@@ -3,13 +3,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
 
 import {
-  Code2,
-  LayoutDashboard,
   Search,
   Settings,
-  Shield,
   ShieldAlert,
-  Users,
   Zap,
 } from "lucide-react"
 import Image from "next/image"
@@ -41,12 +37,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 }
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Feed", href: "/" },
-  { icon: Zap, label: "AutoFix Queue", href: "/autofix", badgeKey: "autofix" },
   { icon: ShieldAlert, label: "Threat Modeling", href: "/threat-modeling" },
-  { icon: Code2, label: "Repositories", href: "/repositories" },
-  { icon: Shield, label: "Compliance", href: "/compliance" },
-  { icon: Users, label: "Team Settings", href: "/team" },
+  { icon: Zap, label: "AutoFix Queue", href: "/autofix", badgeKey: "autofix" },
 ]
 
 export function AppSidebar() {

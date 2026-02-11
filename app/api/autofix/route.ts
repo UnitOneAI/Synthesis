@@ -11,8 +11,8 @@ export async function GET() {
       FROM mitigations m
       JOIN threats t ON m.threat_id = t.id
       JOIN sessions s ON t.session_id = s.id
-      WHERE m.code_fixed IS NOT NULL
-      ORDER BY CASE m.status WHEN 'Proposed' THEN 0 WHEN 'Implemented' THEN 1 ELSE 2 END,
+      ORDER BY s.created_at DESC, t.session_id,
+               CASE m.status WHEN 'Proposed' THEN 0 WHEN 'Implemented' THEN 1 ELSE 2 END,
                CASE t.severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END
     `).all();
     return NextResponse.json(fixes);

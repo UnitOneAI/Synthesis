@@ -1565,28 +1565,28 @@ function SessionDetailView({
       <ScrollArea className="flex-1 overflow-hidden">
         <div className="p-6 space-y-6">
           {/* Session Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1"
+                className="gap-1 shrink-0"
                 onClick={onBack}
               >
                 <ChevronRight className="size-4 rotate-180" />
                 All Sessions
               </Button>
-              <div className="h-6 w-px bg-border" />
-              <div>
-                <h2 className="text-xl font-semibold">{session.name}</h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
+              <div className="h-6 w-px bg-border shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-xl font-semibold truncate">{session.name}</h2>
+                <p className="text-sm text-muted-foreground mt-0.5 truncate">
                   {session.description}
                 </p>
               </div>
             </div>
             <Button
               size="sm"
-              className="gap-1 bg-primary hover:bg-primary/90"
+              className="gap-1 bg-primary hover:bg-primary/90 shrink-0"
               onClick={handleExportPDF}
             >
               <Download className="size-3" />
@@ -1631,13 +1631,13 @@ function SessionDetailView({
             </TabsList>
 
             <TabsContent value="threats">
-              <Card>
-                <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <Card className="overflow-hidden">
+                <div className="px-6 py-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-semibold">
                     Identified Threats ({filteredThreats.length}
                     {filteredThreats.length !== threats.length && ` of ${threats.length}`})
                   </h3>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <ThreatFilters
                       filterSeverity={filterSeverity}
                       filterStatus={filterStatus}

@@ -12,20 +12,7 @@ export const metadata: Metadata = {
   description: 'Close the loop between detection and remediation with AI-powered vulnerability fixes',
   generator: 'unitone.ai',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
+    icon: '/icon-light-32x32.png',
     apple: '/apple-icon.png',
   },
 }
