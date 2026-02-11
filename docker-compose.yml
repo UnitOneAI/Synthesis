@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  unitone-sentinel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - sqlite-data:/app/data
+    environment:
+      - THREAT_MODEL_DB_PATH=/app/data/threats.db
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    restart: unless-stopped
+
+volumes:
+  sqlite-data:
+    driver: local
