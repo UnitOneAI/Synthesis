@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { FileCode, Loader2, Shield, Zap } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { CheckCircle2, FileCode, Loader2, Shield, ShieldAlert, Zap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -74,8 +74,20 @@ export default function AutoFixPage() {
     loadFixes()
   }, [loadFixes])
 
-  const pendingFixes = fixes.filter((f) => f.status === "Proposed")
-  const appliedFixes = fixes.filter((f) => f.status === "Implemented")
+  // Group fixes by session
+  const sessionGroups = useMemo(() => {
+    const groups: Record<string, { name: string; fixes: AutoFixItem[] }> = {}
+    for (const fix of fixes) {
+      if (!groups[fix.session_id]) {
+        groups[fix.session_id] = { name: fix.session_name, fixes: [] }
+      }
+      groups[fix.session_id].fixes.push(fix)
+    }
+    return Object.entries(groups)
+  }, [fixes])
+
+  const proposedCount = fixes.filter((f) => f.status === "Proposed").length
+  const implementedCount = fixes.filter((f) => f.status === "Implemented").length
 
   function handleApplied(fixId: string) {
     setFixes((prev) =>
@@ -91,14 +103,22 @@ export default function AutoFixPage() {
         <AppSidebar />
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           <AppHeader title="AutoFix Queue">
-            <Badge variant="secondary" className="gap-1 text-xs">
-              <Zap className="size-3" />
-              {pendingFixes.length} Pending
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="gap-1 text-xs">
+                <Zap className="size-3" />
+                {proposedCount} Proposed
+              </Badge>
+              {implementedCount > 0 && (
+                <Badge variant="secondary" className="gap-1 text-xs">
+                  <CheckCircle2 className="size-3" />
+                  {implementedCount} Applied
+                </Badge>
+              )}
+            </div>
           </AppHeader>
 
           <ScrollArea className="flex-1 overflow-hidden">
-            <div className="p-6 max-w-4xl space-y-8">
+            <div className="p-6 space-y-6">
               {loading ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -107,26 +127,39 @@ export default function AutoFixPage() {
                 <Card className="py-12">
                   <CardContent className="text-center">
                     <Zap className="size-10 text-muted-foreground mx-auto mb-3" />
-                    <h4 className="font-semibold mb-1">No Code Fixes Available</h4>
+                    <h4 className="font-semibold mb-1">No Fixes Yet</h4>
                     <p className="text-sm text-muted-foreground">
-                      When threat analysis identifies code-level mitigations, they will appear here for review and one-click application.
+                      Run a threat model analysis to generate mitigations. All proposed fixes will appear here.
                     </p>
                   </CardContent>
                 </Card>
               ) : (
-                <>
-                  {/* Pending Fixes */}
-                  {pendingFixes.length > 0 && (
-                    <section>
-                      <div className="flex items-center gap-2 mb-4">
-                        <Zap className="size-5 text-primary" />
-                        <h2 className="text-lg font-semibold">Pending Fixes</h2>
-                        <Badge variant="secondary" className="text-xs">
-                          {pendingFixes.length}
-                        </Badge>
+                sessionGroups.map(([sessionId, group]) => {
+                  const sessionProposed = group.fixes.filter((f) => f.status === "Proposed").length
+                  const sessionImplemented = group.fixes.filter((f) => f.status === "Implemented").length
+                  return (
+                    <section key={sessionId}>
+                      <div className="flex items-center gap-3 mb-3">
+                        <ShieldAlert className="size-4 text-primary" />
+                        <h2 className="font-semibold text-sm">{group.name}</h2>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="secondary" className="text-[10px]">
+                            {group.fixes.length} fix{group.fixes.length !== 1 ? "es" : ""}
+                          </Badge>
+                          {sessionProposed > 0 && (
+                            <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-200">
+                              {sessionProposed} proposed
+                            </Badge>
+                          )}
+                          {sessionImplemented > 0 && (
+                            <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-600 border-green-200">
+                              {sessionImplemented} applied
+                            </Badge>
+                          )}
+                        </div>
                       </div>
-                      <div className="space-y-3">
-                        {pendingFixes.map((fix) => (
+                      <div className="space-y-2">
+                        {group.fixes.map((fix) => (
                           <FixCard
                             key={fix.id}
                             fix={fix}
@@ -135,26 +168,8 @@ export default function AutoFixPage() {
                         ))}
                       </div>
                     </section>
-                  )}
-
-                  {/* Applied Fixes */}
-                  {appliedFixes.length > 0 && (
-                    <section>
-                      <div className="flex items-center gap-2 mb-4">
-                        <Shield className="size-5 text-green-600" />
-                        <h2 className="text-lg font-semibold">Applied Fixes</h2>
-                        <Badge variant="secondary" className="text-xs">
-                          {appliedFixes.length}
-                        </Badge>
-                      </div>
-                      <div className="space-y-3">
-                        {appliedFixes.map((fix) => (
-                          <FixCard key={fix.id} fix={fix} />
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                </>
+                  )
+                })
               )}
             </div>
           </ScrollArea>
@@ -172,14 +187,14 @@ function FixCard({
   onApplied?: () => void
 }) {
   const isRepoSource = fix.source === "github-repo"
+  const hasCodeFix = !!fix.code_fixed
   const isPending = fix.status === "Proposed"
 
   return (
     <Card>
-      <CardContent className="py-4 px-6">
+      <CardContent className="py-3 px-5">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0 space-y-2">
-            {/* Top row: severity + threat title */}
+          <div className="flex-1 min-w-0 space-y-1.5">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 variant="outline"
@@ -192,12 +207,10 @@ function FixCard({
               </span>
             </div>
 
-            {/* Mitigation description */}
             <p className="text-sm text-muted-foreground line-clamp-2">
               {fix.description}
             </p>
 
-            {/* File path + session info */}
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               {fix.code_file && (
                 <div className="flex items-center gap-1">
@@ -208,14 +221,15 @@ function FixCard({
                   </span>
                 </div>
               )}
-              <div className="flex items-center gap-1">
-                <Shield className="size-3" />
-                <span>{fix.session_name}</span>
-              </div>
+              {!fix.code_file && (
+                <div className="flex items-center gap-1">
+                  <Shield className="size-3" />
+                  <span>Manual fix required</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Right side: status badge + action */}
           <div className="flex flex-col items-end gap-2 shrink-0">
             <Badge
               variant="outline"
@@ -223,11 +237,11 @@ function FixCard({
             >
               {fix.status}
             </Badge>
-            {isPending && (
+            {isPending && hasCodeFix && isRepoSource && (
               <ApplyFixButton
                 threatId={fix.threat_id}
                 mitigationId={fix.id}
-                hasCodeFix={!!fix.code_fixed}
+                hasCodeFix={hasCodeFix}
                 isRepoSource={isRepoSource}
                 onApplied={() => onApplied?.()}
               />
