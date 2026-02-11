@@ -216,7 +216,7 @@ export default function SettingsPage() {
           </Badge>
         </AppHeader>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 overflow-hidden">
           <div className="p-6 max-w-4xl">
             <Tabs defaultValue="integrations">
               <TabsList>

@@ -27,6 +27,7 @@ import {
   Plus,
   Shield,
   Target,
+  Trash2,
   Upload,
   X,
   Zap,
@@ -46,6 +47,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
@@ -682,11 +689,13 @@ function SessionsList({
   loading,
   onSelect,
   onNewSession,
+  onDelete,
 }: {
   sessions: SessionSummary[]
   loading: boolean
   onSelect: (id: string) => void
   onNewSession: () => void
+  onDelete: (id: string) => void
 }) {
   const statusColor = (s: string) => {
     switch (s) {
@@ -814,6 +823,20 @@ function SessionsList({
                       </div>
                       <div className="text-xs text-green-500">Mitigated</div>
                     </div>
+                    <button
+                      type="button"
+                      className="size-8 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors text-muted-foreground hover:text-red-600"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (confirm("Delete this threat model session? This cannot be undone.")) {
+                          fetch(`/api/threat-model/sessions/${session.id}`, { method: "DELETE" })
+                            .then(() => onDelete(session.id))
+                            .catch(() => {})
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
                     <ChevronRight className="size-5 text-muted-foreground" />
                   </div>
                 </div>
@@ -878,6 +901,40 @@ function ThreatDetailPanel({
   onPopOut: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [creatingTickets, setCreatingTickets] = useState(false)
+
+  async function handleUpdateStatus(newStatus: string) {
+    try {
+      await fetch(`/api/threat-model/threats/${threat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      onThreatUpdated(threat.id, newStatus)
+    } catch {
+      // Handle error
+    }
+  }
+
+  async function handleCreateAllTickets() {
+    if (!jiraConfigured) return
+    setCreatingTickets(true)
+    try {
+      const unticketedMitigations = threat.mitigations.filter((m) => !m.jiraTicket)
+      for (const mit of unticketedMitigations) {
+        await fetch(`/api/threat-model/threats/${threat.id}/jira`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mitigationId: mit.id }),
+        })
+      }
+      onThreatUpdated(threat.id, threat.status)
+    } catch {
+      // Handle error
+    } finally {
+      setCreatingTickets(false)
+    }
+  }
 
   return (
     <div className={`fixed inset-y-0 right-0 ${expanded ? "w-[85vw]" : "w-[540px]"} bg-card border-l border-border shadow-xl z-50 flex flex-col transition-all duration-300`}>
@@ -1130,34 +1187,44 @@ function ThreatDetailPanel({
 
       {/* Footer */}
       <div className="p-4 border-t border-border flex items-center justify-between">
-        <Button variant="outline" size="sm" className="gap-1 bg-transparent">
-          <ChevronDown className="size-3" />
-          Actions
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1 bg-transparent">
+              <ChevronDown className="size-3" />
+              Actions
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => handleUpdateStatus("Mitigated")}>
+              <Shield className="size-3 mr-2" />
+              Mark as Mitigated
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleUpdateStatus("Identified")}>
+              <AlertTriangle className="size-3 mr-2" />
+              Mark as Identified
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             className="gap-1 bg-transparent"
+            disabled={!jiraConfigured || creatingTickets || threat.mitigations.length === 0}
+            onClick={handleCreateAllTickets}
+            title={!jiraConfigured ? "Configure Jira in Settings first" : ""}
           >
-            <Plus className="size-3" />
-            Create All Tickets
+            {creatingTickets ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Plus className="size-3" />
+            )}
+            {creatingTickets ? "Creating..." : "Create All Tickets"}
           </Button>
           <Button
             size="sm"
             className="gap-1 bg-primary hover:bg-primary/90"
-            onClick={async () => {
-              try {
-                await fetch(`/api/threat-model/threats/${threat.id}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ status: "Accepted" }),
-                })
-                onThreatUpdated(threat.id, "Accepted")
-              } catch {
-                // Handle error
-              }
-            }}
+            onClick={() => handleUpdateStatus("Accepted")}
           >
             <CheckCircle2 className="size-3" />
             Accept Risk
@@ -1371,7 +1438,7 @@ function ThreatRow({ threat, onClick }: { threat: Threat; onClick: () => void })
       >
         {threat.status}
       </Badge>
-      <div className="flex items-center gap-1 text-xs text-muted-foreground w-24 justify-end">
+      <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground w-24 justify-end">
         <Shield className="size-3" />
         {threat.mitigations.length} mitigation
         {threat.mitigations.length !== 1 ? "s" : ""}
@@ -1528,7 +1595,7 @@ function SessionDetailView({
           </div>
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
               { label: "Total Threats", value: liveStats.total, color: "", labelColor: "" },
               { label: "Critical", value: liveStats.critical, color: "text-red-600", labelColor: "text-red-500" },
@@ -1623,7 +1690,7 @@ function SessionDetailView({
 
                     {/* Pagination */}
                     {totalPages > 1 && (
-                      <div className="px-6 py-4 border-t border-border flex items-center justify-between">
+                      <div className="px-6 py-4 border-t border-border flex items-center justify-between flex-wrap gap-2">
                         <span className="text-sm text-muted-foreground">
                           Page {currentPage} of {totalPages}
                         </span>
@@ -2126,7 +2193,7 @@ function ThreatModelingContent() {
     <div className="flex h-screen bg-background">
       <AppSidebar />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* List view */}
         {view === "list" && (
           <>
@@ -2142,6 +2209,7 @@ function ThreatModelingContent() {
                 loading={sessionsLoading}
                 onSelect={handleSelectSession}
                 onNewSession={() => setShowNewSession(true)}
+                onDelete={() => fetchSessions()}
               />
             </ScrollArea>
           </>

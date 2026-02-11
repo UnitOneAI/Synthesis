@@ -3,6 +3,7 @@ import {
   getFullSession,
   getSession,
   updateSession,
+  deleteSession,
   listThreats,
   listMitigations,
   getDesignReviews,
@@ -138,6 +139,33 @@ export async function PATCH(
     console.error("Failed to update session:", error);
     return NextResponse.json(
       { error: "Failed to update session" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/threat-model/sessions/:id — Delete session and all related data
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const session = getSession(id);
+
+    if (!session) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
+      );
+    }
+
+    deleteSession(id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete session:", error);
+    return NextResponse.json(
+      { error: "Failed to delete session" },
       { status: 500 }
     );
   }

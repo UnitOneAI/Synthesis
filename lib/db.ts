@@ -224,6 +224,11 @@ export function updateSession(
   );
 }
 
+export function deleteSession(id: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+}
+
 // ── Threat CRUD ──
 
 export interface ThreatRow {
