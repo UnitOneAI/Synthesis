@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState } from "react"
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
 
 import {
   Code2,
@@ -42,7 +42,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
 const navItems = [
   { icon: LayoutDashboard, label: "Feed", href: "/" },
-  { icon: Zap, label: "AutoFix Queue", href: "/autofix", badge: "12" },
+  { icon: Zap, label: "AutoFix Queue", href: "/autofix", badgeKey: "autofix" },
   { icon: ShieldAlert, label: "Threat Modeling", href: "/threat-modeling" },
   { icon: Code2, label: "Repositories", href: "/repositories" },
   { icon: Shield, label: "Compliance", href: "/compliance" },
@@ -52,6 +52,24 @@ const navItems = [
 export function AppSidebar() {
   const pathname = usePathname()
   const { projectId, setProjectId } = useProject()
+  const [autofixCount, setAutofixCount] = useState(0)
+
+  const loadAutofixCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/autofix")
+      if (res.ok) {
+        const items = await res.json()
+        const pending = items.filter((i: { status: string }) => i.status === "Proposed")
+        setAutofixCount(pending.length)
+      }
+    } catch {
+      // Silently fail
+    }
+  }, [])
+
+  useEffect(() => {
+    loadAutofixCount()
+  }, [loadAutofixCount])
 
   return (
     <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col shrink-0">
@@ -92,9 +110,9 @@ export function AppSidebar() {
                 >
                   <item.icon className="size-4" />
                   <span className="flex-1 text-left">{item.label}</span>
-                  {item.badge && (
+                  {item.badgeKey === "autofix" && autofixCount > 0 && (
                     <Badge className="bg-primary text-primary-foreground text-xs">
-                      {item.badge}
+                      {autofixCount}
                     </Badge>
                   )}
                 </Link>
