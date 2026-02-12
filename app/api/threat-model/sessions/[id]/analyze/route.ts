@@ -19,6 +19,7 @@ import {
   generatePreCodeRisks,
   generateContextLayer,
 } from "@/lib/threat-engine/design-review-engine";
+import { calculateRiskRating } from "@/lib/threat-engine/owasp-risk-engine";
 
 // POST /api/threat-model/sessions/:id/analyze — Trigger analysis pipeline
 export async function POST(
@@ -103,12 +104,14 @@ async function analyzeGitHubRepo(
     const gt = generatedThreats[i];
     const threatId = `TC-${shortId}-${String(i + 1).padStart(3, "0")}`;
 
+    const riskRating = calculateRiskRating(gt.owaspLikelihood, gt.owaspImpact);
+
     createThreat({
       id: threatId,
       sessionId,
       title: gt.title,
       strideCategory: gt.strideCategory,
-      severity: gt.severity,
+      severity: riskRating.riskSeverity === "Note" ? "Low" : riskRating.riskSeverity,
       threatSource: gt.threatSource,
       prerequisites: gt.prerequisites,
       threatAction: gt.threatAction,
@@ -117,6 +120,13 @@ async function analyzeGitHubRepo(
       trustBoundary: gt.trustBoundary,
       assumptions: gt.assumptions,
       relatedCve: gt.relatedCve,
+      owaspLikelihoodScore: riskRating.likelihoodScore,
+      owaspImpactScore: riskRating.impactScore,
+      owaspRiskLevel: riskRating.riskSeverity,
+      owaspFactors: JSON.stringify({
+        likelihood: riskRating.likelihood,
+        impact: riskRating.impact,
+      }),
     });
 
     // Persist mitigations
@@ -189,12 +199,14 @@ async function analyzeDesignDoc(
     const gt = generatedThreats[i];
     const threatId = `TC-${shortId}-${String(i + 1).padStart(3, "0")}`;
 
+    const riskRating = calculateRiskRating(gt.owaspLikelihood, gt.owaspImpact);
+
     createThreat({
       id: threatId,
       sessionId,
       title: gt.title,
       strideCategory: gt.strideCategory,
-      severity: gt.severity,
+      severity: riskRating.riskSeverity === "Note" ? "Low" : riskRating.riskSeverity,
       threatSource: gt.threatSource,
       prerequisites: gt.prerequisites,
       threatAction: gt.threatAction,
@@ -202,6 +214,13 @@ async function analyzeDesignDoc(
       impactedAssets: gt.impactedAssets,
       trustBoundary: gt.trustBoundary,
       assumptions: gt.assumptions,
+      owaspLikelihoodScore: riskRating.likelihoodScore,
+      owaspImpactScore: riskRating.impactScore,
+      owaspRiskLevel: riskRating.riskSeverity,
+      owaspFactors: JSON.stringify({
+        likelihood: riskRating.likelihood,
+        impact: riskRating.impact,
+      }),
     });
 
     for (let j = 0; j < gt.mitigations.length; j++) {

@@ -85,6 +85,14 @@ export async function GET(
           : undefined,
       })),
       relatedCVE: t.related_cve || undefined,
+      owaspRisk: t.owasp_factors
+        ? {
+            likelihoodScore: t.owasp_likelihood_score,
+            impactScore: t.owasp_impact_score,
+            riskLevel: t.owasp_risk_level,
+            factors: JSON.parse(t.owasp_factors),
+          }
+        : undefined,
     }));
 
     return NextResponse.json({
