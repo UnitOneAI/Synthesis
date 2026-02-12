@@ -91,6 +91,30 @@ interface Mitigation {
   }
 }
 
+interface OwaspRisk {
+  likelihoodScore: number
+  impactScore: number
+  riskLevel: string
+  factors: {
+    likelihood: {
+      skillLevel: number
+      motive: number
+      opportunity: number
+      size: number
+      easeOfDiscovery: number
+      easeOfExploit: number
+      awareness: number
+      intrusionDetection: number
+    }
+    impact: {
+      confidentiality: number
+      integrity: number
+      availability: number
+      accountability: number
+    }
+  }
+}
+
 interface Threat {
   id: string
   title: string
@@ -102,6 +126,7 @@ interface Threat {
   assumptions: string[]
   mitigations: Mitigation[]
   relatedCVE?: string
+  owaspRisk?: OwaspRisk
 }
 
 interface SessionStats {
@@ -185,6 +210,18 @@ interface DesignReviewData {
 }
 
 // ── Helpers ──
+
+function getOwaspLevel(score: number): "LOW" | "MEDIUM" | "HIGH" {
+  if (score < 3) return "LOW"
+  if (score < 6) return "MEDIUM"
+  return "HIGH"
+}
+
+function getOwaspBarColor(score: number) {
+  if (score < 3) return "bg-green-500"
+  if (score < 6) return "bg-yellow-500"
+  return "bg-red-500"
+}
 
 function getSeverityColor(severity: string) {
   switch (severity) {
@@ -1019,6 +1056,155 @@ function ThreatDetailPanel({
               </p>
             </div>
           </div>
+
+          {/* OWASP Risk Rating */}
+          {threat.owaspRisk && (
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Shield className="size-4 text-primary" />
+                OWASP Risk Rating
+              </h3>
+              <div className="bg-muted/50 rounded-lg p-4 border border-border space-y-4">
+                {/* Risk Matrix */}
+                <div className="flex items-start gap-6">
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1.5 text-center">Risk Matrix</div>
+                    <div className="grid grid-cols-4 gap-0 text-[10px]">
+                      <div />
+                      <div className="text-center px-1 py-0.5 text-muted-foreground">L</div>
+                      <div className="text-center px-1 py-0.5 text-muted-foreground">M</div>
+                      <div className="text-center px-1 py-0.5 text-muted-foreground">H</div>
+                      <div className="text-right pr-1 py-0.5 text-muted-foreground">H</div>
+                      {(["LOW", "MEDIUM", "HIGH"] as const).map((lk) => {
+                        const cell = lk === "LOW" ? "Medium" : lk === "MEDIUM" ? "High" : "Critical"
+                        const isActive = threat.owaspRisk!.factors &&
+                          getOwaspLevel(threat.owaspRisk!.impactScore) === "HIGH" &&
+                          getOwaspLevel(threat.owaspRisk!.likelihoodScore) === lk
+                        return (
+                          <div key={`h-${lk}`} className={`text-center px-2 py-1 border border-border ${isActive ? "ring-2 ring-primary font-bold bg-primary/10" : ""} ${cell === "Critical" ? "bg-red-500/10 text-red-600" : cell === "High" ? "bg-orange-500/10 text-orange-600" : "bg-yellow-500/10 text-yellow-700"}`}>
+                            {cell[0]}
+                          </div>
+                        )
+                      })}
+                      <div className="text-right pr-1 py-0.5 text-muted-foreground">M</div>
+                      {(["LOW", "MEDIUM", "HIGH"] as const).map((lk) => {
+                        const cell = lk === "LOW" ? "Low" : lk === "MEDIUM" ? "Medium" : "High"
+                        const isActive = threat.owaspRisk!.factors &&
+                          getOwaspLevel(threat.owaspRisk!.impactScore) === "MEDIUM" &&
+                          getOwaspLevel(threat.owaspRisk!.likelihoodScore) === lk
+                        return (
+                          <div key={`m-${lk}`} className={`text-center px-2 py-1 border border-border ${isActive ? "ring-2 ring-primary font-bold bg-primary/10" : ""} ${cell === "High" ? "bg-orange-500/10 text-orange-600" : cell === "Medium" ? "bg-yellow-500/10 text-yellow-700" : "bg-green-500/10 text-green-600"}`}>
+                            {cell[0]}
+                          </div>
+                        )
+                      })}
+                      <div className="text-right pr-1 py-0.5 text-muted-foreground">L</div>
+                      {(["LOW", "MEDIUM", "HIGH"] as const).map((lk) => {
+                        const cell = lk === "LOW" ? "Note" : lk === "MEDIUM" ? "Low" : "Medium"
+                        const isActive = threat.owaspRisk!.factors &&
+                          getOwaspLevel(threat.owaspRisk!.impactScore) === "LOW" &&
+                          getOwaspLevel(threat.owaspRisk!.likelihoodScore) === lk
+                        return (
+                          <div key={`l-${lk}`} className={`text-center px-2 py-1 border border-border ${isActive ? "ring-2 ring-primary font-bold bg-primary/10" : ""} ${cell === "Medium" ? "bg-yellow-500/10 text-yellow-700" : cell === "Low" ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"}`}>
+                            {cell[0]}
+                          </div>
+                        )
+                      })}
+                      <div />
+                      <div className="text-center text-muted-foreground" style={{ gridColumn: "2 / 5" }}>Likelihood →</div>
+                    </div>
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    {/* Likelihood Score */}
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground">Likelihood</span>
+                        <span className="font-medium">{threat.owaspRisk.likelihoodScore.toFixed(1)} / 9 ({getOwaspLevel(threat.owaspRisk.likelihoodScore)})</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${getOwaspBarColor(threat.owaspRisk.likelihoodScore)}`} style={{ width: `${(threat.owaspRisk.likelihoodScore / 9) * 100}%` }} />
+                      </div>
+                    </div>
+                    {/* Impact Score */}
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground">Impact</span>
+                        <span className="font-medium">{threat.owaspRisk.impactScore.toFixed(1)} / 9 ({getOwaspLevel(threat.owaspRisk.impactScore)})</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${getOwaspBarColor(threat.owaspRisk.impactScore)}`} style={{ width: `${(threat.owaspRisk.impactScore / 9) * 100}%` }} />
+                      </div>
+                    </div>
+                    {/* Overall Risk */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-xs text-muted-foreground">Overall Risk:</span>
+                      <Badge variant="outline" className={`text-xs ${getSeverityColor(threat.owaspRisk.riskLevel === "Note" ? "Low" : threat.owaspRisk.riskLevel as "Critical" | "High" | "Medium" | "Low")}`}>
+                        {threat.owaspRisk.riskLevel}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Factor Breakdown */}
+                <Collapsible>
+                  <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    <ChevronDown className="size-3" />
+                    Factor Breakdown
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="grid grid-cols-2 gap-4 mt-3">
+                      <div>
+                        <div className="text-xs font-medium mb-2">Likelihood Factors</div>
+                        <div className="space-y-1">
+                          {[
+                            { label: "Skill Level", value: threat.owaspRisk.factors.likelihood.skillLevel },
+                            { label: "Motive", value: threat.owaspRisk.factors.likelihood.motive },
+                            { label: "Opportunity", value: threat.owaspRisk.factors.likelihood.opportunity },
+                            { label: "Size", value: threat.owaspRisk.factors.likelihood.size },
+                            { label: "Ease of Discovery", value: threat.owaspRisk.factors.likelihood.easeOfDiscovery },
+                            { label: "Ease of Exploit", value: threat.owaspRisk.factors.likelihood.easeOfExploit },
+                            { label: "Awareness", value: threat.owaspRisk.factors.likelihood.awareness },
+                            { label: "Intrusion Detection", value: threat.owaspRisk.factors.likelihood.intrusionDetection },
+                          ].map((f) => (
+                            <div key={f.label} className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">{f.label}</span>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${getOwaspBarColor(f.value)}`} style={{ width: `${(f.value / 9) * 100}%` }} />
+                                </div>
+                                <span className="font-mono w-4 text-right">{f.value}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium mb-2">Impact Factors</div>
+                        <div className="space-y-1">
+                          {[
+                            { label: "Confidentiality", value: threat.owaspRisk.factors.impact.confidentiality },
+                            { label: "Integrity", value: threat.owaspRisk.factors.impact.integrity },
+                            { label: "Availability", value: threat.owaspRisk.factors.impact.availability },
+                            { label: "Accountability", value: threat.owaspRisk.factors.impact.accountability },
+                          ].map((f) => (
+                            <div key={f.label} className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">{f.label}</span>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${getOwaspBarColor(f.value)}`} style={{ width: `${(f.value / 9) * 100}%` }} />
+                                </div>
+                                <span className="font-mono w-4 text-right">{f.value}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            </div>
+          )}
 
           {/* Trust Boundary */}
           <div>

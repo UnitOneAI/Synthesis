@@ -116,6 +116,21 @@ function initSchema(db: Database.Database) {
   } catch {
     // Column already exists
   }
+
+  // Migration: add OWASP risk rating columns to threats
+  const owaspColumns = [
+    "ALTER TABLE threats ADD COLUMN owasp_likelihood_score REAL",
+    "ALTER TABLE threats ADD COLUMN owasp_impact_score REAL",
+    "ALTER TABLE threats ADD COLUMN owasp_risk_level TEXT",
+    "ALTER TABLE threats ADD COLUMN owasp_factors TEXT",
+  ];
+  for (const sql of owaspColumns) {
+    try {
+      db.exec(sql);
+    } catch {
+      // Column already exists
+    }
+  }
 }
 
 // ── Session CRUD ──
@@ -247,6 +262,10 @@ export interface ThreatRow {
   assumptions: string | null; // JSON array
   related_cve: string | null;
   created_at: string;
+  owasp_likelihood_score: number | null;
+  owasp_impact_score: number | null;
+  owasp_risk_level: string | null;
+  owasp_factors: string | null; // JSON blob
 }
 
 export function createThreat(threat: {
@@ -263,11 +282,15 @@ export function createThreat(threat: {
   trustBoundary: string;
   assumptions?: string[];
   relatedCve?: string;
+  owaspLikelihoodScore?: number;
+  owaspImpactScore?: number;
+  owaspRiskLevel?: string;
+  owaspFactors?: string;
 }): ThreatRow {
   const db = getDb();
   db.prepare(
-    `INSERT INTO threats (id, session_id, title, stride_category, severity, threat_source, prerequisites, threat_action, threat_impact, impacted_assets, trust_boundary, assumptions, related_cve)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO threats (id, session_id, title, stride_category, severity, threat_source, prerequisites, threat_action, threat_impact, impacted_assets, trust_boundary, assumptions, related_cve, owasp_likelihood_score, owasp_impact_score, owasp_risk_level, owasp_factors)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     threat.id,
     threat.sessionId,
@@ -281,7 +304,11 @@ export function createThreat(threat: {
     threat.impactedAssets ? JSON.stringify(threat.impactedAssets) : null,
     threat.trustBoundary,
     threat.assumptions ? JSON.stringify(threat.assumptions) : null,
-    threat.relatedCve || null
+    threat.relatedCve || null,
+    threat.owaspLikelihoodScore ?? null,
+    threat.owaspImpactScore ?? null,
+    threat.owaspRiskLevel || null,
+    threat.owaspFactors || null
   );
   return getThreat(threat.id)!;
 }

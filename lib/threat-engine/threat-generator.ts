@@ -1,5 +1,10 @@
 import type { RepoAnalysis } from "./repo-analyzer";
 import { callLLM, getLLMConfig } from "@/lib/llm-provider";
+import {
+  type OwaspLikelihood,
+  type OwaspImpact,
+  calculateRiskRating,
+} from "./owasp-risk-engine";
 
 // ── Types ──
 
@@ -28,6 +33,8 @@ export interface GeneratedThreat {
     codeFixed?: string;
   }[];
   relatedCve?: string;
+  owaspLikelihood?: OwaspLikelihood;
+  owaspImpact?: OwaspImpact;
 }
 
 export type Framework = "STRIDE" | "OWASP Top 10" | "AWS Threat Grammar";
@@ -42,7 +49,7 @@ You produce structured threat statements following the AWS Threat Grammar:
 Rules:
 1. Each threat MUST have a structured threat statement with all fields populated.
 2. Classify each threat into exactly one STRIDE category: Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, or Elevation of Privilege.
-3. Assign severity (Critical/High/Medium/Low) based on likelihood × impact.
+3. For EACH threat, estimate OWASP Risk Rating factors following the OWASP Risk Rating Methodology. Rate each likelihood and impact factor on a 0-9 scale. The severity field should reflect your assessment but will be recalculated from the OWASP risk matrix.
 4. Identify the specific trust boundary being crossed.
 5. List realistic assumptions.
 6. Propose at least one mitigation per threat.
@@ -50,6 +57,22 @@ Rules:
 8. Be specific and actionable — avoid generic threats. Reference actual components from the architecture.
 9. Generate between 5 and 12 threats depending on the complexity of the architecture.
 10. Do NOT invent file paths or line numbers that aren't in the provided data.
+
+OWASP Likelihood Factors (rate each 0-9):
+- skillLevel: 1=no skills, 3=some, 5=advanced, 6=network/programming, 9=security penetration
+- motive: 1=low/no reward, 4=possible reward, 9=high reward
+- opportunity: 0=full access required, 4=special access, 7=some access, 9=no access needed
+- size: 2=developers/sysadmins, 4=intranet, 5=partners, 6=authenticated, 9=anonymous internet
+- easeOfDiscovery: 1=impossible, 3=difficult, 7=easy, 9=automated tools
+- easeOfExploit: 1=theoretical, 3=difficult, 5=easy, 9=automated tools
+- awareness: 1=unknown, 4=hidden, 6=obvious, 9=public knowledge
+- intrusionDetection: 1=active detection, 3=logged+reviewed, 8=logged only, 9=not logged
+
+OWASP Technical Impact Factors (rate each 0-9):
+- confidentiality: 2=minimal non-sensitive, 6=minimal critical or extensive non-sensitive, 7=extensive critical, 9=all data
+- integrity: 1=minimal slight, 3=minimal serious, 5=extensive slight, 7=extensive serious, 9=all corrupt
+- availability: 1=minimal secondary, 5=minimal primary or extensive secondary, 7=extensive primary, 9=all lost
+- accountability: 1=fully traceable, 7=possibly traceable, 9=anonymous
 
 Output ONLY valid JSON matching the schema below. No markdown, no explanation, just the JSON array.`;
 
@@ -88,12 +111,28 @@ Output JSON Schema (array of objects):
       {
         "description": "string — mitigation description",
         "codeFile": "string (optional) — file path if code fix available",
-        "codeLine": number (optional),
+        "codeLine": "number (optional)",
         "codeOriginal": "string (optional) — original vulnerable code",
         "codeFixed": "string (optional) — fixed code"
       }
     ],
-    "relatedCve": "string (optional) — related CVE ID if applicable"
+    "relatedCve": "string (optional) — related CVE ID if applicable",
+    "owaspLikelihood": {
+      "skillLevel": "number 0-9",
+      "motive": "number 0-9",
+      "opportunity": "number 0-9",
+      "size": "number 0-9",
+      "easeOfDiscovery": "number 0-9",
+      "easeOfExploit": "number 0-9",
+      "awareness": "number 0-9",
+      "intrusionDetection": "number 0-9"
+    },
+    "owaspImpact": {
+      "confidentiality": "number 0-9",
+      "integrity": "number 0-9",
+      "availability": "number 0-9",
+      "accountability": "number 0-9"
+    }
   }
 ]`;
 
@@ -442,15 +481,26 @@ function validateThreat(raw: Record<string, unknown>): GeneratedThreat | null {
       "Denial of Service",
       "Elevation of Privilege",
     ];
-    const validSeverity = ["Critical", "High", "Medium", "Low"];
 
     const strideCategory = validStride.includes(raw.strideCategory as string)
       ? (raw.strideCategory as GeneratedThreat["strideCategory"])
       : "Information Disclosure";
 
-    const severity = validSeverity.includes(raw.severity as string)
-      ? (raw.severity as GeneratedThreat["severity"])
-      : "Medium";
+    // Parse OWASP factors from LLM output
+    const owaspLikelihood = raw.owaspLikelihood as
+      | Partial<OwaspLikelihood>
+      | undefined;
+    const owaspImpact = raw.owaspImpact as
+      | Partial<OwaspImpact>
+      | undefined;
+
+    // Calculate OWASP risk rating — this determines severity
+    const riskRating = calculateRiskRating(owaspLikelihood, owaspImpact);
+    const severity = (
+      riskRating.riskSeverity === "Note"
+        ? "Low"
+        : riskRating.riskSeverity
+    ) as GeneratedThreat["severity"];
 
     return {
       title: String(raw.title || "Untitled Threat"),
@@ -479,6 +529,8 @@ function validateThreat(raw: Record<string, unknown>): GeneratedThreat | null {
           }))
         : [],
       relatedCve: raw.relatedCve ? String(raw.relatedCve) : undefined,
+      owaspLikelihood: riskRating.likelihood,
+      owaspImpact: riskRating.impact,
     };
   } catch {
     return null;
