@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSettings, upsertSetting, maskSecret } from "@/lib/db";
+import { getSettings, upsertSetting, maskSecret, decryptSettingValue } from "@/lib/db";
 
 // GET /api/settings — List all settings (secrets masked)
 export async function GET() {
@@ -7,7 +7,7 @@ export async function GET() {
     const settings = getSettings();
     const masked = settings.map((s) => ({
       key: s.key,
-      value: s.is_secret ? maskSecret(s.value) : s.value,
+      value: s.is_secret ? maskSecret(decryptSettingValue(s.value)) : s.value,
       category: s.category,
       isSecret: !!s.is_secret,
       updatedAt: s.updated_at,

@@ -233,10 +233,17 @@ export function readRepoFile(
   filePath: string
 ): { content: string; exists: boolean } {
   try {
-    const fullPath = path.join(repoDir, filePath);
-    const content = fs.readFileSync(fullPath, "utf-8");
+    const resolvedPath = path.resolve(path.join(repoDir, filePath));
+    const resolvedBase = path.resolve(repoDir);
+    if (!resolvedPath.startsWith(resolvedBase + path.sep) && resolvedPath !== resolvedBase) {
+      throw new Error(`Path traversal detected: ${filePath}`);
+    }
+    const content = fs.readFileSync(resolvedPath, "utf-8");
     return { content, exists: true };
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("Path traversal")) {
+      throw err;
+    }
     return { content: "", exists: false };
   }
 }

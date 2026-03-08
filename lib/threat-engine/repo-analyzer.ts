@@ -215,6 +215,39 @@ export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<R
   }
 }
 
+function validateRepoUrl(url: string): void {
+  const allowedHosts = (process.env.ALLOWED_REPO_HOSTS || "github.com,gitlab.com,bitbucket.org")
+    .split(",")
+    .map((h) => h.trim());
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid repository URL: ${url}`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error(`Only HTTPS repository URLs are allowed. Got: ${parsed.protocol}`);
+  }
+
+  // Block internal IPs
+  const hostname = parsed.hostname;
+  if (
+    /^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|localhost|0\.0\.0\.0|\[::1\])/.test(
+      hostname
+    )
+  ) {
+    throw new Error(`Repository URL points to internal network: ${hostname}`);
+  }
+
+  if (!allowedHosts.some((h) => hostname === h || hostname.endsWith("." + h))) {
+    throw new Error(
+      `Repository host not allowed: ${hostname}. Allowed: ${allowedHosts.join(", ")}`
+    );
+  }
+}
+
 async function cloneRepo(url: string, dir: string): Promise<void> {
   // Normalize GitHub URLs
   let gitUrl = url;
@@ -224,6 +257,9 @@ async function cloneRepo(url: string, dir: string): Promise<void> {
   if (!gitUrl.endsWith(".git")) {
     gitUrl = `${gitUrl}.git`;
   }
+
+  // Validate URL before cloning
+  validateRepoUrl(gitUrl);
 
   const git = simpleGit();
   await git.clone(gitUrl, dir, ["--depth", "1"]);
@@ -569,36 +605,103 @@ async function extractArchitecture(
     dataFlows.push({ from: "API Server", to: "Message Queue", protocol: "AMQP/MQTT", dataType: "Events/Commands" });
   }
 
-  // Build trust boundaries
-  const internalComponents = components
-    .filter((c) => c.type !== "external")
-    .map((c) => c.name);
+  // Build trust boundaries — granular separation by architectural tier
 
-  if (internalComponents.length > 0) {
+  // Frontend Boundary — components in pages/, components/, app/ directories
+  const frontendBoundaryComponents = components
+    .filter((c) => c.type === "frontend")
+    .map((c) => c.name);
+  if (frontendBoundaryComponents.length > 0) {
     trustBoundaries.push({
-      name: "Application Boundary",
-      components: internalComponents,
+      name: "Frontend Boundary",
+      components: frontendBoundaryComponents,
     });
   }
 
-  const externalComponents = components
+  // API/Backend Boundary — API, service, gateway, and auth components
+  const backendBoundaryComponents = components
+    .filter((c) => c.type === "api" || c.type === "service" || c.type === "gateway")
+    .map((c) => c.name);
+  if (backendBoundaryComponents.length > 0) {
+    trustBoundaries.push({
+      name: "API/Backend Boundary",
+      components: backendBoundaryComponents,
+    });
+  }
+
+  // Data Layer Boundary — database, cache, and storage components
+  const dataLayerComponents = components
+    .filter((c) => c.type === "database" || c.type === "queue")
+    .map((c) => c.name);
+  if (dataLayerComponents.length > 0) {
+    trustBoundaries.push({
+      name: "Data Layer Boundary",
+      components: dataLayerComponents,
+    });
+  }
+
+  // Infrastructure Boundary — Docker, Terraform, K8s, build configs
+  const infraBoundaryComponents = components
+    .filter((c) => c.type === "config")
+    .map((c) => c.name);
+  if (infraBoundaryComponents.length > 0) {
+    trustBoundaries.push({
+      name: "Infrastructure Boundary",
+      components: infraBoundaryComponents,
+    });
+  }
+
+  // External Boundary — third-party APIs, external services, end users
+  const externalBoundaryComponents = components
     .filter((c) => c.type === "external")
     .map((c) => c.name);
-
-  if (externalComponents.length > 0) {
+  if (externalBoundaryComponents.length > 0) {
     trustBoundaries.push({
-      name: "External",
-      components: externalComponents,
+      name: "External Boundary",
+      components: externalBoundaryComponents,
     });
   }
 
-  // If there's infra (Docker, cloud), create a separate boundary
-  const infraComponent = components.find((c) => c.type === "config");
-  if (infraComponent) {
+  // CI/CD Boundary — detect pipeline configs in the file tree
+  const cicdFiles = files.filter(
+    (f) =>
+      /\.github\/workflows\//i.test(f) ||
+      /\.gitlab-ci/i.test(f) ||
+      /Jenkinsfile/i.test(f) ||
+      /\.circleci/i.test(f) ||
+      /azure-pipelines/i.test(f) ||
+      /buildspec\.yml/i.test(f) ||
+      /cloudbuild\.yaml/i.test(f)
+  );
+  if (cicdFiles.length > 0) {
+    // Add a CI/CD component if one does not already exist
+    const existingCicd = components.find((c) => c.name === "CI/CD Pipeline");
+    if (!existingCicd) {
+      components.push({
+        name: "CI/CD Pipeline",
+        type: "config",
+        files: cicdFiles.slice(0, 10),
+        description: `CI/CD pipeline with ${cicdFiles.length} workflow/build files`,
+      });
+    }
     trustBoundaries.push({
-      name: "Infrastructure",
-      components: [infraComponent.name],
+      name: "CI/CD Boundary",
+      components: ["CI/CD Pipeline"],
     });
+  }
+
+  // Fallback: if no boundaries were created (e.g., a very simple repo),
+  // create a single application boundary so downstream analysis still works
+  if (trustBoundaries.length === 0) {
+    const allComponents = components
+      .filter((c) => c.type !== "external")
+      .map((c) => c.name);
+    if (allComponents.length > 0) {
+      trustBoundaries.push({
+        name: "Application Boundary",
+        components: allComponents,
+      });
+    }
   }
 
   return { components, dataFlows, trustBoundaries };

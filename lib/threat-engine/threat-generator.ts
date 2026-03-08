@@ -57,6 +57,14 @@ Rules:
 8. Be specific and actionable — avoid generic threats. Reference actual components from the architecture.
 9. Generate between 5 and 12 threats depending on the complexity of the architecture.
 10. Do NOT invent file paths or line numbers that aren't in the provided data.
+11. For each threat, specify the most likely threat actor from these categories and their capability level:
+    - Nation-State APT (Advanced): 0-day capability, custom tooling, long-term persistence
+    - Organized Cybercrime (Advanced): Ransomware, credential markets, automated exploitation
+    - Malicious Insider (Moderate): Legitimate access, knowledge of systems, data exfiltration
+    - Hacktivist (Moderate): Public-facing attacks, defacement, DDoS, data leaks
+    - Opportunistic Attacker (Basic): Automated scanners, known CVEs, default credentials
+    - Supply Chain (Variable): Compromised dependencies, typosquatting, build pipeline injection
+12. Format the threat_source field as: "[Actor Type] — [specific capability description]"
 
 OWASP Likelihood Factors (rate each 0-9):
 - skillLevel: 1=no skills, 3=some, 5=advanced, 6=network/programming, 9=security penetration

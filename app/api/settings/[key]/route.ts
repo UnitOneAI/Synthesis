@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertSetting, deleteSetting, getSetting, maskSecret } from "@/lib/db";
+import { upsertSetting, deleteSetting, getSetting, maskSecret, decryptSettingValue } from "@/lib/db";
 
 // PATCH /api/settings/[key] — Update single setting
 export async function PATCH(
@@ -31,7 +31,7 @@ export async function PATCH(
 
     return NextResponse.json({
       key: updated.key,
-      value: updated.is_secret ? maskSecret(updated.value) : updated.value,
+      value: updated.is_secret ? maskSecret(decryptSettingValue(updated.value)) : updated.value,
       category: updated.category,
       isSecret: !!updated.is_secret,
       updatedAt: updated.updated_at,

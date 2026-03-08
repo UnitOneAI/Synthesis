@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+import os from "os";
 
 const DB_PATH =
   process.env.THREAT_MODEL_DB_PATH ||
@@ -564,6 +566,35 @@ export function deleteProject(id: string): void {
   db.prepare("DELETE FROM projects WHERE id = ?").run(id);
 }
 
+// ── Secret Encryption ──
+
+function getEncryptionKey(): Buffer {
+  const keySource = process.env.ENCRYPTION_KEY || `synthesis-${os.hostname()}-sentinel`;
+  return crypto.createHash("sha256").update(keySource).digest();
+}
+
+function encryptSecret(plaintext: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+function decryptSecret(ciphertext: string): string {
+  if (!ciphertext.startsWith("enc:")) return ciphertext; // backward compat with plaintext
+  const [, ivHex, tagHex, dataHex] = ciphertext.split(":");
+  const key = getEncryptionKey();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return decipher.update(Buffer.from(dataHex, "hex")) + decipher.final("utf8");
+}
+
+export function decryptSettingValue(value: string): string {
+  return decryptSecret(value);
+}
+
 // ── Settings CRUD ──
 
 export interface SettingRow {
@@ -590,7 +621,8 @@ export function getSetting(key: string): SettingRow | null {
 
 export function getSettingValue(key: string): string | null {
   const setting = getSetting(key);
-  return setting ? setting.value : null;
+  if (!setting) return null;
+  return setting.is_secret ? decryptSecret(setting.value) : setting.value;
 }
 
 export function getSettings(): SettingRow[] {
@@ -614,11 +646,12 @@ export function upsertSetting(setting: {
   isSecret?: boolean;
 }): void {
   const db = getDb();
+  const storedValue = setting.isSecret ? encryptSecret(setting.value) : setting.value;
   db.prepare(
     `INSERT INTO settings (key, value, category, is_secret, updated_at)
      VALUES (?, ?, ?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, category = excluded.category, is_secret = excluded.is_secret, updated_at = datetime('now')`
-  ).run(setting.key, setting.value, setting.category, setting.isSecret ? 1 : 0);
+  ).run(setting.key, storedValue, setting.category, setting.isSecret ? 1 : 0);
 }
 
 export function deleteSetting(key: string): void {
