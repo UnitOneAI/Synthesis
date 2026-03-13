@@ -1,0 +1,48 @@
+# Example workflow: Synthesis AI-powered threat modeling on every PR.
+#
+# Security controls:
+# - Permissions follow least-privilege principle (CICD-SEC-2)
+# - All third-party actions pinned to full SHA (CICD-SEC-8)
+# - API keys stored as GitHub secrets, never hardcoded (CICD-SEC-6)
+# - Runs on pull_request (not pull_request_target) to avoid PPE (CICD-SEC-4)
+
+name: Threat Model
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# SECURITY: Explicit least-privilege permissions (CICD-SEC-2).
+# Without this block, GITHUB_TOKEN defaults to read-write for everything.
+permissions:
+  contents: read           # Read repository content and PR diff
+  pull-requests: write     # Post threat model report as PR comment
+  security-events: write   # Upload SARIF to GitHub Code Scanning
+
+jobs:
+  threat-model:
+    runs-on: ubuntu-latest
+    # Do not run on PRs from forks to prevent secret exposure (CICD-SEC-4)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      # SECURITY: Action pinned to full SHA, not mutable tag (CICD-SEC-8)
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - uses: UnitOneAI/synthesis-action@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          severity-threshold: high
+          frameworks: stride
+          post-comment: true
+          fail-on-threshold: true
+          sarif-upload: true
+
+      # Optional: Upload the markdown report as a build artifact
+      - uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        if: always()
+        with:
+          name: threat-model-report
+          path: ${{ runner.temp }}/synthesis-threat-model.md
+          retention-days: 30

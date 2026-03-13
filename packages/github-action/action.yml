@@ -1,0 +1,67 @@
+name: 'Synthesis Threat Model'
+description: 'AI-powered STRIDE threat modeling on pull requests. Analyzes code changes for security threats and posts findings as PR comments and SARIF reports.'
+author: 'UnitOneAI'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude-based threat analysis. Provide this OR gemini-api-key.'
+    required: false
+  gemini-api-key:
+    description: 'Google Gemini API key for Gemini-based threat analysis. Provide this OR anthropic-api-key.'
+    required: false
+  severity-threshold:
+    description: 'Minimum severity level that causes the action to fail. One of: critical, high, medium, low, info.'
+    required: false
+    default: 'high'
+  frameworks:
+    description: 'Comma-separated list of threat frameworks to apply. Options: stride, owasp, aws_threat_grammar.'
+    required: false
+    default: 'stride'
+  post-comment:
+    description: 'Whether to post threat model results as a PR comment. Set to false to only generate artifacts.'
+    required: false
+    default: 'true'
+  fail-on-threshold:
+    description: 'Whether to fail the action when threats at or above severity-threshold are found.'
+    required: false
+    default: 'true'
+  max-files:
+    description: 'Maximum number of changed files to analyze. Must be between 1 and 500.'
+    required: false
+    default: '50'
+  sarif-upload:
+    description: 'Whether to upload results as a SARIF report to GitHub Code Scanning.'
+    required: false
+    default: 'false'
+  trend-tracking:
+    description: 'Whether to track threat trends across PRs. Requires synthesis-trend.json in repo root.'
+    required: false
+    default: 'true'
+  expand-context:
+    description: 'Whether to expand analysis context to include files that import or are imported by changed files.'
+    required: false
+    default: 'true'
+  process-acceptances:
+    description: 'Whether to process @synthesis acceptance commands from PR comments.'
+    required: false
+    default: 'true'
+
+outputs:
+  threat-count:
+    description: 'Total number of threats identified in the analysis.'
+  critical-count:
+    description: 'Number of critical-severity threats identified.'
+  high-count:
+    description: 'Number of high-severity threats identified.'
+  report-path:
+    description: 'Path to the generated threat model report file.'
+  new-threat-count:
+    description: 'Number of NEW threats not present in the baseline.'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

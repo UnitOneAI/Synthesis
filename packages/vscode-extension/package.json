@@ -1,0 +1,170 @@
+{
+  "name": "synthesis-threat-model",
+  "displayName": "Synthesis Threat Model",
+  "description": "AI-powered threat modeling engine — STRIDE analysis, DFD generation, and inline threat annotations for your codebase.",
+  "version": "0.2.0",
+  "publisher": "unitoneai",
+  "license": "MIT",
+  "categories": [
+    "Security",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "threat model",
+    "STRIDE",
+    "security",
+    "OWASP",
+    "appsec"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:synthesis-explorer",
+    "onCommand:synthesis.scanWorkspace",
+    "onCommand:synthesis.scanFile",
+    "onCommand:synthesis.scanGitChanges",
+    "onCommand:synthesis.showThreatModel"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "synthesis.scanWorkspace",
+        "title": "Synthesis: Scan Workspace for Threats",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "synthesis.scanFile",
+        "title": "Synthesis: Scan This File for Threats",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "synthesis.scanGitChanges",
+        "title": "Synthesis: Scan Uncommitted Git Changes",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "synthesis.showThreatModel",
+        "title": "Synthesis: Show Threat Model Panel",
+        "icon": "$(shield)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "synthesis-sidebar",
+          "title": "Synthesis",
+          "icon": "resources/shield.svg"
+        }
+      ]
+    },
+    "views": {
+      "synthesis-sidebar": [
+        {
+          "id": "synthesis-explorer",
+          "name": "Threat Explorer",
+          "type": "tree"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Synthesis Threat Model",
+      "properties": {
+        "synthesis.provider": {
+          "type": "string",
+          "default": "anthropic",
+          "enum": [
+            "anthropic",
+            "gemini"
+          ],
+          "description": "AI provider for threat analysis."
+        },
+        "synthesis.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "DEPRECATED — Keys are stored in SecretStorage. This field is only used for one-time migration.",
+          "markdownDeprecationMessage": "API keys are now stored securely via VS Code SecretStorage. Use the command palette to set your key."
+        },
+        "synthesis.geminiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "DEPRECATED — Keys are stored in SecretStorage. This field is only used for one-time migration.",
+          "markdownDeprecationMessage": "API keys are now stored securely via VS Code SecretStorage. Use the command palette to set your key."
+        },
+        "synthesis.frameworks": {
+          "type": "array",
+          "default": [
+            "STRIDE"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "STRIDE",
+              "OWASP",
+              "AWS_THREAT_GRAMMAR"
+            ]
+          },
+          "description": "Threat frameworks to apply during analysis."
+        },
+        "synthesis.severityThreshold": {
+          "type": "string",
+          "default": "low",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "description": "Minimum severity level to display in results."
+        },
+        "synthesis.maxFiles": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of files to include in a workspace scan (resource exhaustion guard)."
+        }
+      }
+    },
+    "viewsWelcome": [
+      {
+        "view": "synthesis-explorer",
+        "contents": "Welcome to Synthesis Threat Model.\n\nRun a scan to identify security threats using STRIDE analysis.\n\n[Scan Workspace](command:synthesis.scanWorkspace)\n[Scan Current File](command:synthesis.scanFile)\n[Scan Git Changes](command:synthesis.scanGitChanges)\n\nYou'll need an Anthropic or Gemini API key configured."
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "synthesis.scanFile",
+          "group": "synthesis@1",
+          "when": "editorTextFocus"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "synthesis.scanFile",
+          "group": "synthesis@1",
+          "when": "resourceScheme == file"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "package": "vsce package",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@synthesis/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.0",
+    "typescript": "^5.3.0"
+  }
+}
