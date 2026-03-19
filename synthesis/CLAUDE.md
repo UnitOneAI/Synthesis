@@ -23,23 +23,35 @@ This Python package provides UnitoneController integration for the Synthesis thr
 │  │ run(context: ToolContext) -> ToolOutput                 │    │
 │  │                                                         │    │
 │  │  1. Validate context (repo_path exists)                 │    │
-│  │  2. Call TypeScript CLI via subprocess                  │    │
+│  │  2. Call analysis engine (see Execution Environments)   │    │
 │  │  3. Parse JSON output to Issue objects                  │    │
 │  │  4. Return ToolOutput with issues and summary           │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ subprocess: npx ts-node cli/scan.ts
+                            │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    cli/scan.ts                                   │
-│                    TypeScript CLI                                │
+│              Execution Environment (configurable)                │
 │                                                                  │
-│  1. analyzeRepo() - Detect components, data flows               │
-│  2. generateThreats() - LLM-powered STRIDE analysis             │
-│  3. Convert to UnitoneController Issue format                    │
-│  4. Output JSON to stdout                                        │
+│  LOCAL:   subprocess → npx ts-node cli/scan.ts                  │
+│  LAMBDA:  boto3.invoke() → unitoneflow-lambda                   │
+│  HTTP:    requests.post() → synthesis API endpoint              │
+│                                                                  │
+│  The Tool interface is the same regardless of execution env.     │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Execution Environments
+
+The same tool can run in different environments:
+
+| Environment | How it runs | Use case |
+|-------------|-------------|----------|
+| **Local** | subprocess to TypeScript CLI | Development, CLI |
+| **Lambda** | AWS Lambda invocation | Cloud deployment |
+| **HTTP** | API call to service | Container deployment |
+
+The tool implementation abstracts this - callers just call `tool.run(context)`.
 
 ## Package Structure
 
