@@ -149,30 +149,31 @@ cli/
 │                                                                  │
 │  from synthesis import SynthesisThreatModelTool                  │
 │  tool = SynthesisThreatModelTool()                               │
-│  output = tool.run(context)                                      │
+│  output = tool.run(context)  # Same interface everywhere        │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ subprocess
+                            │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Synthesis (Python)                            │
-│                    synthesis/tool.py                             │
+│                    Execution Environment                         │
 │                                                                  │
-│  - Implements Tool interface                                     │
-│  - Calls TypeScript CLI                                          │
-│  - Parses JSON output to Issue objects                           │
+│  LOCAL:   subprocess → TypeScript CLI                           │
+│  LAMBDA:  boto3.invoke() → AWS Lambda                           │
+│  HTTP:    requests.post() → Container API                       │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ npx ts-node
+                            │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Synthesis (TypeScript)                        │
-│                    cli/scan.ts                                   │
+│                    Synthesis Analysis Engine                     │
+│                    (TypeScript)                                  │
 │                                                                  │
-│  - Analyzes repository                                           │
-│  - Generates STRIDE threats                                      │
+│  - Analyzes repository structure                                 │
+│  - Generates STRIDE threats via LLM                              │
 │  - Calculates OWASP risk ratings                                 │
-│  - Outputs JSON to stdout                                        │
+│  - Returns JSON in UnitoneController Issue format                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+The tool interface (`tool.run()`) is the same regardless of where the analysis runs.
 
 See `synthesis/CLAUDE.md` for detailed architecture documentation.
 
