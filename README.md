@@ -92,6 +92,90 @@ lib/
 - **UI:** Tailwind CSS, Radix UI, Lucide icons
 - **LLMs:** Anthropic Claude Sonnet 4.5, Google Gemini 2.5
 
+---
+
+## Python Package (UnitoneController Integration)
+
+Synthesis also provides a Python package for integration with UnitoneController.
+
+### Installation
+
+```bash
+pip install git+https://github.com/UnitOneAI/Synthesis.git
+```
+
+### Usage with UnitoneController
+
+```python
+from synthesis import SynthesisThreatModelTool
+
+# Register with UnitoneController
+tool = SynthesisThreatModelTool()
+registry.register(tool)
+
+# Run threat model
+from unitone import UnitOneFlow
+unitone = UnitOneFlow("/path/to/repo")
+result = unitone.run("synthesis")
+```
+
+### Standalone CLI
+
+```bash
+# Run threat model on a repository
+python -m synthesis.tool /path/to/repo --framework STRIDE
+
+# Or using npx (TypeScript CLI)
+npx ts-node cli/scan.ts /path/to/repo --framework STRIDE
+```
+
+### Python Package Structure
+
+```
+synthesis/
+├── __init__.py       # Package exports
+├── models.py         # Data models (Threat, OWASP, STRIDE)
+└── tool.py           # SynthesisThreatModelTool (Tool interface)
+
+cli/
+└── scan.ts           # TypeScript CLI (called by Python tool)
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    UnitoneController                             │
+│                                                                  │
+│  from synthesis import SynthesisThreatModelTool                  │
+│  tool = SynthesisThreatModelTool()                               │
+│  output = tool.run(context)                                      │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ subprocess
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Synthesis (Python)                            │
+│                    synthesis/tool.py                             │
+│                                                                  │
+│  - Implements Tool interface                                     │
+│  - Calls TypeScript CLI                                          │
+│  - Parses JSON output to Issue objects                           │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ npx ts-node
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Synthesis (TypeScript)                        │
+│                    cli/scan.ts                                   │
+│                                                                  │
+│  - Analyzes repository                                           │
+│  - Generates STRIDE threats                                      │
+│  - Calculates OWASP risk ratings                                 │
+│  - Outputs JSON to stdout                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+See `synthesis/CLAUDE.md` for detailed architecture documentation.
+
 ## License
 
 Private — UnitOne AI
