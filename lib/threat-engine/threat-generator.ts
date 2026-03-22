@@ -312,7 +312,7 @@ export async function generateThreats(
 ): Promise<GeneratedThreat[]> {
   const config = await getLLMConfig();
   if (!config) {
-    console.log("[threat-generator] No LLM API key configured — using demo mode with realistic mock threats");
+    console.error("[threat-generator] No LLM API key configured — using demo mode with realistic mock threats");
     return generateDemoThreats(analysis);
   }
 
@@ -554,7 +554,7 @@ export async function generateThreatsFromDocument(
 ): Promise<GeneratedThreat[]> {
   const config = await getLLMConfig();
   if (!config) {
-    console.log("[threat-generator] No LLM API key configured — using demo mode for document analysis");
+    console.error("[threat-generator] No LLM API key configured — using demo mode for document analysis");
     return generateDemoThreatsFromDoc(documentName);
   }
 

@@ -438,7 +438,7 @@ export async function generateDesignEnhancements(
 ): Promise<DesignEnhancement[]> {
   const config = await getLLMConfig();
   if (!config) {
-    console.log("[design-review-engine] No LLM API key configured — using demo mode for design enhancements");
+    console.error("[design-review-engine] No LLM API key configured — using demo mode for design enhancements");
     return generateDemoEnhancements(docName);
   }
 
@@ -467,7 +467,7 @@ export async function generatePreCodeRisks(
 ): Promise<PreCodeRisk[]> {
   const config = await getLLMConfig();
   if (!config) {
-    console.log("[design-review-engine] No LLM API key configured — using demo mode for pre-code risks");
+    console.error("[design-review-engine] No LLM API key configured — using demo mode for pre-code risks");
     return generateDemoRisks(docName);
   }
 
@@ -498,7 +498,7 @@ export async function generateContextLayer(
 ): Promise<string> {
   const config = await getLLMConfig();
   if (!config) {
-    console.log("[design-review-engine] No LLM API key configured — using demo mode for context layer");
+    console.error("[design-review-engine] No LLM API key configured — using demo mode for context layer");
     return generateDemoContextLayer(docName);
   }
 
