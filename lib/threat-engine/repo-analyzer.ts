@@ -167,28 +167,39 @@ const FRAMEWORK_SIGNATURES: FrameworkSignature[] = [
 export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<RepoAnalysis> {
   const tmpDir = path.join(os.tmpdir(), `threat-model-${sessionId}`);
 
+  // Check if input is a local path (not a URL)
+  const isLocalPath = !repoUrl.startsWith("http") &&
+                      !repoUrl.startsWith("git@") &&
+                      !repoUrl.includes("github.com") &&
+                      fs.existsSync(repoUrl);
+
+  // Use the local path directly or clone into tmpDir
+  const workDir = isLocalPath ? repoUrl : tmpDir;
+
   try {
-    // 1. Clone the repo
-    await cloneRepo(repoUrl, tmpDir);
+    // 1. Clone the repo (only if it's a URL)
+    if (!isLocalPath) {
+      await cloneRepo(repoUrl, tmpDir);
+    }
 
     // 2. Walk file tree
-    const fileTree = walkDir(tmpDir, tmpDir);
+    const fileTree = walkDir(workDir, workDir);
 
     // 3. Detect languages
     const languages = detectLanguages(fileTree);
 
     // 4. Detect frameworks
-    const frameworks = await detectFrameworks(tmpDir, fileTree);
+    const frameworks = await detectFrameworks(workDir, fileTree);
 
     // 5. Find entry points
     const entryPoints = findEntryPoints(fileTree);
 
     // 6. Scan for security patterns
-    const securityFindings = await scanSecurity(tmpDir, fileTree);
+    const securityFindings = await scanSecurity(workDir, fileTree);
 
     // 7. Extract architecture
     const { components, dataFlows, trustBoundaries } = await extractArchitecture(
-      tmpDir,
+      workDir,
       fileTree,
       frameworks,
       securityFindings
@@ -206,11 +217,13 @@ export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<R
       entryPoints,
     };
   } finally {
-    // Cleanup
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
+    // Cleanup (only if we cloned, not for local paths)
+    if (!isLocalPath) {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   }
 }
