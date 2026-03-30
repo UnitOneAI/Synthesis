@@ -15,6 +15,7 @@
 import { analyzeRepo, type RepoAnalysis } from "../lib/threat-engine/repo-analyzer";
 import { generateThreats, type GeneratedThreat, type Framework } from "../lib/threat-engine/threat-generator";
 import { v4 as uuidv4 } from "uuid";
+import * as fs from "fs";
 
 // ── Issue format compatible with UnitoneController ──
 
@@ -147,6 +148,7 @@ Usage:
 
 Options:
   --framework <STRIDE|OWASP Top 10>  Threat framework (default: STRIDE)
+  --output-file <path>                Write JSON to file (avoids stdout buffer limits)
   --json                              Output as JSON (default)
   --help, -h                          Show this help
 
@@ -162,6 +164,12 @@ Examples:
   const framework: Framework = (frameworkIndex !== -1 && args[frameworkIndex + 1])
     ? args[frameworkIndex + 1] as Framework
     : "STRIDE";
+
+  // Check for --output-file option (avoids stdout buffer truncation for large outputs)
+  const outputFileIndex = args.indexOf("--output-file");
+  const outputFile: string | null = (outputFileIndex !== -1 && args[outputFileIndex + 1])
+    ? args[outputFileIndex + 1]
+    : null;
 
   const sessionId = uuidv4();
 
@@ -206,8 +214,14 @@ Examples:
       },
     };
 
-    // Output JSON to stdout
-    console.log(JSON.stringify(output, null, 2));
+    // Output JSON - use file if specified (avoids 64KB pipe buffer limit)
+    const jsonOutput = JSON.stringify(output);
+    if (outputFile) {
+      fs.writeFileSync(outputFile, jsonOutput, "utf-8");
+      console.error(`[synthesis] Output written to ${outputFile} (${jsonOutput.length} bytes)`);
+    } else {
+      console.log(jsonOutput);
+    }
     process.exit(0);
 
   } catch (error) {
