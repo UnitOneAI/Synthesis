@@ -32,6 +32,17 @@ export interface SecurityFinding {
   severity: "Critical" | "High" | "Medium" | "Low";
 }
 
+export interface ScopeItem {
+  name: string;
+  type: string;
+  description?: string;
+}
+
+export interface AnalysisScope {
+  in_scope: ScopeItem[];
+  out_of_scope: ScopeItem[];
+}
+
 export interface RepoAnalysis {
   repoUrl: string;
   languages: string[];
@@ -42,6 +53,7 @@ export interface RepoAnalysis {
   securityFindings: SecurityFinding[];
   fileTree: string[];
   entryPoints: string[];
+  scope: AnalysisScope;
 }
 
 // ── Constants ──
@@ -162,6 +174,95 @@ const FRAMEWORK_SIGNATURES: FrameworkSignature[] = [
   { file: ".github/workflows", framework: "GitHub Actions", type: "infra" },
 ];
 
+// ── Scope Generation ──
+
+/**
+ * Generate scope from components and files
+ * In scope: Security-relevant components (API, database, auth, services)
+ * Out of scope: Tests, documentation, build artifacts, config
+ */
+function generateScope(components: ComponentInfo[], fileTree: string[]): AnalysisScope {
+  const in_scope: ScopeItem[] = [];
+  const out_of_scope: ScopeItem[] = [];
+
+  // Categorize components
+  const inScopeTypes = new Set(["api", "service", "database", "gateway", "external"]);
+  const outOfScopeTypes = new Set(["config", "frontend"]); // Frontend often not security-critical
+
+  for (const comp of components) {
+    const item: ScopeItem = {
+      name: comp.name,
+      type: comp.type,
+      description: comp.description,
+    };
+
+    if (inScopeTypes.has(comp.type)) {
+      in_scope.push(item);
+    } else {
+      out_of_scope.push(item);
+    }
+  }
+
+  // Identify out-of-scope file patterns from file tree
+  const outOfScopePatterns = [
+    /test[s]?\//i,
+    /spec[s]?\//i,
+    /__tests__\//i,
+    /doc[s]?\//i,
+    /example[s]?\//i,
+    /sample[s]?\//i,
+    /fixture[s]?\//i,
+    /mock[s]?\//i,
+    /\.md$/i,
+    /\.txt$/i,
+    /\.test\./i,
+    /\.spec\./i,
+  ];
+
+  // Count files by category
+  let testFileCount = 0;
+  let docFileCount = 0;
+
+  for (const file of fileTree.slice(0, 500)) {
+    for (const pattern of outOfScopePatterns) {
+      if (pattern.test(file)) {
+        if (file.match(/test|spec|mock|fixture/i)) {
+          testFileCount++;
+        } else if (file.match(/doc|readme|\.md|\.txt/i)) {
+          docFileCount++;
+        }
+        break;
+      }
+    }
+  }
+
+  // Add file-based out-of-scope items if significant
+  if (testFileCount > 5) {
+    out_of_scope.push({
+      name: "Test Files",
+      type: "tests",
+      description: `${testFileCount} test files excluded from threat analysis`,
+    });
+  }
+
+  if (docFileCount > 2) {
+    out_of_scope.push({
+      name: "Documentation",
+      type: "docs",
+      description: `${docFileCount} documentation files excluded from threat analysis`,
+    });
+  }
+
+  // Always add some standard out-of-scope items
+  out_of_scope.push({
+    name: "Build Artifacts",
+    type: "build",
+    description: "Compiled output, node_modules, dist folders",
+  });
+
+  return { in_scope, out_of_scope };
+}
+
 // ── Main Analyzer ──
 
 export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<RepoAnalysis> {
@@ -205,6 +306,9 @@ export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<R
       securityFindings
     );
 
+    // 8. Generate scope from components
+    const scope = generateScope(components, fileTree);
+
     return {
       repoUrl,
       languages,
@@ -215,6 +319,7 @@ export async function analyzeRepo(repoUrl: string, sessionId: string): Promise<R
       securityFindings,
       fileTree: fileTree.slice(0, 200), // Cap for response size
       entryPoints,
+      scope,
     };
   } finally {
     // Cleanup (only if we cloned, not for local paths)

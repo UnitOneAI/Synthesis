@@ -111,6 +111,12 @@ function buildDescription(threat: GeneratedThreat): string {
 
 // ── Scanner Output ──
 
+interface ScopeItem {
+  name: string;
+  type: string;
+  description?: string;
+}
+
 interface ScannerOutput {
   tool_id: string;
   tool_version: string;
@@ -130,6 +136,10 @@ interface ScannerOutput {
       components: number;
       data_flows: number;
       security_findings: number;
+    };
+    scope?: {
+      in_scope: ScopeItem[];
+      out_of_scope: ScopeItem[];
     };
   };
 }
@@ -211,6 +221,7 @@ Examples:
           data_flows: analysis.dataFlows.length,
           security_findings: analysis.securityFindings.length,
         },
+        scope: analysis.scope,  // Include scope from analysis
       },
     };
 
