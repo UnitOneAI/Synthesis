@@ -45,6 +45,128 @@ function getStrideLabel(stride: string): string {
   return labels[normalized] || stride
 }
 
+// Clean title by removing STRIDE prefix like "[Spoofing]" since we show it as a badge
+function cleanTitle(title: string): string {
+  return title.replace(/^\[[\w\s]+\]\s*/, "")
+}
+
+// Parse description to extract structured sections
+function parseDescription(description: string): {
+  summary: string
+  impact?: string
+  affectedComponents?: string
+  attackVector?: string
+} {
+  const lines = description.split("\n")
+  const result: ReturnType<typeof parseDescription> = { summary: "" }
+
+  let currentSection: string | null = null
+  const summaryLines: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("**Impact:**") || trimmed.startsWith("Impact:")) {
+      currentSection = "impact"
+      result.impact = trimmed.replace(/^\*?\*?Impact:\*?\*?\s*/, "")
+    } else if (trimmed.startsWith("**Affected Components:**") || trimmed.startsWith("Affected Components:")) {
+      currentSection = "affected"
+      result.affectedComponents = trimmed.replace(/^\*?\*?Affected Components:\*?\*?\s*/, "")
+    } else if (trimmed.startsWith("**Attack Vector:**") || trimmed.startsWith("Attack Vector:")) {
+      currentSection = "attack"
+      result.attackVector = trimmed.replace(/^\*?\*?Attack Vector:\*?\*?\s*/, "")
+    } else if (currentSection === "impact" && trimmed) {
+      result.impact = (result.impact || "") + " " + trimmed
+    } else if (currentSection === "affected" && trimmed) {
+      result.affectedComponents = (result.affectedComponents || "") + " " + trimmed
+    } else if (currentSection === "attack" && trimmed) {
+      result.attackVector = (result.attackVector || "") + " " + trimmed
+    } else if (!currentSection && trimmed) {
+      summaryLines.push(trimmed)
+    }
+  }
+
+  result.summary = summaryLines.join(" ")
+  return result
+}
+
+// Scope section component
+function ScopeSection({ scope }: { scope: any }) {
+  if (!scope) return null
+
+  return (
+    <div
+      style={{
+        marginBottom: "24px",
+        padding: "16px",
+        backgroundColor: "#f8fafc",
+        borderRadius: "8px",
+        border: "1px solid #e2e8f0",
+      }}
+    >
+      <h3
+        style={{
+          fontSize: "14px",
+          fontWeight: 600,
+          color: "#475569",
+          marginBottom: "12px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        <span style={{ fontSize: "16px" }}>🎯</span> Analysis Scope
+      </h3>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+        {scope.files_analyzed !== undefined && (
+          <div>
+            <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>Files Analyzed</p>
+            <p style={{ fontSize: "18px", fontWeight: 600, color: "#1e293b", margin: 0 }}>{scope.files_analyzed}</p>
+          </div>
+        )}
+        {scope.components !== undefined && (
+          <div>
+            <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>Components</p>
+            <p style={{ fontSize: "18px", fontWeight: 600, color: "#1e293b", margin: 0 }}>{scope.components}</p>
+          </div>
+        )}
+        {scope.data_flows !== undefined && (
+          <div>
+            <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>Data Flows</p>
+            <p style={{ fontSize: "18px", fontWeight: 600, color: "#1e293b", margin: 0 }}>{scope.data_flows}</p>
+          </div>
+        )}
+        {scope.entry_points !== undefined && (
+          <div>
+            <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>Entry Points</p>
+            <p style={{ fontSize: "18px", fontWeight: 600, color: "#1e293b", margin: 0 }}>{scope.entry_points}</p>
+          </div>
+        )}
+      </div>
+      {scope.focus_areas && scope.focus_areas.length > 0 && (
+        <div style={{ marginTop: "12px" }}>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: 0, marginBottom: "6px" }}>Focus Areas</p>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            {scope.focus_areas.map((area: string, idx: number) => (
+              <span
+                key={idx}
+                style={{
+                  padding: "2px 8px",
+                  backgroundColor: "#e0e7ff",
+                  color: "#3730a3",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                }}
+              >
+                {area}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Badge({
   children,
   style,
@@ -107,6 +229,9 @@ function ThreatCard({ issue }: { issue: Issue }) {
   const strideCategory =
     issue.metadata?.stride_category || issue.rule_id?.split("/")[1] || "unknown"
 
+  const title = cleanTitle(issue.title)
+  const parsedDesc = issue.description ? parseDescription(issue.description) : null
+
   return (
     <div
       onClick={() => setExpanded(!expanded)}
@@ -126,9 +251,9 @@ function ThreatCard({ issue }: { issue: Issue }) {
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <SeverityBadge severity={issue.severity} />
             <StrideBadge stride={strideCategory} />
-            <span style={{ fontWeight: 500 }}>{issue.title}</span>
+            <span style={{ fontWeight: 500 }}>{title}</span>
           </div>
-          {issue.description && (
+          {parsedDesc?.summary && (
             <p
               style={{
                 fontSize: "14px",
@@ -140,7 +265,7 @@ function ThreatCard({ issue }: { issue: Issue }) {
                 WebkitBoxOrient: "vertical",
               }}
             >
-              {issue.description}
+              {parsedDesc.summary}
             </p>
           )}
         </div>
@@ -166,12 +291,39 @@ function ThreatCard({ issue }: { issue: Issue }) {
 
       {expanded && (
         <div style={{ paddingTop: "12px", borderTop: "1px solid #e5e7eb", marginTop: "12px" }}>
-          {issue.description && (
+          {parsedDesc?.summary && (
             <div style={{ marginBottom: "16px" }}>
               <h4 style={{ fontSize: "12px", fontWeight: 600, color: "#6b7280", marginBottom: "4px" }}>
                 Description
               </h4>
-              <p style={{ fontSize: "14px" }}>{issue.description}</p>
+              <p style={{ fontSize: "14px" }}>{parsedDesc.summary}</p>
+            </div>
+          )}
+
+          {parsedDesc?.impact && (
+            <div style={{ marginBottom: "16px" }}>
+              <h4 style={{ fontSize: "12px", fontWeight: 600, color: "#dc2626", marginBottom: "4px" }}>
+                Impact
+              </h4>
+              <p style={{ fontSize: "14px" }}>{parsedDesc.impact}</p>
+            </div>
+          )}
+
+          {parsedDesc?.affectedComponents && (
+            <div style={{ marginBottom: "16px" }}>
+              <h4 style={{ fontSize: "12px", fontWeight: 600, color: "#6b7280", marginBottom: "4px" }}>
+                Affected Components
+              </h4>
+              <p style={{ fontSize: "14px", fontFamily: "monospace" }}>{parsedDesc.affectedComponents}</p>
+            </div>
+          )}
+
+          {parsedDesc?.attackVector && (
+            <div style={{ marginBottom: "16px" }}>
+              <h4 style={{ fontSize: "12px", fontWeight: 600, color: "#ea580c", marginBottom: "4px" }}>
+                Attack Vector
+              </h4>
+              <p style={{ fontSize: "14px" }}>{parsedDesc.attackVector}</p>
             </div>
           )}
 
@@ -238,6 +390,7 @@ function ThreatCard({ issue }: { issue: Issue }) {
 
 export function ThreatModelRenderer({ output }: ThreatModelRendererProps) {
   const issues = output.issues || []
+  const scope = output.data?.scope
 
   // Group by STRIDE category
   const byStride = issues.reduce(
@@ -272,6 +425,9 @@ export function ThreatModelRenderer({ output }: ThreatModelRendererProps) {
 
   return (
     <div>
+      {/* Scope Section */}
+      <ScopeSection scope={scope} />
+
       {/* STRIDE Summary */}
       <div style={{ marginBottom: "24px" }}>
         <h3 style={{ fontSize: "14px", fontWeight: 500, color: "#6b7280", marginBottom: "12px" }}>
