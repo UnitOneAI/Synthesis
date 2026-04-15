@@ -14,6 +14,7 @@
 
 import { analyzeRepo, type RepoAnalysis } from "../lib/threat-engine/repo-analyzer";
 import { generateThreats, type GeneratedThreat, type Framework } from "../lib/threat-engine/threat-generator";
+import { generateDFD } from "../lib/threat-engine/dfd-generator";
 import { v4 as uuidv4 } from "uuid";
 import * as fs from "fs";
 
@@ -141,6 +142,10 @@ interface ScannerOutput {
       in_scope: ScopeItem[];
       out_of_scope: ScopeItem[];
     };
+    dfd_mermaid: string;
+    components: unknown[];
+    data_flows: unknown[];
+    trust_boundaries: unknown[];
   };
 }
 
@@ -222,6 +227,10 @@ Examples:
           security_findings: analysis.securityFindings.length,
         },
         scope: analysis.scope,  // Include scope from analysis
+        dfd_mermaid: generateDFD(analysis),
+        components: analysis.components,
+        data_flows: analysis.dataFlows,
+        trust_boundaries: analysis.trustBoundaries,
       },
     };
 
