@@ -143,7 +143,7 @@ function renderNode(nodeId: string, comp: ComponentInfo): string {
     case "external":
       return `${nodeId}[["${label}"]]`; // Subroutine shape (double border)
     case "queue":
-      return `${nodeId}>>"${label}"]`; // Flag shape
+      return `${nodeId}>"${label}"]`; // Asymmetric/flag shape
     case "gateway":
       return `${nodeId}{{"${label}"}}`; // Hexagon shape
     default:
