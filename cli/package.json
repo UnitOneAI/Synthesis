@@ -1,0 +1,30 @@
+{
+  "name": "@unitoneai/synthesis",
+  "version": "1.2.0",
+  "description": "Synthesis threat modeling CLI - STRIDE-based security analysis",
+  "bin": {
+    "synthesis": "./dist/index.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "ncc build scan.ts -o dist -m -t --license licenses.txt",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/UnitOneAI/Synthesis.git",
+    "directory": "cli"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.4"
+  }
+}
