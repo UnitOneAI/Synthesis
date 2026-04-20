@@ -34,3 +34,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+.next/
+__pycache__/
+*.pyc
+*.egg-info/
+data/
