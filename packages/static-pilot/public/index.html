@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Synthesis · Static system review</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">S<span>ynthesis</span></a
+      ><span class="pill">STATIC ONLY</span
+      ><span class="muted">Local workspace · Optional model review</span>
+    </header>
+    <main>
+      <section class="intro">
+        <p class="eyebrow">MULTI-REPOSITORY THREAT MODELING</p>
+        <h1>Understand the system.<br />Keep the evidence in view.</h1>
+        <p>
+          Start with source repositories. Review interfaces, connect the
+          evidence, and export a draft your security team can inspect.
+        </p>
+      </section>
+      <nav aria-label="Workflow">
+        <button data-tab="sources" class="active">1 · Sources</button
+        ><button data-tab="model">2 · Evidence and model</button
+        ><button data-tab="review">3 · Connect and export</button>
+      </nav>
+      <div id="message" role="status" aria-live="polite"></div>
+      <section id="sources" class="panel">
+        <div class="section-title">
+          <div>
+            <h2>Your repository scope</h2>
+            <p>
+              Import a classification workbook or add repositories individually.
+              No architecture documents required.
+            </p>
+          </div>
+          <label class="button secondary"
+            >Import XLSX or CSV<input
+              id="inventory"
+              type="file"
+              accept=".xlsx,.csv"
+              hidden
+          /></label>
+        </div>
+        <div class="grid">
+          <label
+            >System name<input
+              id="title"
+              value="Static system threat model" /></label
+          ><label
+            >Product or configuration profile<input
+              id="profile"
+              placeholder="For example: Server edition / intended release"
+              required
+          /></label>
+        </div>
+        <p class="hint">
+          Analyze one installation variant at a time. A profile name records
+          scope; it does not automatically resolve conditional configuration.
+        </p>
+        <div class="source-root">
+          <strong>Local source root</strong><code id="root">Connecting…</code>
+          <p>
+            Folder paths are relative to this root. GitHub sources use read-only
+            source downloads and are pinned to a commit. Credentials stay on the
+            server.
+          </p>
+        </div>
+        <form id="add-form" class="add-form">
+          <label
+            >Repository name<input
+              id="repo-name"
+              placeholder="orders-service"
+              required
+              pattern="[A-Za-z0-9_.-]+" /></label
+          ><label
+            >Local folder or GitHub URL<input
+              id="repo-location"
+              placeholder="orders-service or https://github.com/org/repo"
+              required /></label
+          ><button type="submit" class="secondary">Add repository</button>
+        </form>
+        <div class="toolbar">
+          <strong id="counts">0 repositories selected</strong
+          ><input
+            id="repo-search"
+            type="search"
+            aria-label="Filter repositories"
+            placeholder="Find a repository…"
+          /><button id="selected-only" class="secondary">Show selected</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Include</th>
+                <th>Repository</th>
+                <th>Scope</th>
+                <th>Source</th>
+                <th>Folder / GitHub URL</th>
+                <th>GitHub ref</th>
+              </tr>
+            </thead>
+            <tbody id="repositories"></tbody>
+          </table>
+        </div>
+        <div class="source-root">
+          <h3>Model review</h3>
+          <p id="model-config">Checking provider configuration…</p>
+          <label
+            ><input id="use-model" type="checkbox" disabled /> Use the
+            configured model to suggest threats and connections</label
+          >
+          <label
+            ><input id="source-excerpts" type="checkbox" disabled /> Include
+            bounded, redacted source excerpts</label
+          >
+          <p id="model-disclosure" class="hint">
+            Model review sends private architectural metadata (repository names,
+            file locations, operations and evidence references) to the
+            configured provider. Source excerpts are optional. Redaction is best
+            effort; use only a destination approved for this source. Models
+            cannot execute the application or approve connections.
+          </p>
+        </div>
+        <div class="action-row">
+          <p>
+            Reads source only. No application execution, installer execution, or
+            runtime probing. Model review uses the choice above; it never runs
+            the target.
+          </p>
+          <button id="analyze">Analyze selected sources</button
+          ><button id="cancel" class="secondary" hidden>Cancel</button>
+        </div>
+      </section>
+      <section id="model" class="panel" hidden>
+        <div class="section-title">
+          <div>
+            <h2>Evidence and coverage</h2>
+            <p>
+              Source declarations and lexical candidates are separated. Missing
+              evidence remains visible.
+            </p>
+          </div>
+          <button id="refresh" class="secondary">Refresh model</button>
+        </div>
+        <div id="summary" class="stats"></div>
+        <div id="coverage"></div>
+        <h3>Model suggestions · Human review required</h3>
+        <div id="ai-review"></div>
+        <div class="toolbar">
+          <h3>Interfaces and control references</h3>
+          <input
+            id="interface-search"
+            type="search"
+            aria-label="Filter interfaces"
+            placeholder="Filter by repository, operation, protocol…"
+          />
+        </div>
+        <p class="hint">
+          A control reference does not establish that the control governs an
+          operation. Open the source locally at the evidence location to verify
+          scope.
+        </p>
+        <div id="interfaces"></div>
+        <div class="toolbar">
+          <button id="prev" class="secondary">Previous</button
+          ><span id="page-count"></span
+          ><button id="next" class="secondary">Next</button>
+        </div>
+        <details>
+          <summary>Actor assumptions and conditional threats</summary>
+          <div id="threats"></div>
+        </details>
+        <details>
+          <summary>Diagnostics and missing evidence</summary>
+          <div id="diagnostics"></div>
+        </details>
+      </section>
+      <section id="review" class="panel" hidden>
+        <h2>Connect interfaces with a rationale</h2>
+        <p>
+          Connections are reviewer declarations. The model preserves source
+          evidence and does not convert your declaration into a source-proven
+          relationship.
+        </p>
+        <form id="binding-form">
+          <div class="grid">
+            <label>From interface<select id="from" required></select></label
+            ><label>To interface<select id="to" required></select></label
+            ><label
+              >Reason for the connection<input
+                id="reason"
+                required
+                placeholder="Configuration binding, contract, or reviewed source relationship" /></label
+            ><label
+              >Reviewer name<input
+                id="reviewer"
+                required
+                placeholder="Your name" /></label
+            ><label
+              >Data transferred<input
+                id="data"
+                placeholder="Unknown until reviewed" /></label
+            ><label
+              >Enforcement and controls<input
+                id="controls"
+                placeholder="Unknown, or source location and explanation"
+            /></label>
+          </div>
+          <h3>Trust transition, if established</h3>
+          <div class="grid three">
+            <label
+              >Dimension<select id="dimension">
+                <option value="">Not established</option>
+                <option value="identity">Identity</option>
+                <option value="privilege">Privilege</option>
+                <option value="network">Network exposure</option>
+                <option value="execution">Execution authority</option>
+                <option value="data-ownership">Data ownership</option>
+                <option value="third-party">Third-party control</option>
+              </select></label
+            ><label
+              >Authority before<input
+                id="before"
+                placeholder="For example: authenticated application user" /></label
+            ><label
+              >Authority after<input
+                id="after"
+                placeholder="For example: privileged service identity"
+            /></label>
+          </div>
+          <button type="submit">Save connection declaration</button>
+        </form>
+        <div id="bindings"></div>
+        <h2>DFD review sheets</h2>
+        <p>
+          Solid connections are declared. Dashed connections have an unknown
+          endpoint. Source groupings are not automatically processes or trust
+          domains.
+        </p>
+        <div id="diagram"></div>
+        <h2>Export the review package</h2>
+        <p>
+          Keep the full evidence ledger with the report. Reports remain drafts;
+          this pilot does not approve risks or confirm vulnerabilities.
+        </p>
+        <div class="downloads">
+          <button data-export="html">HTML threat model</button
+          ><button data-export="svg" class="secondary">SVG diagrams</button
+          ><button data-export="json" class="secondary">Full model JSON</button
+          ><button data-export="manifest" class="secondary">
+            Manifest with declarations
+          </button>
+        </div>
+        <label class="button secondary import-manifest"
+          >Load a saved manifest<input
+            id="manifest-file"
+            type="file"
+            accept=".json"
+            hidden
+        /></label>
+      </section>
+      <footer>
+        Static analysis describes supplied source under stated assumptions. It
+        does not verify the deployed environment.
+      </footer>
+    </main>
+  </body>
+</html>

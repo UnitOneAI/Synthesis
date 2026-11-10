@@ -1,0 +1,19 @@
+{
+  "name": "@synthesis/static-pilot",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Local, evidence-led multi-repository static threat modeling pilot",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs serve",
+    "test": "node --test test/pilot.test.mjs test/model-review.test.mjs",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/server.mjs && node --check src/model-review.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.0",
+    "fflate": "0.8.3"
+  }
+}

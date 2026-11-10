@@ -137,7 +137,7 @@ export const allSessions: {
     id: "tm-001",
     name: "HVAC Cloud API - Threat Model",
     source: "github-repo",
-    sourceRef: "github.com/jci/smart-building-cloud",
+    sourceRef: "github.com/example/smart-building-cloud",
     createdAt: "2026-02-04T14:30:00Z",
     status: "Review",
     framework: "STRIDE",
@@ -147,7 +147,7 @@ export const allSessions: {
     id: "tm-002",
     name: "Fire Safety Controller - Threat Model",
     source: "github-repo",
-    sourceRef: "github.com/jci/fire-safety-platform",
+    sourceRef: "github.com/example/fire-safety-platform",
     createdAt: "2026-01-22T09:15:00Z",
     status: "Complete",
     framework: "STRIDE",
@@ -167,7 +167,7 @@ export const allSessions: {
     id: "tm-004",
     name: "BACnet Edge Gateway Firmware - Threat Model",
     source: "github-repo",
-    sourceRef: "github.com/jci/bacnet-edge-firmware",
+    sourceRef: "github.com/example/bacnet-edge-firmware",
     createdAt: "2026-01-08T16:45:00Z",
     status: "Complete",
     framework: "STRIDE",
@@ -175,7 +175,7 @@ export const allSessions: {
   },
   {
     id: "tm-005",
-    name: "OpenBlue Cloud Identity Service",
+    name: "Example Cloud Identity Service",
     source: "design-doc",
     sourceRef: "identity-service-arch.md",
     createdAt: "2025-12-19T10:30:00Z",
@@ -187,7 +187,7 @@ export const allSessions: {
     id: "tm-006",
     name: "Chiller Plant Optimization ML Pipeline",
     source: "github-repo",
-    sourceRef: "github.com/jci/chiller-ml-pipeline",
+    sourceRef: "github.com/example/chiller-ml-pipeline",
     createdAt: "2025-12-05T13:20:00Z",
     status: "Review",
     framework: "AWS Threat Grammar",
@@ -195,14 +195,14 @@ export const allSessions: {
   },
 ]
 
-// Mock Threat Model Session — JCI Smart Building Cloud
+// Mock Threat Model Session — Example Smart Building Cloud
 export const mockSession: ThreatModelSession = {
   id: "tm-001",
   name: "HVAC Cloud API - Threat Model",
   description:
-    "Threat model for the JCI Smart Building Cloud HVAC Control API, covering BACnet/IP gateway, MQTT message broker, and tenant management plane.",
+    "Threat model for the Example Smart Building Cloud HVAC Control API, covering BACnet/IP gateway, MQTT message broker, and tenant management plane.",
   source: "github-repo",
-  sourceRef: "github.com/jci/smart-building-cloud",
+  sourceRef: "github.com/example/smart-building-cloud",
   createdAt: "2026-02-04T14:30:00Z",
   status: "Review",
   dataFlowDiagram: `graph LR
@@ -527,16 +527,16 @@ def set_temperature():
             file: "cloud/gateway/config.js",
             line: 23,
             original: `const config = {
-    apiEndpoint: "https://api.metasys.jci.com",
-    apiKey: "sk_live_JCI_2024_BUILDING_MGMT_KEY",
-    apiSecret: "super_secret_123!@#",
+    apiEndpoint: "https://api.building.example",
+    apiKey: "EXAMPLE_ONLY_NOT_A_REAL_API_KEY",
+    apiSecret: "EXAMPLE_ONLY_NOT_A_REAL_SECRET",
 };`,
             fixed: `const vault = require('@hashicorp/vault-client');
 
 const config = {
-    apiEndpoint: process.env.METASYS_API_ENDPOINT,
-    apiKey: await vault.getSecret('metasys/api-key'),
-    apiSecret: await vault.getSecret('metasys/api-secret'),
+    apiEndpoint: process.env.BUILDING_API_ENDPOINT,
+    apiKey: await vault.getSecret('building/api-key'),
+    apiSecret: await vault.getSecret('building/api-secret'),
 };`,
           },
           jiraTicket: {

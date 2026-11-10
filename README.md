@@ -2,6 +2,18 @@
 
 AI-powered threat modeling platform. Analyze GitHub repositories or design documents to generate structured threat models using STRIDE, OWASP Top 10, or AWS Threat Grammar frameworks.
 
+## Local static multi-repository pilot
+
+For a local, provider-free portfolio review, use the [static pilot](packages/static-pilot/README.md). It imports XLSX/CSV inventory, reads local clones or pinned GitHub sources, collects evidence-linked candidates, supports declared connections and trust transitions, and exports HTML/SVG/JSON. It is a separate draft-review workflow; see its coverage matrix before using it for an assessment.
+
+```sh
+cd packages/static-pilot
+npm ci --ignore-scripts
+node src/cli.mjs serve --source-root "/absolute/path/to/clones"
+```
+
+Requires Node.js 22+. Open the local access link printed by the server. No AI key or target execution is required. The features below describe the existing main application.
+
 ## Features
 
 - **Repository Analysis** — Point at a GitHub repo URL to auto-detect components, data flows, trust boundaries, and security findings

@@ -400,7 +400,7 @@ THREAT_MODEL_DB_PATH=./data/threats.db  # SQLite database file path
 
 ### 3.1 Test Scenario
 
-**As an engineer on the JCI Smart Building team, I want to submit a GitHub repo and get a full threat model.**
+**As an engineer on the Example Smart Building team, I want to submit a GitHub repo and get a full threat model.**
 
 ### 3.2 End-to-End Test Flow
 
