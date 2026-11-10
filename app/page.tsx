@@ -136,7 +136,7 @@ const cveData: CVE[] = [
   },
   {
     id: "CVE-2024-1003",
-    title: "Hardcoded API Key in Metasys-Cloud-Gateway",
+    title: "Hardcoded API Key in Example Cloud Gateway",
     severity: "High",
     source: "SonarQube",
     file: "cloud/gateway/config.js",
@@ -150,18 +150,18 @@ const cveData: CVE[] = [
       lineStart: 21,
       lineEnd: 28,
       originalCode: `const config = {
-    apiEndpoint: "https://api.metasys.jci.com",
-    apiKey: "sk_live_JCI_2024_BUILDING_MGMT_KEY",
-    apiSecret: "super_secret_123!@#",
+    apiEndpoint: "https://api.building.example",
+    apiKey: "EXAMPLE_ONLY_NOT_A_REAL_API_KEY",
+    apiSecret: "EXAMPLE_ONLY_NOT_A_REAL_SECRET",
     timeout: 30000,
     retries: 3
 };`,
       fixedCode: `const vault = require('@hashicorp/vault-client');
 
 const config = {
-    apiEndpoint: process.env.METASYS_API_ENDPOINT,
-    apiKey: await vault.getSecret('metasys/api-key'),
-    apiSecret: await vault.getSecret('metasys/api-secret'),
+    apiEndpoint: process.env.BUILDING_API_ENDPOINT,
+    apiKey: await vault.getSecret('building/api-key'),
+    apiSecret: await vault.getSecret('building/api-secret'),
     timeout: 30000,
     retries: 3
 };`,
