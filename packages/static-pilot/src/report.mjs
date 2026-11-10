@@ -1,0 +1,123 @@
+export const escape = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const compact = (s) =>
+  String(s ?? "").length > 70 ? String(s).slice(0, 67) + "…" : String(s ?? "");
+function text(x, y, value, small = false) {
+  return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="${small ? 12 : 15}" fill="#18302b">${escape(compact(value))}<title>${escape(value)}</title></text>`;
+}
+export function diagram(model) {
+  const components = new Map(model.components.map((c) => [c.id, c]));
+  const interfaces = new Map(model.interfaces.map((i) => [i.id, i]));
+  const flows = model.flows.map((f) => ({
+    ...f,
+    label: `${interfaces.get(f.from)?.operation} → ${interfaces.get(f.to)?.operation}`,
+    fromLabel: components.get(f.source)?.name,
+    toLabel: components.get(f.target)?.name,
+  }));
+  const linked = new Set(model.flows.flatMap((f) => [f.from, f.to]));
+  const unresolved = model.interfaces
+    .filter((i) => i.direction !== "control" && !linked.has(i.id))
+    .map((i) => ({
+      id: i.id,
+      label: i.operation,
+      basis: "unresolved candidate",
+      fromLabel:
+        i.direction === "inbound"
+          ? "Unknown caller / publisher"
+          : components.get(i.component)?.name,
+      toLabel:
+        i.direction === "inbound"
+          ? components.get(i.component)?.name
+          : "Unknown target / resource",
+    }));
+  const rows = [...flows, ...unresolved];
+  const height = Math.max(170, 95 + rows.length * 150);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="${height}" viewBox="0 0 1100 ${height}" role="img" aria-label="Static data flow review sheets"><rect width="1100" height="${height}" fill="#f8faf8"/><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#327a66"/></marker></defs>${text(25, 30, model.title)}${text(25, 52, "Declared flows are solid; unresolved interface candidates are dashed. Nodes are source groupings until reviewed.", true)}${
+    rows.length
+      ? rows
+          .map((f, n) => {
+            const y = 85 + n * 150,
+              declared = f.basis === "declared";
+            const boundary = model.boundaries.find((b) => b.flow === f.id);
+            return `<g><title>${escape(f.id)}</title><rect x="20" y="${y}" width="1060" height="135" rx="8" fill="white" stroke="#d1ded6"/>${text(38, y + 23, `${n + 1}. ${f.label}`)}${text(38, y + 43, `${f.id} · ${f.basis}`, true)}<rect x="38" y="${y + 57}" width="440" height="42" rx="5" fill="#edf5f0"/><rect x="620" y="${y + 57}" width="440" height="42" rx="5" fill="#edf5f0"/>${text(50, y + 83, f.fromLabel, true)}${text(632, y + 83, f.toLabel, true)}<line x1="480" y1="${y + 78}" x2="615" y2="${y + 78}" stroke="#327a66" stroke-width="2" ${declared ? "" : 'stroke-dasharray="7 5"'} marker-end="url(#arrow)"/>${text(38, y + 119, boundary ? `Trust transition (${boundary.dimension}): ${boundary.before} → ${boundary.after}; declared` : "Trust transition: unknown / not declared", true)}</g>`;
+          })
+          .join("")
+      : text(
+          25,
+          110,
+          "No interfaces found. This is not evidence that the selected system has no interfaces.",
+        )
+  }</svg>`;
+}
+function table(headers, rows) {
+  return `<div class="table"><table><thead><tr>${headers.map((h) => `<th>${escape(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${escape(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+export function reportHtml(model) {
+  const interfaces = new Map(model.interfaces.map((i) => [i.id, i]));
+  const evidence = new Map(model.evidence.map((e) => [e.id, e]));
+  const refs = (ids) =>
+    ids
+      .map((k) => {
+        const e = evidence.get(k);
+        return e
+          ? `${e.repository}/${e.path}:${e.line}${e.pointer ? " " + e.pointer : ""} [${e.id}]`
+          : k;
+      })
+      .join("\n");
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${escape(model.title)}</title><style>body{font:15px/1.55 system-ui,sans-serif;color:#20342e;background:#f7f9f6;margin:0}main{max-width:1200px;margin:auto;padding:40px}h1{font-size:34px}h2{margin-top:36px}small{color:#52645b}.notice{border-left:4px solid #bd862c;padding:16px;background:#fff5dd}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d6e0d9;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf3ed}.table{overflow:auto}article{padding:20px;background:white;border:1px solid #d6e0d9;margin:15px 0;break-inside:avoid}svg{width:100%;height:auto}code{overflow-wrap:anywhere}@media print{body{background:white}main{padding:0;max-width:none}table{font-size:10px}h2{break-after:avoid}.table{overflow:visible}svg{display:none}.print-note{display:block}}@media screen{.print-note{display:none}}</style><main><h1>${escape(model.title)}</h1><p>${escape(model.profile)} · Static-only · Draft with gaps · No AI provider</p><p class="notice">This is a review draft of selected sources and dependencies. Candidate interfaces and conditional scenarios are not confirmed vulnerabilities or evidence of deployed reachability. No whole-product coverage or security approval is implied.</p><small>Engine ${escape(model.engine)} · Created ${escape(model.createdAt)} · Model revision ${escape(model.modelRevision)}</small><h2>Scope and coverage</h2><p>${model.sources.length} selected of ${model.inventoryCount} inventory repositories. ${model.interfaces.length} interfaces/control references; ${model.flows.length} declared flows; ${model.boundaries.length} declared trust transitions.</p>${table(
+    ["Repository / scope", "Snapshot / revision", "Coverage"],
+    model.sources.map((s) => [
+      s.name + " / " + s.scope,
+      s.revision || s.snapshot || "unavailable",
+      s.coverage
+        ? `${s.coverage.inspected} inspected; ${s.coverage.unsupported} unsupported; ${s.coverage.oversized} oversized; ${s.coverage.failed} failed; ${s.coverage.excluded} exclusions (excluded directories are not recursively counted); truncated: ${s.coverage.truncated}`
+        : "unavailable",
+    ]),
+  )}<h2>Interpretation limits</h2><ul>${model.limitations.map((l) => `<li>${escape(l)}</li>`).join("")}</ul><h2>DFD review sheets</h2><p>Each sheet preserves a flow or unresolved interface; grouping by source is not a process or trust-boundary assertion. Full labels and evidence are in the registers below.</p><p class="print-note">SVG diagrams are supplied separately; use the complete flow and interface registers below in a printed report.</p>${diagram(model)}<h2>Declared flows</h2>${table(
+    ["ID / operation", "Endpoints", "Data and controls", "Basis"],
+    model.flows.map((f) => [
+      f.id + "\n" + f.operation,
+      `${f.from} → ${f.to}`,
+      `${f.data}\n${f.controls}`,
+      `${f.basis}: ${f.reason}\nReviewer: ${f.reviewer}`,
+    ]),
+  )}<h2>Trust boundary register</h2>${table(
+    ["ID / flow", "Authority transition", "Enforcement / basis"],
+    model.boundaries.map((b) => [
+      b.id + "\n" + b.flow,
+      `${b.dimension}: ${b.before} → ${b.after}`,
+      b.enforcement + "\n" + b.basis,
+    ]),
+  )}<h2>Actor register</h2>${table(
+    ["Actor", "Initial access assumption", "Basis"],
+    model.actors.map((a) => [a.id + "\n" + a.name, a.startingAccess, a.basis]),
+  )}<h2>Interface and evidence register</h2>${table(
+    ["ID / operation", "Direction / protocol", "Basis / status", "Evidence"],
+    model.interfaces.map((i) => [
+      i.id + "\n" + i.operation,
+      i.direction + " / " + i.protocol,
+      i.basis + "\n" + i.resolution,
+      refs(i.evidence),
+    ]),
+  )}<h2>Conditional threat register</h2>${model.threats.map((t) => `<article id="${escape(t.id)}"><h3>${escape(t.category)} · ${escape(interfaces.get(t.interface)?.operation)}</h3><small>${escape(t.id)} · Severity: unassessed · Needs review</small><p>${escape(t.scenario)}</p><p><strong>Asset:</strong> ${escape(t.asset)}</p><p><strong>Actor:</strong> ${escape(t.actor)}</p><p><strong>Prerequisites:</strong> ${escape(t.prerequisites.join("; "))}</p><p><strong>Path:</strong> ${escape(t.path.join(", ") || "Unresolved; no cross-component path established")}</p><p><strong>Existing controls:</strong> ${escape(t.controls)}</p><p><strong>Review and mitigation:</strong> ${escape(t.mitigation)}</p><p><strong>Evidence:</strong> ${escape(refs(t.evidence))}</p></article>`).join("")}<h2>Dependencies requiring review</h2>${table(
+    ["Repository", "Dependency", "Source"],
+    model.dependencies.map((d) => [
+      d.repository,
+      d.name,
+      d.path + " " + d.pointer,
+    ]),
+  )}<h2>Diagnostics</h2>${table(
+    ["Repository / file", "Gap", "Details"],
+    model.diagnostics.map((d) => [
+      d.repository + (d.path ? "/" + d.path : ""),
+      d.kind,
+      d.message,
+    ]),
+  )}<p>Download and retain model.json for the complete per-file ledger and provenance hashes. Review declarations are local author assertions, not authenticated organizational approval.</p></main></html>`;
+}

@@ -1,0 +1,5 @@
+Repository,Description,URL,Threat-modeling tier,Primary category,Classification rationale,Recommended initial set,Confidence / basis
+frontdoor,Synthetic API ingress,,Tier 1,API,Static test fixture,Yes,Synthetic
+business,Synthetic business service,,Tier 1,Service,Static test fixture,Yes,Synthetic
+setup,Synthetic installer source,,Tier 2,Installation,Static test fixture,Yes,Synthetic
+unavailable,Synthetic unavailable supporting source,,Tier 2,Library,Static test fixture,No,Synthetic

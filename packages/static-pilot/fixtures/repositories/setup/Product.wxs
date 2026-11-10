@@ -1,0 +1,1 @@
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"><Product Name="Synthetic product"><Component Id="Example"><ServiceInstall Id="Service" Name="ExampleService" Account="LocalSystem"/><Permission User="Users" Read="yes"/><CustomAction Id="Configure" Execute="deferred" Impersonate="no" /></Component></Product></Wix>
