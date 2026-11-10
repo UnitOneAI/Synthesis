@@ -129,7 +129,7 @@ async function status() {
   if (!inferenceInitialized) {
     inferenceInitialized = true;
     $("model-config").textContent = s.inference
-      ? `${s.inference.label} · ${s.inference.model}. Model and key are configured on this machine.`
+      ? `${s.inference.label} · ${s.inference.model}.${s.inference.endpoint ? ` Destination: ${s.inference.endpoint} (API ${s.inference.apiVersion}).` : ""} Model and key are configured on this machine.`
       : "Static discovery only. To enable Claude or Gemini, restart with --provider and --model and the provider key in the environment.";
     $("use-model").disabled = !s.inference;
     $("use-model").checked = Boolean(s.inference);

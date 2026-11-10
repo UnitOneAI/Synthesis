@@ -13,16 +13,42 @@ const PROVIDERS = {
     key: "ANTHROPIC_API_KEY",
     endpoint: "https://api.anthropic.com/v1/messages",
   },
+  "anthropic-gateway": {
+    label: "Claude via gateway",
+    key: "CLAUDE_API_KEY",
+  },
   gemini: {
     label: "Gemini",
     key: "GOOGLE_GEMINI_API_KEY",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
   },
 };
-export function modelConfig(provider = "none", model, env = process.env) {
+function gatewayOptions(baseUrl, apiVersion = "2023-06-01") {
+  // The operator configures this destination on the server, never through source or browser input.
+  // Reject credential-bearing URLs and ambiguous path rewriting without echoing the supplied value.
+  let url;
+  try {
+    if (typeof baseUrl !== "string" || !/^https:\/\/[a-zA-Z0-9.:[\]-]+(?:\/[a-zA-Z0-9_/-]*)?$/.test(baseUrl))
+      throw new Error();
+    url = new URL(baseUrl);
+    if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash)
+      throw new Error();
+  } catch {
+    throw new Error("Gateway requires an HTTPS --base-url without credentials, query, fragment or encoded path");
+  }
+  const base = url.href.replace(/\/+$/, "");
+  if (/\/v1(?:\/messages)?$/.test(base))
+    throw new Error("Set the gateway base URL before /v1/messages; the Messages path is appended automatically");
+  if (typeof apiVersion !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(apiVersion))
+    throw new Error("Gateway API version must use YYYY-MM-DD");
+  return { baseUrl: base, apiVersion };
+}
+export function modelConfig(provider = "none", model, env = process.env, options = {}) {
+  if (provider !== "anthropic-gateway" && (options.baseUrl !== undefined || options.apiVersion !== undefined))
+    throw new Error("--base-url and --api-version require --provider anthropic-gateway");
   if (provider === "none") return null;
   if (!Object.hasOwn(PROVIDERS, provider))
-    throw new Error("Provider must be none, anthropic or gemini");
+    throw new Error("Provider must be none, anthropic, anthropic-gateway or gemini");
   if (
     typeof model !== "string" ||
     !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,149}$/.test(model)
@@ -31,9 +57,14 @@ export function modelConfig(provider = "none", model, env = process.env) {
       "Set --model to an approved provider model ID (letters, digits, dots, underscores and hyphens)",
     );
   const apiKey = env[PROVIDERS[provider].key];
-  if (typeof apiKey !== "string" || !apiKey.trim())
+  if (typeof apiKey !== "string" || !apiKey.trim() || /[\r\n]/.test(apiKey))
     throw new Error(`Set ${PROVIDERS[provider].key} in the server environment`);
-  return { provider, model, apiKey };
+  return { provider, model, apiKey,
+    ...(provider === "anthropic-gateway" ? gatewayOptions(
+      options.baseUrl ?? env.SYNTHESIS_LLM_BASE_URL,
+      options.apiVersion ?? env.SYNTHESIS_LLM_API_VERSION ?? "2023-06-01",
+    ) : {}),
+  };
 }
 export function publicModelConfig(config) {
   return config
@@ -41,6 +72,10 @@ export function publicModelConfig(config) {
         provider: config.provider,
         model: config.model,
         label: PROVIDERS[config.provider].label,
+        ...(config.provider === "anthropic-gateway" ? {
+          endpoint: gatewayOptions(config.baseUrl, config.apiVersion).baseUrl + "/v1/messages",
+          apiVersion: config.apiVersion,
+        } : {}),
       }
     : null;
 }
@@ -326,12 +361,15 @@ async function responseJson(response) {
   }
 }
 export async function requestReview(config, packet, fetchImpl = fetch) {
-  // Only these fixed provider endpoints receive packets. Never follow redirects with credentials.
+  // Direct endpoints are fixed; gateway destination comes only from server configuration.
+  // Never follow redirects with credentials.
   const provider = PROVIDERS[config.provider];
   if (!provider) throw new Error("Unsupported provider");
   const user = JSON.stringify(packet);
-  const anthropic = config.provider === "anthropic";
-  const url = anthropic
+  const gateway = config.provider === "anthropic-gateway"
+    ? gatewayOptions(config.baseUrl, config.apiVersion) : null;
+  const anthropic = config.provider === "anthropic" || Boolean(gateway);
+  const url = gateway ? gateway.baseUrl + "/v1/messages" : anthropic
     ? provider.endpoint
     : provider.endpoint + encodeURIComponent(config.model) + ":generateContent";
   const body = anthropic
@@ -358,7 +396,10 @@ export async function requestReview(config, packet, fetchImpl = fetch) {
         signal: AbortSignal.timeout(120000),
         headers: {
           "Content-Type": "application/json",
-          ...(anthropic
+          ...(gateway ? {
+            "Ocp-Apim-Subscription-Key": config.apiKey,
+            "anthropic-version": gateway.apiVersion,
+          } : anthropic
             ? { "x-api-key": config.apiKey, "anthropic-version": "2026-10-21" }
             : { "x-goog-api-key": config.apiKey }),
         },

@@ -35,6 +35,7 @@ Choose an organization-approved provider and an available model ID. Model IDs ar
 | Provider | Flag | Key environment variable | Network destination |
 | --- | --- | --- | --- |
 | Claude | `--provider anthropic` | `ANTHROPIC_API_KEY` | `api.anthropic.com` |
+| Claude via APIM gateway | `--provider anthropic-gateway` | `CLAUDE_API_KEY` | Operator-configured HTTPS base URL |
 | Gemini | `--provider gemini` | `GOOGLE_GEMINI_API_KEY` | `generativelanguage.googleapis.com` |
 
 ```sh
@@ -45,7 +46,21 @@ node src/cli.mjs serve --source-root "/private/clones" --manifest "/private/scop
 node src/cli.mjs serve --source-root "/private/clones" --provider gemini --model YOUR_APPROVED_GEMINI_MODEL
 ```
 
-`SYNTHESIS_LLM_PROVIDER` and `SYNTHESIS_LLM_MODEL` are optional environment alternatives to the flags. `--provider none` explicitly disables inference even when an environment provider is set. Direct Anthropic and Gemini APIs are implemented; Bedrock, Vertex AI, Azure and custom gateways are not yet adapters in this package.
+`SYNTHESIS_LLM_PROVIDER` and `SYNTHESIS_LLM_MODEL` are optional environment alternatives to the flags. `--provider none` explicitly disables inference even when an environment provider is set. Direct Anthropic, Gemini and an Anthropic Messages-compatible APIM gateway are implemented. Bedrock, Vertex AI, Entra token authentication and other gateway protocols are not implemented.
+
+### Claude through an enterprise APIM gateway
+
+Set `CLAUDE_API_KEY` in the server environment using your organization's secret process. It is separate from `ANTHROPIC_API_KEY`, so both keys can exist on the machine. Select one connection per server/run; there is no automatic fallback. No key is entered into the browser or saved in a manifest.
+
+```sh
+node src/cli.mjs serve --source-root "/private/clones" --provider anthropic-gateway --base-url "https://your-approved-gateway.example/anthropic" --model claude-opus-4-6-1 --api-version 2023-06-01
+```
+
+Use the provisioned gateway base URL in place of the example. **Keep the deployment ID exactly `claude-opus-4-6-1`** when that is the provisioned name; it is passed unchanged. The adapter appends `/v1/messages` and sends `Ocp-Apim-Subscription-Key: <CLAUDE_API_KEY>`, `anthropic-version: 2023-06-01` and JSON content type. It does not send the direct Anthropic key or add an `x-api-key` header. URLs must be HTTPS with no credentials, query or fragment; give the base before `/v1/messages`. Redirects are rejected. Gateway policy must permit the Messages request, including `system`, `max_tokens` and `messages`.
+
+Environment alternatives: `SYNTHESIS_LLM_PROVIDER=anthropic-gateway`, `SYNTHESIS_LLM_MODEL=claude-opus-4-6-1`, `SYNTHESIS_LLM_BASE_URL=<approved-base>`, and optionally `SYNTHESIS_LLM_API_VERSION=2023-06-01` (the gateway default). Explicit flags take precedence. The base URL and version flags require the gateway provider; gateway environment defaults do not change direct-provider destinations. The same flags work with `analyze`.
+
+The UI shows the selected gateway destination, model and API version. JSON exports retain that connection provenance without the key; treat gateway addresses and reports as internal information. A 403 remains a visible failure: check the exact deployment name, gateway subscription and policy. Successful mock protocol tests do not establish live gateway access.
 
 The **Model review** area shows the configured provider and model. Starting the server with a provider enables the review checkbox by default; you can turn it off before analysis. Metadata-only mode sends repository names, file locations, operation labels, source hashes, evidence references, profile and relevant reviewer declarations. It does not send entire repositories or the inventory. Check **Include bounded, redacted source excerpts** for additional local code context. To preselect excerpts, add `--include-source-excerpts`; on the CLI this flag opts into sending them. Redaction is best effort, not a guarantee that all sensitive content is removed. Use a provider approved for the chosen data. The model has no tools or target-system access.
 

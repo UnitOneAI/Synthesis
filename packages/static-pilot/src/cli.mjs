@@ -21,6 +21,8 @@ const { values, positionals } = parseArgs({
     add: { type: "string", multiple: true },
     provider: { type: "string" },
     model: { type: "string" },
+    "base-url": { type: "string" },
+    "api-version": { type: "string" },
     "include-source-excerpts": { type: "boolean" },
     help: { type: "boolean" },
   },
@@ -29,7 +31,7 @@ const [command] = positionals;
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|gemini --model <approved-model-id> [--include-source-excerpts]. Keys: ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY (environment only).',
+      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
     );
     return;
   }
@@ -39,6 +41,8 @@ async function main() {
       : modelConfig(
           values.provider || process.env.SYNTHESIS_LLM_PROVIDER || "none",
           values.model || process.env.SYNTHESIS_LLM_MODEL,
+          process.env,
+          { baseUrl: values["base-url"], apiVersion: values["api-version"] },
         );
   if (values["include-source-excerpts"] && !inference)
     throw new Error(

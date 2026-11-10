@@ -26,6 +26,11 @@ const config = modelConfig("anthropic", "approved-model", {
   ANTHROPIC_API_KEY: "synthetic-provider-key",
 });
 const fixture = () => analyze(manifest, { sourceRoot });
+const gatewayConfig = () => modelConfig("anthropic-gateway", "claude-opus-4-6-1", {
+  CLAUDE_API_KEY: "synthetic-gateway-key",
+  ANTHROPIC_API_KEY: "different-direct-key",
+  SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic/",
+});
 function suggestion(packet) {
   const [a, b] = packet.records.filter((r) => r.direction !== "control");
   return {
@@ -290,12 +295,12 @@ test("empty discovery skips provider and no-model runs have no inference result"
   assert.equal(model.aiReview.status, "skipped");
 });
 test("server exposes configured model without key and refuses requested inference without provider", async (t) => {
-  for (const configured of [false, true]) {
+  for (const configured of [null, config, gatewayConfig()]) {
     const { server, url, token } = await serve({
       sourceRoot,
       port: 0,
       quiet: true,
-      modelConfig: configured ? config : null,
+      modelConfig: configured,
     });
     t.after(() => new Promise((resolve) => server.close(resolve)));
     const base = new URL(url).origin,
@@ -307,9 +312,10 @@ test("server exposes configured model without key and refuses requested inferenc
       await fetch(base + "/api/status", { headers })
     ).json();
     assert.ok(!JSON.stringify(status).includes(config.apiKey));
+    assert.ok(!JSON.stringify(status).includes("synthetic-gateway-key"));
     assert.equal(
       status.inference?.provider,
-      configured ? "anthropic" : undefined,
+      configured?.provider,
     );
     if (!configured) {
       const response = await fetch(base + "/api/analyze", {
@@ -398,4 +404,111 @@ test("model execution and excerpt choices require booleans, not truthy strings",
     ),
     /true or false/,
   );
+});
+
+test("gateway configuration separates credentials, validates destinations and permits explicit overrides", () => {
+  const gateway = gatewayConfig();
+  assert.equal(gateway.apiKey, "synthetic-gateway-key");
+  assert.equal(gateway.apiVersion, "2023-06-01");
+  assert.equal(gateway.baseUrl, "https://test-gateway.example/anthropic");
+  assert.equal(publicModelConfig(gateway).endpoint, "https://test-gateway.example/anthropic/v1/messages");
+  assert.ok(!JSON.stringify(publicModelConfig(gateway)).includes(gateway.apiKey));
+  assert.throws(() => modelConfig("anthropic-gateway", "claude-opus-4-6-1", { ANTHROPIC_API_KEY: "wrong-key" }), /CLAUDE_API_KEY/);
+  for (const baseUrl of [undefined, "http://test.example/anthropic", "https://user:secret@test.example/anthropic", "https://test.example/path?key=secret", "https://test.example/#secret", "https://test.example/%2e%2e/path", "https://test.example/v1/messages", "https://test.example/anthropic/v1", "https://test.example\\evil"]) {
+    assert.throws(() => modelConfig("anthropic-gateway", "claude-opus-4-6-1", { CLAUDE_API_KEY: "key" }, { baseUrl }), /Gateway requires|base URL/);
+  }
+  assert.throws(() => modelConfig("anthropic-gateway", "claude-opus-4-6-1", { CLAUDE_API_KEY: "key" }, { baseUrl: gateway.baseUrl, apiVersion: "2023-06-01\r\nx: y" }), /API version/);
+  assert.throws(() => modelConfig("anthropic", "approved-model", { ANTHROPIC_API_KEY: "key" }, { baseUrl: gateway.baseUrl }), /require --provider/);
+  const explicit = modelConfig("anthropic-gateway", "claude-opus-4-6-1", { CLAUDE_API_KEY: "key", SYNTHESIS_LLM_BASE_URL: "https://environment.example", SYNTHESIS_LLM_API_VERSION: "2023-01-01" }, { baseUrl: "https://explicit.example/prefix", apiVersion: "2023-06-01" });
+  assert.equal(explicit.baseUrl, "https://explicit.example/prefix");
+  assert.equal(explicit.apiVersion, "2023-06-01");
+  assert.equal(modelConfig("anthropic", "approved-model", { ANTHROPIC_API_KEY: "direct", SYNTHESIS_LLM_BASE_URL: gateway.baseUrl }).baseUrl, undefined);
+});
+
+test("APIM gateway matches the supplied Messages contract and retains safe provenance", async () => {
+  const model = await fixture();
+  const gateway = gatewayConfig();
+  let calls = 0;
+  await enrichModel(model, gateway, new Map(), async (url, options) => {
+    calls++;
+    assert.equal(url, "https://test-gateway.example/anthropic/v1/messages");
+    assert.equal(options.method, "POST");
+    assert.equal(options.redirect, "error");
+    assert.deepEqual(options.headers, {
+      "Content-Type": "application/json",
+      "Ocp-Apim-Subscription-Key": "synthetic-gateway-key",
+      "anthropic-version": "2023-06-01",
+    });
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, "claude-opus-4-6-1");
+    assert.equal(body.max_tokens, REVIEW_LIMITS.outputTokens);
+    assert.equal(body.tools, undefined);
+    assert.ok(!options.body.includes(gateway.apiKey));
+    return responseFor("anthropic", suggestion(JSON.parse(body.messages[0].content)));
+  });
+  assert.equal(calls, 1);
+  assert.equal(model.aiReview.status, "completed-needs-review");
+  assert.equal(model.aiReview.endpoint, "https://test-gateway.example/anthropic/v1/messages");
+  assert.equal(model.aiReview.apiVersion, "2023-06-01");
+  assert.equal(model.flows.length, 0);
+  assert.ok(!JSON.stringify(model).includes(gateway.apiKey));
+  assert.ok(!reportHtml(model).includes(gateway.apiKey));
+});
+
+test("gateway policy errors and redirects fail visibly without fallback or credential disclosure", async () => {
+  for (const status of [403, 302]) {
+    const model = await fixture();
+    let calls = 0;
+    await enrichModel(model, gatewayConfig(), new Map(), async (url, options) => {
+      calls++;
+      assert.equal(options.redirect, "error");
+      assert.ok(url.startsWith("https://test-gateway.example/"));
+      return new Response("private gateway diagnostic synthetic-gateway-key", { status, headers: { Location: "https://another.example/" } });
+    });
+    assert.equal(calls, 1);
+    assert.equal(model.aiReview.status, "failed");
+    assert.match(model.aiReview.error, new RegExp(`HTTP ${status}`));
+    assert.ok(!JSON.stringify(model).includes("private gateway diagnostic"));
+    assert.ok(!JSON.stringify(model).includes("synthetic-gateway-key"));
+    assert.ok(model.interfaces.length > 0);
+  }
+});
+
+test("CLI supports gateway flags and environment configuration end to end", async (t) => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { pathToFileURL } = await import("node:url");
+  const { execFileSync } = await import("node:child_process");
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-gateway-"));
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  const manifestFile = path.join(temporary, "scope.json");
+  const mockFile = path.join(temporary, "mock.mjs");
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  await fs.writeFile(mockFile, `import assert from 'node:assert/strict';
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, 'https://test-gateway.example/anthropic/v1/messages');
+      assert.equal(options.headers['Ocp-Apim-Subscription-Key'], 'synthetic-gateway-key');
+      assert.equal(options.headers['anthropic-version'], '2023-06-01');
+      assert.equal(JSON.parse(options.body).model, 'claude-opus-4-6-1');
+      return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({summary:'Synthetic protocol test only.',threats:[],connections:[],questions:[]})}]});
+    };`);
+  for (const mode of ["flags", "environment"]) {
+    const out = path.join(temporary, mode);
+    const env = { ...process.env, CLAUDE_API_KEY: "synthetic-gateway-key", SYNTHESIS_LLM_PROVIDER: "anthropic-gateway", SYNTHESIS_LLM_MODEL: "claude-opus-4-6-1", SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic", SYNTHESIS_LLM_API_VERSION: "2023-06-01" };
+    const flags = mode === "flags" ? ["--provider", "anthropic-gateway", "--model", "claude-opus-4-6-1", "--base-url", env.SYNTHESIS_LLM_BASE_URL, "--api-version", "2023-06-01"] : [];
+    if (mode === "flags") {
+      env.SYNTHESIS_LLM_PROVIDER = "none";
+      env.SYNTHESIS_LLM_BASE_URL = "https://unused.example";
+      env.SYNTHESIS_LLM_MODEL = "unused-model";
+      env.SYNTHESIS_LLM_API_VERSION = "2023-01-01";
+    }
+    const output = execFileSync(process.execPath, ["--import", pathToFileURL(mockFile).href, fileURLToPath(new URL("../src/cli.mjs", import.meta.url)), "analyze", "--source-root", sourceRoot, "--manifest", manifestFile, "--out", out, ...flags], { env, encoding: "utf8", timeout: 30000 });
+    assert.ok(!output.includes(env.CLAUDE_API_KEY));
+    const model = JSON.parse(await fs.readFile(path.join(out, "model.json"), "utf8"));
+    assert.equal(model.aiReview.status, "completed-needs-review");
+    assert.equal(model.aiReview.model, "claude-opus-4-6-1");
+    assert.equal(model.aiReview.apiVersion, "2023-06-01");
+    assert.ok(!JSON.stringify(model).includes(env.CLAUDE_API_KEY));
+  }
 });
