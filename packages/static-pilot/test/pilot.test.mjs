@@ -209,6 +209,22 @@ test("malformed configuration cannot leak content in diagnostics", () => {
   assert(!JSON.stringify(r).includes("SUPER_PRIVATE"));
   assert.equal(r.diagnostics[0].kind, "parse-failed");
 });
+
+test("installer package declarations preserve individual identities without command secrets", () => {
+  const r = extract({ name: "setup" }, [
+    file(
+      "Bundle.wxs",
+      '<Wix><Bundle><Chain><ExePackage Id="DatabasePrerequisite" InstallArguments="password=PRIVATE"/><ExePackage Id="MessageBroker"/></Chain></Bundle></Wix>',
+    ),
+  ]);
+  assert.equal(r.interfaces.length, 2);
+  assert.deepEqual(
+    r.dependencies.map((d) => d.name),
+    ["DatabasePrerequisite", "MessageBroker"],
+  );
+  assert(!JSON.stringify(r).includes("PRIVATE"));
+  assert(r.evidence.some((e) => e.pointer.endsWith("/1")));
+});
 test("same names and source categories never fabricate cross-repo flows", async () => {
   const m = await modelFixture();
   assert(m.interfaces.length > 10);

@@ -317,6 +317,13 @@ export function extract(source, files) {
               "Permission",
               "PermissionEx",
               "ServiceConfig",
+              "ServiceControl",
+              "RegistryValue",
+              "ExePackage",
+              "MsiPackage",
+              "MspPackage",
+              "PackageGroupRef",
+              "Payload",
               "SqlDatabase",
               "SqlScript",
               "Certificate",
@@ -330,16 +337,36 @@ export function extract(source, files) {
               : /binding|rewrite|endpoint/.test(key)
                 ? "configuration"
                 : "installation";
-            add(
-              file,
-              pointer,
-              0,
-              "configuration",
-              "resource",
-              protocol,
-              `${key} declaration; effective values and applicability require review`,
-              "source-supported declaration; effective behavior unverified",
-            );
+            const declarations = Array.isArray(value) ? value : [value];
+            declarations.forEach((declaration, index) => {
+              const declarationPointer = Array.isArray(value)
+                ? `${pointer}/${index}`
+                : pointer;
+              // Record package identifiers, never install arguments, URLs or credential values.
+              const packageId =
+                /^(ExePackage|MsiPackage|MspPackage|PackageGroupRef)$/.test(key)
+                  ? safeLabel(declaration?.["@Id"] || "unnamed package")
+                  : null;
+              add(
+                file,
+                declarationPointer,
+                0,
+                "configuration",
+                "resource",
+                protocol,
+                `${key}${packageId ? ` (${packageId})` : ""} declaration; effective values and applicability require review`,
+                "source-supported declaration; effective behavior unverified",
+              );
+              if (packageId)
+                dependencies.push({
+                  repository: source.name,
+                  path: file.path,
+                  pointer: declarationPointer,
+                  name: packageId,
+                  basis:
+                    "installer package declaration; installed state and consumers unverified",
+                });
+            });
           }
           if (
             [
