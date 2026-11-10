@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { parseInventory, MAX_UPLOAD } from "./inventory.mjs";
+import { publicModelConfig } from "./model-review.mjs";
 import { compose, validateManifest } from "./engine.mjs";
 import { reportHtml, diagram } from "./report.mjs";
 
@@ -22,6 +23,8 @@ export async function serve({
   githubToken,
   quiet = false,
   initialManifest,
+  modelConfig,
+  includeSourceExcerpts = false,
 }) {
   const root = await fs.realpath(sourceRoot),
     token = randomBytes(32).toString("hex");
@@ -90,6 +93,8 @@ export async function serve({
           ...job,
           sourceRoot: root,
           githubConfigured: Boolean(githubToken),
+          inference: publicModelConfig(modelConfig),
+          defaultSourceExcerpts: includeSourceExcerpts,
         });
       if (req.method === "GET" && url.pathname === "/api/manifest")
         return send(200, manifest || null);
@@ -110,10 +115,24 @@ export async function serve({
           return send(409, { error: "An analysis is already running" });
         manifest = await body(req);
         validateManifest(manifest);
+        if (manifest.analysis?.useModel === true && !modelConfig)
+          throw new Error(
+            "Start the server with --provider and --model before requesting model review",
+          );
         model = null;
         job = { status: "running", message: "Starting static source analysis" };
         worker = new Worker(new URL("./worker.mjs", import.meta.url), {
-          workerData: { manifest, options: { sourceRoot: root, githubToken } },
+          workerData: {
+            manifest,
+            options: {
+              sourceRoot: root,
+              githubToken,
+              modelConfig:
+                manifest.analysis?.useModel === true ? modelConfig : null,
+              includeSourceExcerpts:
+                manifest.analysis?.includeSourceExcerpts === true,
+            },
+          },
           resourceLimits: { maxOldGenerationSizeMb: 768 },
         });
         const active = worker;
@@ -136,7 +155,10 @@ export async function serve({
             model = m.model;
             job = {
               status: "ready",
-              message: "Draft ready for review; coverage gaps remain",
+              message:
+                model.aiReview?.status === "failed"
+                  ? "Static draft ready; model review FAILED. See model review details."
+                  : "Draft ready for review; coverage gaps remain",
             };
             clearTimeout(activeTimer);
           }
@@ -219,7 +241,7 @@ export async function serve({
   const url = `http://127.0.0.1:${server.address().port}/#${token}`;
   if (!quiet)
     process.stdout.write(
-      `Synthesis static pilot\nSource root: ${root}\nOpen this local access link:\n${url}\nNo AI provider. Sources are read only. Stop with Ctrl+C.\n`,
+      `Synthesis static pilot\nSource root: ${root}\nOpen this local access link:\n${url}\nModel: ${modelConfig ? modelConfig.provider + " / " + modelConfig.model : "none"}. Sources are read only. Stop with Ctrl+C.\n`,
     );
   server.on("close", () => {
     clearTimeout(timer);

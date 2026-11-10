@@ -11,7 +11,8 @@ let repositories = [],
   onlySelected = false,
   page = 0,
   polling,
-  diagramUrl;
+  diagramUrl,
+  inferenceInitialized = false;
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -125,6 +126,18 @@ $("add-form").onsubmit = (event) => {
 async function status() {
   const s = await api("status");
   $("root").textContent = s.sourceRoot;
+  if (!inferenceInitialized) {
+    inferenceInitialized = true;
+    $("model-config").textContent = s.inference
+      ? `${s.inference.label} · ${s.inference.model}. Model and key are configured on this machine.`
+      : "Static discovery only. To enable Claude or Gemini, restart with --provider and --model and the provider key in the environment.";
+    $("use-model").disabled = !s.inference;
+    $("use-model").checked = Boolean(s.inference);
+    $("source-excerpts").disabled = !s.inference;
+    $("source-excerpts").checked = Boolean(
+      s.inference && s.defaultSourceExcerpts,
+    );
+  }
   $("analyze").disabled = s.status === "running";
   $("cancel").hidden = s.status !== "running";
   if (s.status === "running") message(s.message);
@@ -148,6 +161,11 @@ $("analyze").onclick = async () => {
       profile: $("profile").value,
       repositories,
       declarations: manifestDeclarations,
+      analysis: {
+        useModel: $("use-model").checked,
+        includeSourceExcerpts:
+          $("use-model").checked && $("source-excerpts").checked,
+      },
     });
     model = null;
     $("analyze").disabled = true;
@@ -201,6 +219,7 @@ function renderModel() {
           `<div class="card"><strong>${esc(s.name)}</strong> <span class="badge">${esc(s.scope)}</span><span class="badge unknown">${esc(s.status)}</span><p>${s.coverage ? `${s.coverage.inspected} files inspected · ${s.coverage.unsupported} unsupported · ${s.coverage.failed} failed · ${s.coverage.oversized} oversized · ${s.coverage.excluded} exclusions · ${s.coverage.truncated ? "TRUNCATED" : "within collection limits"}` : "Source unavailable; this repository has not been assessed."}</p><div class="evidence">${esc(s.revision || s.snapshot || "")}<br>${esc(s.revisionBasis || "")}</div></div>`,
       )
       .join("");
+  renderAIReview();
   renderInterfaces();
   $("threats").innerHTML =
     `<p>${model.threats.length} conditional scenarios. Showing the first 50; all scenarios are included in exports.</p>` +
@@ -238,6 +257,45 @@ function renderModel() {
     )
     .join("");
   updateDiagram().catch((e) => message(e.message, true));
+}
+$("use-model").onchange = () => {
+  $("source-excerpts").disabled = !$("use-model").checked;
+};
+function renderAIReview() {
+  const a = model.aiReview;
+  if (!a) {
+    $("ai-review").textContent =
+      "No model requested. Conditional scenarios below are rule-based review prompts.";
+    return;
+  }
+  const refs = (ids) =>
+    ids
+      .map((id) => {
+        const e = model.evidence.find((e) => e.id === id);
+        return e ? `${e.repository}/${e.path}:${e.line} [${id}]` : id;
+      })
+      .join("; ");
+  const label = (id) => {
+    const i = model.interfaces.find((i) => i.id === id);
+    return i ? `${i.repository} · ${i.operation} [${id}]` : id;
+  };
+  $("ai-review").innerHTML =
+    `<div class="card"><strong>${esc(a.label)} · ${esc(a.model)} · ${esc(a.status)}</strong><p>${a.coverage.submittedInterfaces} of ${a.coverage.totalInterfaces} records submitted; ${a.coverage.omittedInterfaces} omitted. Mode: ${esc(a.mode)}; ${a.coverage.excerptCount} excerpts. Submission does not imply complete analysis.</p><p>${esc(a.error || a.summary || "")}</p><p class="hint">Model inferences are conditional and unverified. Severity remains unassessed. Suggestions do not alter the DFD. ${a.status === "stale" ? "These suggestions are stale; rerun analysis before using them." : ""}</p></div>` +
+    (a.threats || [])
+      .map(
+        (t) =>
+          `<div class="card"><h3>${esc(t.title)}</h3><span class="badge unknown">Model-inferred · Needs review · ${esc(t.category)}</span><p>${esc(t.scenario)}</p><p><strong>Actor / starting access:</strong> ${esc(t.actor)} / ${esc(t.startingAccess)}</p><p><strong>Asset:</strong> ${esc(t.asset)}</p><p><strong>Prerequisites:</strong> ${esc(t.prerequisites)}</p><p><strong>Controls:</strong> ${esc(t.controls)}</p><p><strong>Review and mitigation:</strong> ${esc(t.mitigation)}</p><p class="evidence">${esc(refs(t.evidenceIds))}</p></div>`,
+      )
+      .join("") +
+    (a.connections || [])
+      .map(
+        (c) =>
+          `<div class="card"><h3>Proposed connection · Not in DFD</h3><p>${esc(label(c.from))} → ${esc(label(c.to))}</p><p>${esc(c.reason)}</p>${c.transition ? `<p><strong>Possible ${esc(c.transition.dimension)} transition:</strong> ${esc(c.transition.before)} → ${esc(c.transition.after)}. ${esc(c.transition.reason)}</p>` : "<p>Trust transition not established.</p>"}<p class="evidence">${esc(refs(c.evidenceIds))}</p><p>Inspect the cited source, then use Connect and export to declare a justified connection.</p></div>`,
+      )
+      .join("") +
+    (a.questions || [])
+      .map((q) => `<p class="hint">Review question: ${esc(q)}</p>`)
+      .join("");
 }
 function renderInterfaces() {
   if (!model) return;

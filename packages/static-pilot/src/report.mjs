@@ -58,6 +58,40 @@ export function diagram(model) {
 function table(headers, rows) {
   return `<div class="table"><table><thead><tr>${headers.map((h) => `<th>${escape(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${escape(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
+export function modelReviewHtml(model) {
+  const a = model.aiReview;
+  if (!a)
+    return "<h2>Model review</h2><p>No model requested. Conditional scenarios are rule-based review prompts.</p>";
+  const refs = (ids) =>
+    ids
+      .map((id) => {
+        const e = model.evidence.find((e) => e.id === id);
+        return e ? `${e.repository}/${e.path}:${e.line} [${id}]` : id;
+      })
+      .join("; ");
+  return (
+    `<h2>Model review · ${escape(a.label)} / ${escape(a.model)}</h2><p class="notice">Status: ${escape(a.status)}. Model-inferred suggestions require human review; severity is unassessed. They do not establish source facts or add accepted DFD connections. ${escape(a.error || "")}</p><p>${a.coverage.submittedInterfaces} of ${a.coverage.totalInterfaces} interface records submitted; ${a.coverage.omittedInterfaces} omitted. Mode: ${escape(a.mode)}; ${a.coverage.excerptCount} excerpts; ${a.coverage.packetBytes} packet bytes. Submission is not semantic coverage.</p><p>${escape(a.summary || "")}</p><small>Prompt ${escape(a.promptVersion)} / ${escape(a.promptHash)} · Packet ${escape(a.packetHash)} · Response ${escape(a.responseHash || "unavailable")} · Based on revision ${escape(a.basedOnRevision)}</small>` +
+    (a.threats || [])
+      .map(
+        (t) =>
+          `<article><h3>${escape(t.title)}</h3><small>${escape(t.id)} · ${escape(t.category)} · Model-inferred · Needs review</small><p>${escape(t.scenario)}</p><p><strong>Actor / initial access:</strong> ${escape(t.actor)} / ${escape(t.startingAccess)}</p><p><strong>Asset:</strong> ${escape(t.asset)}</p><p><strong>Prerequisites:</strong> ${escape(t.prerequisites)}</p><p><strong>Controls:</strong> ${escape(t.controls)}</p><p><strong>Review and mitigation:</strong> ${escape(t.mitigation)}</p><p><strong>Interfaces:</strong> ${escape(t.interfaceIds.join(", "))}</p><p><strong>Evidence:</strong> ${escape(refs(t.evidenceIds))}</p></article>`,
+      )
+      .join("") +
+    `<h3>Proposed connections · Not accepted DFD edges</h3>` +
+    table(
+      ["Endpoints", "Rationale", "Possible trust transition", "Evidence"],
+      (a.connections || []).map((c) => [
+        c.from + " → " + c.to,
+        c.reason,
+        c.transition
+          ? `${c.transition.dimension}: ${c.transition.before} → ${c.transition.after}; ${c.transition.reason}`
+          : "Unknown",
+        refs(c.evidenceIds),
+      ]),
+    ) +
+    `<h3>Questions for source review</h3><ul>${(a.questions || []).map((q) => `<li>${escape(q)}</li>`).join("")}</ul>`
+  );
+}
 export function reportHtml(model) {
   const interfaces = new Map(model.interfaces.map((i) => [i.id, i]));
   const evidence = new Map(model.evidence.map((e) => [e.id, e]));
@@ -70,7 +104,7 @@ export function reportHtml(model) {
           : k;
       })
       .join("\n");
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${escape(model.title)}</title><style>body{font:15px/1.55 system-ui,sans-serif;color:#20342e;background:#f7f9f6;margin:0}main{max-width:1200px;margin:auto;padding:40px}h1{font-size:34px}h2{margin-top:36px}small{color:#52645b}.notice{border-left:4px solid #bd862c;padding:16px;background:#fff5dd}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d6e0d9;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf3ed}.table{overflow:auto}article{padding:20px;background:white;border:1px solid #d6e0d9;margin:15px 0;break-inside:avoid}svg{width:100%;height:auto}code{overflow-wrap:anywhere}@media print{body{background:white}main{padding:0;max-width:none}table{font-size:10px}h2{break-after:avoid}.table{overflow:visible}svg{display:none}.print-note{display:block}}@media screen{.print-note{display:none}}</style><main><h1>${escape(model.title)}</h1><p>${escape(model.profile)} · Static-only · Draft with gaps · No AI provider</p><p class="notice">This is a review draft of selected sources and dependencies. Candidate interfaces and conditional scenarios are not confirmed vulnerabilities or evidence of deployed reachability. No whole-product coverage or security approval is implied.</p><small>Engine ${escape(model.engine)} · Created ${escape(model.createdAt)} · Model revision ${escape(model.modelRevision)}</small><h2>Scope and coverage</h2><p>${model.sources.length} selected of ${model.inventoryCount} inventory repositories. ${model.interfaces.length} interfaces/control references; ${model.flows.length} declared flows; ${model.boundaries.length} declared trust transitions.</p>${table(
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${escape(model.title)}</title><style>body{font:15px/1.55 system-ui,sans-serif;color:#20342e;background:#f7f9f6;margin:0}main{max-width:1200px;margin:auto;padding:40px}h1{font-size:34px}h2{margin-top:36px}small{color:#52645b}.notice{border-left:4px solid #bd862c;padding:16px;background:#fff5dd}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d6e0d9;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf3ed}.table{overflow:auto}article{padding:20px;background:white;border:1px solid #d6e0d9;margin:15px 0;break-inside:avoid}svg{width:100%;height:auto}code{overflow-wrap:anywhere}@media print{body{background:white}main{padding:0;max-width:none}table{font-size:10px}h2{break-after:avoid}.table{overflow:visible}svg{display:none}.print-note{display:block}}@media screen{.print-note{display:none}}</style><main><h1>${escape(model.title)}</h1><p>${escape(model.profile)} · Static-only · Draft with gaps · ${escape(model.aiReview ? model.aiReview.label + " / " + model.aiReview.model : "No AI provider")}</p><p class="notice">This is a review draft of selected sources and dependencies. Candidate interfaces and conditional scenarios are not confirmed vulnerabilities or evidence of deployed reachability. No whole-product coverage or security approval is implied.</p><small>Engine ${escape(model.engine)} · Created ${escape(model.createdAt)} · Model revision ${escape(model.modelRevision)}</small><h2>Scope and coverage</h2><p>${model.sources.length} selected of ${model.inventoryCount} inventory repositories. ${model.interfaces.length} interfaces/control references; ${model.flows.length} declared flows; ${model.boundaries.length} declared trust transitions.</p>${table(
     ["Repository / scope", "Snapshot / revision", "Coverage"],
     model.sources.map((s) => [
       s.name + " / " + s.scope,
@@ -79,7 +113,7 @@ export function reportHtml(model) {
         ? `${s.coverage.inspected} inspected; ${s.coverage.unsupported} unsupported; ${s.coverage.oversized} oversized; ${s.coverage.failed} failed; ${s.coverage.excluded} exclusions (excluded directories are not recursively counted); truncated: ${s.coverage.truncated}`
         : "unavailable",
     ]),
-  )}<h2>Interpretation limits</h2><ul>${model.limitations.map((l) => `<li>${escape(l)}</li>`).join("")}</ul><h2>DFD review sheets</h2><p>Each sheet preserves a flow or unresolved interface; grouping by source is not a process or trust-boundary assertion. Full labels and evidence are in the registers below.</p><p class="print-note">SVG diagrams are supplied separately; use the complete flow and interface registers below in a printed report.</p>${diagram(model)}<h2>Declared flows</h2>${table(
+  )}<h2>Interpretation limits</h2><ul>${model.limitations.map((l) => `<li>${escape(l)}</li>`).join("")}</ul><h2>DFD review sheets</h2><p>Each sheet preserves a flow or unresolved interface; grouping by source is not a process or trust-boundary assertion. Full labels and evidence are in the registers below.</p><p class="print-note">SVG diagrams are supplied separately; use the complete flow and interface registers below in a printed report.</p>${diagram(model)}${modelReviewHtml(model)}<h2>Declared flows</h2>${table(
     ["ID / operation", "Endpoints", "Data and controls", "Basis"],
     model.flows.map((f) => [
       f.id + "\n" + f.operation,

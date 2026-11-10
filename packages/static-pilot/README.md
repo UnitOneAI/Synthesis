@@ -1,12 +1,12 @@
 # Static multi-repository pilot
 
-Local source review with no AI provider or target-system access. Import XLSX/CSV inventory, select primary and supporting sources, inspect evidence, declare connections and trust transitions, and export HTML, SVG and JSON.
+Local source review with optional Claude or Gemini analysis and no target-system access. Import XLSX/CSV inventory, select primary and supporting sources, inspect evidence, declare connections and trust transitions, and export HTML, SVG and JSON.
 
 **This is a discovery and review pilot, not the completed Synthesis architecture.** Code collectors are bounded lexical recognizers. They do not establish effective authorization, complete call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
 
 ## Run tonight
 
-Prerequisites: **Node.js 22 or later**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, Python, database, application services or AI keys are needed.
+Prerequisites: **Node.js 22 or later**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, Python, database or application services are needed. Provider-free discovery needs no AI key; model review requires the selected provider key.
 
 From the Synthesis repository:
 
@@ -24,15 +24,50 @@ To preload a prepared inventory selection, append `--manifest "/private/scope.js
 2. Select the installer and any justified supporting repositories. Original selection remains separate from current selection. No customer-specific defaults are embedded in this generic tool.
 3. Name one product variant/release profile. Naming a profile does not evaluate conditional installer/preprocessor branches; verify source applicability during review.
 4. Map folders relative to the source root. For GitHub, choose GitHub and supply `https://github.com/owner/repository` plus an optional ref. It resolves to a pinned commit. Private access requires a server-side `GITHUB_TOKEN` with read access; never put credentials in URLs.
-5. Analyze and review coverage. Missing sources, unsupported formats, parse failures and limits remain visible. File inspection is not semantic coverage. Source excerpts/configuration values are omitted from exports; inspect referenced files locally.
+5. Analyze and review coverage. Missing sources, unsupported formats, parse failures and limits remain visible. File inspection is not semantic coverage. Raw source excerpts/configuration values are omitted from exports; inspect referenced files locally. Optional model-generated text may paraphrase or quote submitted source, so treat reports as confidential.
 6. In **Connect and export**, select interface endpoints and give a rationale. Add data, controls and a trust transition only when justified. Declarations stay declared. Reviewer names are attribution, not authenticated organizational risk approval.
 7. Export HTML, SVG, full model JSON and the reusable manifest. Reports are self-contained with no network assets. SVG contains all flow sheets; registers retain full labels. Printing HTML omits the long SVG, so retain the separate diagram file. Native paginated PDF is not implemented.
+
+## Claude or Gemini underneath
+
+Choose an organization-approved provider and an available model ID. Model IDs are configurable and are never silently replaced. Set the key in the **server environment**, using your normal secret-management process; never put it in a manifest, source URL or browser field.
+
+| Provider | Flag | Key environment variable | Network destination |
+| --- | --- | --- | --- |
+| Claude | `--provider anthropic` | `ANTHROPIC_API_KEY` | `api.anthropic.com` |
+| Gemini | `--provider gemini` | `GOOGLE_GEMINI_API_KEY` | `generativelanguage.googleapis.com` |
+
+```sh
+# The key must already be in this process's environment.
+node src/cli.mjs serve --source-root "/private/clones" --manifest "/private/scope.json" --provider anthropic --model YOUR_APPROVED_CLAUDE_MODEL
+
+# Alternative provider, same analysis and export workflow:
+node src/cli.mjs serve --source-root "/private/clones" --provider gemini --model YOUR_APPROVED_GEMINI_MODEL
+```
+
+`SYNTHESIS_LLM_PROVIDER` and `SYNTHESIS_LLM_MODEL` are optional environment alternatives to the flags. `--provider none` explicitly disables inference even when an environment provider is set. Direct Anthropic and Gemini APIs are implemented; Bedrock, Vertex AI, Azure and custom gateways are not yet adapters in this package.
+
+The **Model review** area shows the configured provider and model. Starting the server with a provider enables the review checkbox by default; you can turn it off before analysis. Metadata-only mode sends repository names, file locations, operation labels, source hashes, evidence references, profile and relevant reviewer declarations. It does not send entire repositories or the inventory. Check **Include bounded, redacted source excerpts** for additional local code context. To preselect excerpts, add `--include-source-excerpts`; on the CLI this flag opts into sending them. Redaction is best effort, not a guarantee that all sensitive content is removed. Use a provider approved for the chosen data. The model has no tools or target-system access.
+
+The same options work with `analyze`:
+
+```sh
+node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-model-report --provider anthropic --model YOUR_APPROVED_CLAUDE_MODEL --include-source-excerpts
+```
+
+Each run sends **one packet**, selected round-robin across repositories: at most **120 interface/control records and 96 KiB**, with partial excerpts of at most 12 lines / 1,600 characters each. The response budget is 8,192 tokens, with a 120-second timeout and a 1 MiB response limit. Large portfolios are not fully reviewed by this first model layer. The UI and report state submitted and omitted record counts; narrow scope for deeper review. Neither submission nor file inspection measures semantic completeness.
+
+Results are separately labeled **model-inferred / needs review** and must cite valid collected evidence IDs. Suggestions contain actor assumptions, prerequisites, assets, conditional threats, control uncertainty, mitigation questions and possible interface/authority transitions. Schema and citation checks reject fabricated references; they cannot prove the model's reasoning correct. Suggestions never create accepted DFD edges or establish controls/vulnerabilities. Review source before declaring a connection. Changing declarations marks prior suggestions stale. Reanalysis is required to refresh them.
+
+Provider/model, prompt version/hash, packet hash, response hash, reviewed record IDs and base model revision are retained in JSON. Raw request/response bodies and keys are not retained. Generated text can still disclose source details. There is **no automatic retry, alternate-provider fallback or demo result**. A rejected, truncated or malformed response produces a visible failure and retains the static draft. HTML exports include model suggestions and status; SVG keeps the reviewer-declared DFD.
+
+Protocol references: [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create) and [Gemini generateContent](https://ai.google.dev/api/generate-content). Provider availability and access policy must be checked in the customer's environment.
 
 ## Offline transfer
 
 On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies are JavaScript-only; no customer-side dependency installation is needed. Node.js 22+ must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.
 
-Local-source mode needs no network. Optional GitHub acquisition uses `api.github.com` and `codeload.github.com`, never runtime destinations found in code. Keep customer workbooks, manifests, reports, tokens and source outside the public Synthesis checkout. Exports can contain private repository names and architectural metadata even without source excerpts.
+Local-source mode with model review disabled needs no network. Optional GitHub acquisition uses `api.github.com` and `codeload.github.com`, never runtime destinations found in code. Keep customer workbooks, manifests, reports, tokens and source outside the public Synthesis checkout. Exports can contain private repository names and architectural metadata even without source excerpts.
 
 ## CLI
 
@@ -41,7 +76,7 @@ node src/cli.mjs import --inventory /private/inventory.xlsx --profile "Server / 
 node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-report
 ```
 
-Import refuses to overwrite a manifest. Analysis requires a new output directory outside the source root. Outputs: `model.json`, `threat-model.html`, `dfd.svg`. Exit 2 means a source was unavailable, exit 1 means invalid input/fatal failure, and exit 0 means a draft was generated—not that security or completeness was established.
+Import refuses to overwrite a manifest. Analysis requires a new output directory outside the source root. Outputs: `model.json`, `threat-model.html`, `dfd.svg`. Exit 2 means a source was unavailable, exit 3 means the requested model review failed (the static draft is still exported), exit 1 means invalid input/fatal failure, and exit 0 means a draft was generated—not that security or completeness was established.
 
 Minimal manifest:
 

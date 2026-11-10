@@ -11,7 +11,7 @@
     <header>
       <a class="brand" href="/">S<span>ynthesis</span></a
       ><span class="pill">STATIC ONLY</span
-      ><span class="muted">Local workspace · No AI provider</span>
+      ><span class="muted">Local workspace · Optional model review</span>
     </header>
     <main>
       <section class="intro">
@@ -107,10 +107,30 @@
             <tbody id="repositories"></tbody>
           </table>
         </div>
+        <div class="source-root">
+          <h3>Model review</h3>
+          <p id="model-config">Checking provider configuration…</p>
+          <label
+            ><input id="use-model" type="checkbox" disabled /> Use the
+            configured model to suggest threats and connections</label
+          >
+          <label
+            ><input id="source-excerpts" type="checkbox" disabled /> Include
+            bounded, redacted source excerpts</label
+          >
+          <p id="model-disclosure" class="hint">
+            Model review sends private architectural metadata (repository names,
+            file locations, operations and evidence references) to the
+            configured provider. Source excerpts are optional. Redaction is best
+            effort; use only a destination approved for this source. Models
+            cannot execute the application or approve connections.
+          </p>
+        </div>
         <div class="action-row">
           <p>
-            Reads source only. No application execution, installer execution,
-            runtime probing, or source submission to an AI provider.
+            Reads source only. No application execution, installer execution, or
+            runtime probing. Model review uses the choice above; it never runs
+            the target.
           </p>
           <button id="analyze">Analyze selected sources</button
           ><button id="cancel" class="secondary" hidden>Cancel</button>
@@ -129,6 +149,8 @@
         </div>
         <div id="summary" class="stats"></div>
         <div id="coverage"></div>
+        <h3>Model suggestions · Human review required</h3>
+        <div id="ai-review"></div>
         <div class="toolbar">
           <h3>Interfaces and control references</h3>
           <input

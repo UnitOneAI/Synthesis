@@ -6,6 +6,7 @@ import { analyze } from "./engine.mjs";
 import { parseInventory } from "./inventory.mjs";
 import { serve } from "./server.mjs";
 import { reportHtml, diagram } from "./report.mjs";
+import { modelConfig } from "./model-review.mjs";
 import { within } from "./sources.mjs";
 
 const { values, positionals } = parseArgs({
@@ -18,6 +19,9 @@ const { values, positionals } = parseArgs({
     out: { type: "string" },
     profile: { type: "string" },
     add: { type: "string", multiple: true },
+    provider: { type: "string" },
+    model: { type: "string" },
+    "include-source-excerpts": { type: "boolean" },
     help: { type: "boolean" },
   },
 });
@@ -25,10 +29,21 @@ const [command] = positionals;
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution and no AI-provider access.',
+      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|gemini --model <approved-model-id> [--include-source-excerpts]. Keys: ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY (environment only).',
     );
     return;
   }
+  const inference =
+    command === "import"
+      ? null
+      : modelConfig(
+          values.provider || process.env.SYNTHESIS_LLM_PROVIDER || "none",
+          values.model || process.env.SYNTHESIS_LLM_MODEL,
+        );
+  if (values["include-source-excerpts"] && !inference)
+    throw new Error(
+      "Source excerpts require an explicitly configured provider",
+    );
   if (command === "serve") {
     if (!values["source-root"])
       throw new Error("Specify --source-root explicitly");
@@ -39,6 +54,8 @@ async function main() {
       sourceRoot: values["source-root"],
       port,
       githubToken: process.env.GITHUB_TOKEN,
+      modelConfig: inference,
+      includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
       initialManifest: values.manifest
         ? JSON.parse(await fs.readFile(values.manifest, "utf8"))
         : undefined,
@@ -93,6 +110,8 @@ async function main() {
       {
         sourceRoot: root,
         githubToken: process.env.GITHUB_TOKEN,
+        modelConfig: inference,
+        includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
         progress: console.log,
       },
     );
@@ -108,7 +127,14 @@ async function main() {
     console.log(
       `Draft with gaps: ${model.interfaces.length} interface/control candidates, ${model.flows.length} declared flows. Reports: ${output}`,
     );
-    if (model.sources.some((s) => s.status === "unavailable"))
+    if (model.aiReview?.status === "failed") {
+      console.error(
+        "Model review failed: " +
+          model.aiReview.error +
+          ". Static draft exported.",
+      );
+      process.exitCode = 3;
+    } else if (model.sources.some((s) => s.status === "unavailable"))
       process.exitCode = 2;
     return;
   }

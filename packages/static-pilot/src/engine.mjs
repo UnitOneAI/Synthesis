@@ -2,7 +2,9 @@ import path from "node:path";
 import { id, sha, localSource, githubSource } from "./sources.mjs";
 import { parseXml } from "./inventory.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.1.0";
+import { collectExcerpts, enrichModel } from "./model-review.mjs";
+
+export const ENGINE_VERSION = "static-pilot-0.2.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -661,6 +663,14 @@ export function compose(model, declarations = {}) {
       declarations: model.declarations,
     }),
   );
+  if (
+    model.aiReview &&
+    model.aiReview.basedOnRevision !== model.modelRevision
+  ) {
+    model.aiReview.status = "stale";
+    model.aiReview.error =
+      "Declarations changed; rerun analysis before using these model suggestions";
+  }
   return model;
 }
 export function validateManifest(manifest) {
@@ -676,6 +686,20 @@ export function validateManifest(manifest) {
     manifest.profile.length > 200
   )
     throw new Error("Choose one named product/configuration profile");
+  if (manifest.analysis != null) {
+    if (
+      typeof manifest.analysis !== "object" ||
+      Array.isArray(manifest.analysis)
+    )
+      throw new Error("Invalid analysis options");
+    for (const key of ["useModel", "includeSourceExcerpts"]) {
+      if (
+        manifest.analysis[key] !== undefined &&
+        typeof manifest.analysis[key] !== "boolean"
+      )
+        throw new Error("Model choices must be true or false");
+    }
+  }
   const selected = manifest.repositories.filter((r) => r.selected !== false);
   if (!selected.length || selected.length > 100)
     throw new Error("Select 1–100 repositories for one analysis");
@@ -706,6 +730,7 @@ export function validateManifest(manifest) {
 }
 export async function analyze(manifest, options = {}) {
   const selected = validateManifest(manifest);
+  const excerpts = new Map();
   const model = {
     schemaVersion: 1,
     engine: ENGINE_VERSION,
@@ -727,7 +752,7 @@ export async function analyze(manifest, options = {}) {
       "Source grouping does not establish executable processes. No trust boundary is inferred from a repository boundary.",
       "Only explicit reviewer bindings form cross-component flows. Missing bindings remain unresolved.",
       "Conditional threat scenarios are review prompts, not verified vulnerabilities. Severity is unassessed.",
-      "No target code, builds, installers, tests, hooks, runtime APIs, or AI providers are executed or contacted.",
+      "No target code, builds, installers, tests, hooks or runtime APIs are executed or contacted. Optional inference sends a bounded evidence packet only to the configured provider.",
       "Installation variants and runtime permissions require separate review within the selected profile.",
     ],
   };
@@ -758,6 +783,8 @@ export async function analyze(manifest, options = {}) {
         continue;
       }
       const result = extract(source, snapshot.files);
+      if (options.modelConfig && options.includeSourceExcerpts)
+        collectExcerpts(result, snapshot.files, excerpts);
       for (const key of [
         "components",
         "interfaces",
@@ -804,5 +831,12 @@ export async function analyze(manifest, options = {}) {
           "Dependency declaration resembles an inventory name; confirm package ownership before adding supporting scope",
       })),
   );
-  return compose(model, manifest.declarations || {});
+  compose(model, manifest.declarations || {});
+  if (options.modelConfig) {
+    options.progress?.(
+      "Requesting bounded model review; source collection remains static-only",
+    );
+    await enrichModel(model, options.modelConfig, excerpts, options.modelFetch);
+  }
+  return model;
 }
