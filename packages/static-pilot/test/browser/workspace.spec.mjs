@@ -183,7 +183,16 @@ test("actor, boundary and domain declarations save, edit and survive restart", a
 test("STRIDE, threat details, evidence and every register export remain connected", async ({
   page,
 }) => {
-  await tab(page, "STRIDE matrix");
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  await expect(page.locator("#workspace")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Run or continue STRIDE analysis",
+      exact: true,
+    }),
+  ).toBeDisabled();
   await page.getByLabel("Rows", { exact: true }).selectOption("component");
   await expect(
     page.locator(".ws-matrix th").filter({ hasText: "Elevation of privilege" }),

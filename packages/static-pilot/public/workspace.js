@@ -18,6 +18,11 @@
     notify,
     update,
     s,
+    startReview,
+    stopReview,
+    providerAvailable = false,
+    jobState = { status: "idle" },
+    requestBudget = 12,
     threatIndex = new Map(),
     selected = "",
     view = "system",
@@ -254,7 +259,9 @@
       return;
     }
     if (view === "matrix") {
-      body.innerHTML = `<div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "boundary"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label><button data-start-review>Run or continue STRIDE analysis</button></div><p class="hint">Scenario counts and checklist items are separate. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+      const review = model.aiReview,
+        c = review?.coverage;
+      body.innerHTML = `<div class="ws-analysis"><div><strong>${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "boundary"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Scenario counts and checklist items are separate. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
         .filter((r) => r.rowKind === (window.wsRowKind || "boundary"))
         .map(
           (r) =>
@@ -498,7 +505,19 @@
       page++;
       renderBody();
     } else if (b.hasAttribute("data-start-review")) {
-      document.querySelector('[data-tab="stride"]').click();
+      try {
+        b.disabled = true;
+        requestBudget = Number(root.querySelector("#ws-request-budget").value);
+        await startReview(requestBudget);
+      } catch (error) {
+        notify(error.message, true);
+      }
+    } else if (b.hasAttribute("data-stop-review")) {
+      try {
+        await stopReview();
+      } catch (error) {
+        notify(error.message, true);
+      }
     } else if (b.id === "ws-export") {
       const panel = root.querySelector("#ws-export-panel");
       panel.hidden = !panel.hidden;
@@ -547,6 +566,7 @@
   });
   root.addEventListener("change", (event) => {
     const id = event.target.id;
+    if (id === "ws-request-budget") requestBudget = Number(event.target.value);
     if (id === "ws-level") level = event.target.value;
     if (id === "ws-lens") lens = event.target.value;
     if (id === "ws-focus") {
@@ -598,8 +618,24 @@
       model = value;
       s = value.systemModel;
       threatIndex = new Map((s?.threats || []).map((t) => [t.id, t]));
-      ({ api, download, notify, update } = callbacks);
+      ({
+        api,
+        download,
+        notify,
+        update,
+        startReview,
+        stopReview,
+        providerAvailable,
+      } = callbacks);
       if (s) render();
+    },
+    setStatus(value) {
+      jobState = value;
+      const run = root.querySelector("[data-start-review]"),
+        stop = root.querySelector("[data-stop-review]");
+      if (run) run.disabled = !value.inference || value.status === "running";
+      if (stop)
+        stop.hidden = !(value.status === "running" && value.mode === "review");
     },
     showMatrix() {
       view = "matrix";

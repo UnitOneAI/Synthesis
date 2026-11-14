@@ -45,12 +45,22 @@ async function api(route, data) {
   return response.json();
 }
 function tab(name) {
+  const matrixTab = name === "stride" && model && window.SynthesisWorkspace;
+  if (matrixTab) {
+    name = "workspace";
+    window.SynthesisWorkspace.showMatrix();
+  }
   document
     .querySelectorAll(".panel")
     .forEach((p) => (p.hidden = p.id !== name));
   document
     .querySelectorAll("[data-tab]")
-    .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    .forEach((b) =>
+      b.classList.toggle(
+        "active",
+        matrixTab ? b.dataset.tab === "stride" : b.dataset.tab === name,
+      ),
+    );
 }
 document
   .querySelectorAll("[data-tab]")
@@ -138,6 +148,7 @@ $("add-form").onsubmit = (event) => {
 async function status() {
   const s = await api("status");
   $("root").textContent = s.sourceRoot;
+  window.SynthesisWorkspace?.setStatus(s);
   if (!inferenceInitialized) {
     inferenceInitialized = true;
     providerAvailable = Boolean(s.inference);
@@ -226,6 +237,15 @@ function renderModel() {
     api,
     download,
     notify: message,
+    providerAvailable,
+    startReview: async (budget) => {
+      $("review-budget").value = budget;
+      await $("run-review").onclick();
+      await status();
+    },
+    stopReview: async () => {
+      await $("cancel-review").onclick();
+    },
     update: (value) => {
       model = value;
       renderModel();
