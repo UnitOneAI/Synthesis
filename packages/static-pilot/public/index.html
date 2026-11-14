@@ -24,8 +24,10 @@
       </section>
       <nav aria-label="Workflow">
         <button data-tab="sources" class="active">1 · Sources</button
-        ><button data-tab="model">2 · Evidence and model</button
-        ><button data-tab="review">3 · Connect and export</button>
+        ><button data-tab="graph">2 · Source graph</button
+        ><button data-tab="review">3 · Data flows</button
+        ><button data-tab="stride">4 · STRIDE matrix</button
+        ><button data-tab="model">Evidence and details</button>
       </nav>
       <div id="message" role="status" aria-live="polite"></div>
       <section id="sources" class="panel">
@@ -75,7 +77,7 @@
               id="repo-name"
               placeholder="orders-service"
               required
-              pattern="[A-Za-z0-9_.-]+" /></label
+              pattern="[A-Za-z0-9_.\-]+" /></label
           ><label
             >Local folder or GitHub URL<input
               id="repo-location"
@@ -112,11 +114,11 @@
           <p id="model-config">Checking provider configuration…</p>
           <label
             ><input id="use-model" type="checkbox" disabled /> Use the
-            configured model to suggest threats and connections</label
+            configured model in the STRIDE review stage</label
           >
           <label
             ><input id="source-excerpts" type="checkbox" disabled /> Include
-            bounded, redacted source excerpts</label
+            bounded, redacted source excerpts in the later review</label
           >
           <p id="model-disclosure" class="hint">
             Model review sends private architectural metadata (repository names,
@@ -129,11 +131,117 @@
         <div class="action-row">
           <p>
             Reads source only. No application execution, installer execution, or
-            runtime probing. Model review uses the choice above; it never runs
-            the target.
+            runtime probing. Build the graph first, review the DFD, then start
+            model review from the STRIDE matrix. Building the graph makes no
+            model calls.
           </p>
-          <button id="analyze">Analyze selected sources</button
+          <button id="analyze">Build source graph</button
           ><button id="cancel" class="secondary" hidden>Cancel</button>
+        </div>
+      </section>
+      <section id="graph" class="panel" hidden>
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">STATIC SOURCE EVIDENCE</p>
+            <h2>Understand the code before the threats</h2>
+            <p>
+              Declarations, call sites and project references, with source
+              locations. Unresolved calls remain unresolved.
+            </p>
+          </div>
+          <button data-go="review">Review data flows →</button>
+        </div>
+        <div id="graph-summary" class="stats"></div>
+        <div id="graph-coverage"></div>
+        <div class="toolbar">
+          <label
+            >Show<select id="graph-kind">
+              <option value="function">Functions and methods</option>
+              <option value="call">Call sites</option>
+              <option value="type">Classes and types</option>
+              <option value="dependency">Dependencies</option>
+              <option value="interface">Interfaces</option>
+            </select></label
+          ><input
+            id="graph-search"
+            aria-label="Find a graph node"
+            placeholder="Find a symbol, repository or file"
+          />
+        </div>
+        <div id="graph-nodes" class="table-wrap"></div>
+        <div class="downloads">
+          <button data-export="graph" class="secondary">
+            Source graph JSON</button
+          ><button data-export="graph-mermaid" class="secondary">
+            Graph preview Mermaid
+          </button>
+        </div>
+      </section>
+      <section id="stride" class="panel" hidden>
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">THREAT REVIEW</p>
+            <h2>STRIDE at a glance</h2>
+            <p>
+              Choose a cell to inspect scenarios, assumptions and source
+              evidence.
+            </p>
+          </div>
+          <div class="downloads">
+            <button data-export="stride" class="secondary">
+              Export matrix CSV</button
+            ><button data-export="html" class="secondary">Export report</button>
+          </div>
+        </div>
+        <div class="review-action">
+          <div>
+            <strong id="review-plan">Build the source graph first.</strong>
+            <p id="review-progress">
+              Each review action uses a bounded number of model requests.
+              Successful batches are retained in this session.
+            </p>
+          </div>
+          <label
+            >Requests per action<input
+              id="review-budget"
+              type="number"
+              min="1"
+              max="100"
+              value="12" /></label
+          ><button id="run-review" disabled>Run STRIDE review</button
+          ><button id="cancel-review" class="secondary" hidden>
+            Stop review
+          </button>
+        </div>
+        <p class="hint">
+          Starting review sends the selected evidence and graph context to the
+          configured provider. Continue processes pending or failed batches.
+          Export before closing; session results are not restored after restart.
+        </p>
+        <div class="toolbar">
+          <label
+            >Repository<select id="matrix-repository">
+              <option value="">All repositories</option>
+            </select></label
+          ><label
+            >Rows<select id="matrix-kind">
+              <option value="component">Components</option>
+              <option value="flow">Declared flows</option>
+            </select></label
+          >
+        </div>
+        <p class="matrix-legend">
+          <span>● AI scenarios to review</span><span>○ Rule prompts</span
+          ><span>— Not reviewed</span><span>? No scenario returned</span>
+        </p>
+        <div id="stride-matrix" class="table-wrap"></div>
+        <p class="hint">
+          No scenario returned does not mean safe. Counts describe draft
+          scenarios, not confirmed vulnerabilities. Rule prompts do not count as
+          model review.
+        </p>
+        <div id="stride-detail" aria-live="polite">
+          <p>Select a matrix cell to see its evidence and review questions.</p>
         </div>
       </section>
       <section id="model" class="panel" hidden>
@@ -236,13 +344,26 @@
           <button type="submit">Save connection declaration</button>
         </form>
         <div id="bindings"></div>
-        <h2>DFD review sheets</h2>
+        <h2>Data flow review sheets</h2>
         <p>
           Solid connections are declared. Dashed connections have an unknown
           endpoint. Source groupings are not automatically processes or trust
           domains.
         </p>
         <div id="diagram"></div>
+        <details>
+          <summary>Mermaid DFD source</summary>
+          <pre id="mermaid-preview">
+Build the graph to generate a DFD draft.</pre
+          >
+        </details>
+        <div class="action-row">
+          <p>
+            Review the unresolved endpoints and declare justified trust
+            transitions before interpreting threats.
+          </p>
+          <button data-go="stride">Open STRIDE matrix →</button>
+        </div>
         <h2>Export the review package</h2>
         <p>
           Keep the full evidence ledger with the report. Reports remain drafts;
@@ -252,6 +373,11 @@
           <button data-export="html">HTML threat model</button
           ><button data-export="svg" class="secondary">SVG diagrams</button
           ><button data-export="json" class="secondary">Full model JSON</button
+          ><button data-export="mermaid" class="secondary">Mermaid DFD</button
+          ><button data-export="stride" class="secondary">
+            STRIDE matrix CSV</button
+          ><button data-export="graph" class="secondary">
+            Source graph JSON</button
           ><button data-export="manifest" class="secondary">
             Manifest with declarations
           </button>

@@ -355,6 +355,91 @@ footer {
 [hidden] {
   display: none !important;
 }
+.review-action {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 0;
+  border-block: 1px solid #d3ddcf;
+}
+.review-action > div {
+  flex: 1;
+}
+.review-action p {
+  margin-bottom: 0;
+}
+.review-action input {
+  max-width: 100px;
+}
+.matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin: 24px 0 12px;
+  font-size: 13px;
+}
+.stride-table {
+  min-width: 960px;
+}
+.stride-table th {
+  position: static;
+}
+.stride-table thead th {
+  font-size: 12px;
+  max-width: 125px;
+}
+.stride-table tbody th {
+  background: transparent;
+  color: #213a31;
+  min-width: 200px;
+  max-width: 260px;
+  overflow-wrap: anywhere;
+}
+.stride-letter {
+  display: block;
+  font-size: 21px;
+  color: #294c3c;
+}
+.matrix-cell {
+  width: 100%;
+  min-height: 90px;
+  padding: 9px 6px;
+  border: 1px solid #d7dfd4;
+  background: #f7f9f5;
+  color: #526156;
+  font-size: 12px;
+  font-weight: 400;
+}
+.matrix-cell strong {
+  font-size: 19px;
+  display: block;
+}
+.matrix-cell span,
+.matrix-cell small {
+  display: block;
+  font-size: 12px;
+}
+.matrix-cell.has-threats {
+  background: #fff2d8;
+  color: #704a14;
+  border-color: #d8b775;
+}
+#stride-detail {
+  margin-top: 28px;
+}
+#mermaid-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+@media (max-width: 850px) {
+  .review-action {
+    flex-wrap: wrap;
+  }
+  .review-action > div {
+    flex-basis: 100%;
+  }
+}
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

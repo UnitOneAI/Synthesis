@@ -1,3 +1,6 @@
+import { strideMatrix, STRIDE } from "./graph-review.mjs";
+import { dfdMermaid } from "./graph-exports.mjs";
+
 export const escape = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -58,6 +61,21 @@ export function diagram(model) {
 function table(headers, rows) {
   return `<div class="table"><table><thead><tr>${headers.map((h) => `<th>${escape(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${escape(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
+function graphReport(model) {
+  const graph = model.sourceGraph;
+  const coverage = model.aiReview?.coverage;
+  return `<h2>Source graph coverage</h2>${graph ? `<p>${graph.nodes.length} nodes; ${graph.edges.length} relationships. ${graph.coverage.parsed} parsed files; ${graph.coverage.syntaxErrors} with syntax errors; ${graph.coverage.failed} parse failures; ${graph.coverage.unsupported} without a language parser; ${graph.coverage.limited} graph-limited files.</p><p>Syntax graph only. Call candidates, source groupings and project references do not establish runtime data flows or trust boundaries.</p>` : "<p>No source graph.</p>"}<h2>STRIDE matrix</h2><p>AI scenarios and conditional rule prompts are separate. No scenario returned does not establish safety or non-applicability.</p>${coverage?.totalBatches !== undefined ? `<p>${coverage.completedBatches}/${coverage.totalBatches} batches completed; ${coverage.failedBatches} failed; ${coverage.pendingBatches} pending. ${coverage.reviewedInterfaces}/${coverage.totalInterfaces} interface records reviewed.</p>` : ""}${table(
+    ["Component or flow", "Model reviewed / interfaces", ...STRIDE],
+    strideMatrix(model).map((r) => [
+      r.name,
+      `${r.reviewed}/${r.interfaces}`,
+      ...r.cells.map(
+        (c) =>
+          `${c.count} AI scenarios; ${c.promptCount} rule prompts\n${c.status}`,
+      ),
+    ]),
+  )}<details><summary>Mermaid DFD source</summary><pre>${escape(dfdMermaid(model))}</pre></details>`;
+}
 export function modelReviewHtml(model) {
   const a = model.aiReview;
   if (!a)
@@ -104,7 +122,7 @@ export function reportHtml(model) {
           : k;
       })
       .join("\n");
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${escape(model.title)}</title><style>body{font:15px/1.55 system-ui,sans-serif;color:#20342e;background:#f7f9f6;margin:0}main{max-width:1200px;margin:auto;padding:40px}h1{font-size:34px}h2{margin-top:36px}small{color:#52645b}.notice{border-left:4px solid #bd862c;padding:16px;background:#fff5dd}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d6e0d9;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf3ed}.table{overflow:auto}article{padding:20px;background:white;border:1px solid #d6e0d9;margin:15px 0;break-inside:avoid}svg{width:100%;height:auto}code{overflow-wrap:anywhere}@media print{body{background:white}main{padding:0;max-width:none}table{font-size:10px}h2{break-after:avoid}.table{overflow:visible}svg{display:none}.print-note{display:block}}@media screen{.print-note{display:none}}</style><main><h1>${escape(model.title)}</h1><p>${escape(model.profile)} · Static-only · Draft with gaps · ${escape(model.aiReview ? model.aiReview.label + " / " + model.aiReview.model : "No AI provider")}</p><p class="notice">This is a review draft of selected sources and dependencies. Candidate interfaces and conditional scenarios are not confirmed vulnerabilities or evidence of deployed reachability. No whole-product coverage or security approval is implied.</p><small>Engine ${escape(model.engine)} · Created ${escape(model.createdAt)} · Model revision ${escape(model.modelRevision)}</small><h2>Scope and coverage</h2><p>${model.sources.length} selected of ${model.inventoryCount} inventory repositories. ${model.interfaces.length} interfaces/control references; ${model.flows.length} declared flows; ${model.boundaries.length} declared trust transitions.</p>${table(
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${escape(model.title)}</title><style>body{font:15px/1.55 system-ui,sans-serif;color:#20342e;background:#f7f9f6;margin:0}main{max-width:1200px;margin:auto;padding:40px}h1{font-size:34px}h2{margin-top:36px}small{color:#52645b}.notice{border-left:4px solid #bd862c;padding:16px;background:#fff5dd}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;border:1px solid #d6e0d9;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#edf3ed}.table{overflow:auto}article{padding:20px;background:white;border:1px solid #d6e0d9;margin:15px 0;break-inside:avoid}svg{width:100%;height:auto}code{overflow-wrap:anywhere}@media print{body{background:white}main{padding:0;max-width:none}table{font-size:10px}h2{break-after:avoid}.table{overflow:visible}svg{display:none}.print-note{display:block}}@media screen{.print-note{display:none}}</style><main><h1>${escape(model.title)}</h1><p>${escape(model.profile)} · Static-only · Draft with gaps · ${escape(model.aiReview ? model.aiReview.label + " / " + model.aiReview.model : "No AI provider")}</p><p class="notice">This is a review draft of selected sources and dependencies. Candidate interfaces and conditional scenarios are not confirmed vulnerabilities or evidence of deployed reachability. No whole-product coverage or security approval is implied.</p><small>Engine ${escape(model.engine)} · Created ${escape(model.createdAt)} · Model revision ${escape(model.modelRevision)}</small>${graphReport(model)}<h2>Scope and coverage</h2><p>${model.sources.length} selected of ${model.inventoryCount} inventory repositories. ${model.interfaces.length} interfaces/control references; ${model.flows.length} declared flows; ${model.boundaries.length} declared trust transitions.</p>${table(
     ["Repository / scope", "Snapshot / revision", "Coverage"],
     model.sources.map((s) => [
       s.name + " / " + s.scope,
