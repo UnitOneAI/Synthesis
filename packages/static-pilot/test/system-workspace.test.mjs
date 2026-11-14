@@ -531,8 +531,10 @@ test("completed model batches persist across restart and continuation reuses the
     ANTHROPIC_API_KEY: "test-only",
   });
   let calls = 0;
-  const response = async () => {
+  const response = async (url, options) => {
     calls++;
+    const packet = JSON.parse(JSON.parse(options.body).messages[0].content);
+    const record = packet.records[0];
     return Response.json({
       stop_reason: "end_turn",
       content: [
@@ -540,7 +542,21 @@ test("completed model batches persist across restart and continuation reuses the
           type: "text",
           text: JSON.stringify({
             summary: "Conditional static review",
-            threats: [],
+            threats: [
+              {
+              title: "Conditional caller impersonation",
+              category: "Spoofing",
+              actor: "Untrusted caller from analysis",
+              startingAccess: "Access to the declared interface",
+              asset: "Caller identity",
+              scenario: "A caller may impersonate a principal if identity checks are absent.",
+              prerequisites: "Missing identity verification; requires review",
+              controls: "Enforcement unresolved",
+              mitigation: "Review caller authentication",
+              interfaceIds: [record.id],
+              evidenceIds: [record.evidence[0].id],
+              },
+            ],
             connections: [],
             questions: ["Confirm the operating assumptions."],
           }),
@@ -557,6 +573,15 @@ test("completed model batches persist across restart and continuation reuses the
       { maxBatches: 1 },
     );
     assert.equal(calls, 1);
+    assert.equal(m.aiReview.threats.length, 1);
+    assert.ok(
+      systemModel(m).actors.some((a) => a.name === "Untrusted caller from analysis"),
+    );
+    assert.ok(
+      reviewPlan(m).batches.every((b) =>
+        !b.packet.systemContext.actors.some((a) => a.name === "Untrusted caller from analysis"),
+      ),
+    );
     const total = reviewPlan(m).batches.length;
     assert.ok(total > 1);
     store = await workspaceStore(root, dir);
@@ -570,6 +595,9 @@ test("completed model batches persist across restart and continuation reuses the
     assert.equal(calls, total);
     assert.equal(m.aiReview.coverage.completedBatches, total);
     assert.equal(m.aiReview.coverage.failedBatches, 0);
+    m = await enrichGraphModel(m, config, new Map(), response, { maxBatches: 1 });
+    assert.equal(calls, total);
+    assert.equal(m.aiReview.coverage.callsThisRun, 0);
   } finally {
     await store?.close();
     await fs.rm(dir, { recursive: true, force: true });

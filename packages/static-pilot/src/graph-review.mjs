@@ -20,7 +20,9 @@ export const STRIDE = [
 export const GRAPH_REVIEW_VERSION = "graph-stride-2";
 
 export function reviewPlan(model, excerpts = new Map()) {
-  const system = systemModel(model, { matrix: false });
+  // Analysis proposals are outputs, not new inputs on each continuation.
+  // Explicit reviewer records remain in the workspace and still affect packets.
+  const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
   const contexts = graphContexts(model.sourceGraph);
   // All names are untrusted source metadata, not instructions or established facts.
   for (const [key, value] of contexts) {
