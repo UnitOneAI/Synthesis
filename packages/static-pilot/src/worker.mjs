@@ -5,8 +5,20 @@ try {
   let excerpts = new Map(workerData.excerpts || []);
   const progress = (message) =>
     parentPort.postMessage({ type: "progress", message });
-  const checkpoint = (aiReview) =>
-    parentPort.postMessage({ type: "checkpoint", aiReview });
+  let checkpointId = 0;
+  const checkpoint = (aiReview, usageLedger) =>
+    new Promise((resolve, reject) => {
+      const id = ++checkpointId;
+      const ack = (message) => {
+        if (message.type !== "checkpoint-saved" || message.id !== id) return;
+        parentPort.off("message", ack);
+        message.error
+          ? reject(Error("Workspace checkpoint failed; review stopped"))
+          : resolve();
+      };
+      parentPort.on("message", ack);
+      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger });
+    });
   const model =
     workerData.mode === "review"
       ? await enrichGraphModel(

@@ -1,3 +1,9 @@
+import {
+  providerUsage,
+  beginUsageRun,
+  beginAttempt,
+  finishAttempt,
+} from "./token-usage.mjs";
 import { sha, id } from "./sources.mjs";
 
 export const REVIEW_VERSION = "static-review-2";
@@ -509,6 +515,8 @@ export async function requestReview(
       "Provider request failed or timed out; no automatic retry or provider fallback",
     );
   }
+  const usage = providerUsage(data, config.provider);
+  await options.onUsage?.(usage);
   let text;
   if (anthropic) {
     if (data.stop_reason === "max_tokens")
@@ -551,6 +559,7 @@ export async function requestReview(
   }
   const parsed = parseReviewText(text);
   return {
+    usage,
     review: validateReview(parsed, packet),
     responseHash: sha(text),
     requestPromptHash: sha(requestPrompt),
@@ -584,6 +593,7 @@ export async function enrichModel(
     },
     status: "pending",
   };
+  beginUsageRun(model);
   model.provider = config.provider;
   model.aiReview = review;
   if (!ids.length) {
@@ -591,13 +601,20 @@ export async function enrichModel(
     review.error = "No collected interfaces to submit";
     return model;
   }
+  const attempt = beginAttempt(model, config, packet);
   try {
-    const result = await requestReview(config, packet, fetchImpl);
+    const result = await requestReview(config, packet, fetchImpl, {
+      onUsage: (usage) => {
+        attempt.usage = usage;
+      },
+    });
+    finishAttempt(attempt, "succeeded");
     Object.assign(review, result.review, {
       status: "completed-needs-review",
       responseHash: result.responseHash,
     });
   } catch (error) {
+    finishAttempt(attempt, "failed");
     review.status = "failed";
     review.error = error.message;
   }

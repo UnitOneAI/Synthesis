@@ -327,11 +327,11 @@ test("staged worker continues and cancels review without rescanning source", asy
     boot = path.join(harness, "server.mjs");
   await fs.writeFile(
     preload,
-    `import fs from "node:fs/promises"; globalThis.fetch = async () => {if(await fs.stat(${JSON.stringify(path.join(harness, "hold"))}).then(()=>true,()=>false))await new Promise(resolve=>setTimeout(resolve,60000));return Response.json({stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});};`,
+    `import fs from "node:fs/promises"; globalThis.fetch = async () => {if(await fs.stat(${JSON.stringify(path.join(harness, "hold"))}).then(()=>true,()=>false))await new Promise(resolve=>setTimeout(resolve,60000));return Response.json({usage:{input_tokens:100,output_tokens:20},stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});};`,
   );
   await fs.writeFile(
     boot,
-    `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
+    `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,persist:true,workspace:${JSON.stringify(path.join(harness, "state"))},modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
   );
   const child = spawn(
     process.execPath,
@@ -438,7 +438,10 @@ test("staged worker continues and cancels review without rescanning source", asy
       const status = await (
         await fetch(base + "/api/status", { headers })
       ).json();
-      if (status.message.startsWith("STRIDE review")) {
+      if (
+        status.message.startsWith("STRIDE review") &&
+        status.tokenUsage.requests === 3
+      ) {
         started = true;
         break;
       }
@@ -450,6 +453,9 @@ test("staged worker continues and cancels review without rescanning source", asy
     assert.equal(model.aiReview.coverage.completedBatches, 2);
     assert.equal(model.aiReview.status, "partial");
     assert.ok(model.sourceGraph.nodes.length);
+    assert.equal(model.tokenUsage.totalTokens, 240);
+    assert.equal(model.tokenUsage.unknownRequests, 1);
+    assert.equal(model.usageLedger.attempts.at(-1).status, "interrupted");
     await fs.rm(path.join(harness, "hold"));
     await post("review", {
       modelRevision: model.modelRevision,
@@ -459,6 +465,25 @@ test("staged worker continues and cancels review without rescanning source", asy
     await wait();
     model = await (await fetch(base + "/api/model", { headers })).json();
     assert.equal(model.aiReview.coverage.completedBatches, 3);
+    assert.equal(model.tokenUsage.totalTokens, 360);
+    assert.equal(model.tokenUsage.requests, 4);
+    const csv = await (
+      await fetch(base + "/api/export?format=usage", { headers })
+    ).text();
+    assert.ok(csv.includes('"interrupted"'));
+    const saved = JSON.parse(
+      await fs.readFile(path.join(harness, "state", "snapshot.json"), "utf8"),
+    );
+    assert.equal(saved.data.model.usageLedger.attempts.length, 4);
+    await post("analyze", {
+      profile: "test",
+      repositories: [{ name: "repo-0" }],
+      analysis: { useModel: false },
+    });
+    await wait();
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.tokenUsage.totalTokens, 360);
+    assert.equal(model.tokenUsage.unknownRequests, 1);
   } finally {
     child.kill();
     await new Promise((resolve) =>

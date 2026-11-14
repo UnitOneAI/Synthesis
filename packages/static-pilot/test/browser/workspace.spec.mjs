@@ -1,3 +1,4 @@
+import { usageSummary } from "../../src/token-usage.mjs";
 import { test, expect } from "@playwright/test";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -219,9 +220,13 @@ test("STRIDE, threat details, evidence and every register export remain connecte
   await page.getByLabel("Actor", { exact: true }).selectOption("");
   await page.locator(".ws-matrix button.populated").first().click();
   await expect(page.locator("#ws-inspector")).toContainText("Linked scenarios");
-  await expect(page.locator(".ws-checklist .ws-linked-record").first()).not.toBeVisible();
+  await expect(
+    page.locator(".ws-checklist .ws-linked-record").first(),
+  ).not.toBeVisible();
   await page.locator(".ws-checklist summary").click();
-  await expect(page.locator(".ws-checklist .ws-linked-record small").first()).toContainText(":");
+  await expect(
+    page.locator(".ws-checklist .ws-linked-record small").first(),
+  ).toContainText(":");
   await page
     .locator("#ws-inspector section button[data-select]")
     .first()
@@ -246,9 +251,13 @@ test("STRIDE, threat details, evidence and every register export remain connecte
     "STRIDE matrix · CSV",
     "Complete model · JSON",
     "Source manifest",
+    "Token usage · CSV",
   ]) {
     const pending = page.waitForEvent("download");
-    await page.getByRole("button", { name, exact: true }).click();
+    await page
+      .locator("#ws-export-panel")
+      .getByRole("button", { name, exact: true })
+      .click();
     const download = await pending;
     const content = await fs.readFile(await download.path(), "utf8");
     expect(content.length).toBeGreaterThan(15);
@@ -422,4 +431,97 @@ test("analysis controls submit the chosen budget and cancel without rescanning (
   ).toBeEnabled();
   expect(cancelled).toBeTruthy();
   expect(scans).toBe(0);
+});
+
+test("token meter shows repository and shared totals, unknown usage and live updates", async ({
+  page,
+}) => {
+  const ledger = {
+    lastRunId: "run",
+    legacyUnmetered: true,
+    attempts: [
+      {
+        id: "a",
+        runId: "run",
+        batchId: "batch-one",
+        model: "approved-opus",
+        repositories: ["frontdoor"],
+        status: "succeeded",
+        usage: {
+          inputTokens: 140,
+          outputTokens: 20,
+          cacheReadTokens: 30,
+          cacheWriteTokens: 10,
+          totalTokens: 160,
+        },
+      },
+      {
+        id: "b",
+        runId: "run",
+        batchId: "batch-shared",
+        model: "approved-opus",
+        repositories: ["frontdoor", "business"],
+        status: "failed",
+        retry: true,
+        usage: { inputTokens: 70, outputTokens: 10, totalTokens: 80 },
+      },
+      {
+        id: "c",
+        runId: "run",
+        batchId: "batch-unknown",
+        model: "approved-opus",
+        repositories: ["business"],
+        status: "interrupted",
+        usage: null,
+      },
+    ],
+  };
+  await page.route("**/api/status", async (route) => {
+    const r = await route.fetch();
+    await route.fulfill({
+      json: {
+        ...(await r.json()),
+        status: "running",
+        mode: "review",
+        tokenUsage: usageSummary(ledger),
+      },
+    });
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  const meter = page.locator("#ws-usage");
+  await expect(meter).toContainText("240 reported tokens");
+  await expect(meter).toContainText("1 with unknown totals");
+  await expect(meter).toContainText("Earlier analysis has no token records");
+  await meter
+    .getByText("Usage by repository and shared analysis", { exact: true })
+    .click();
+  await expect(
+    meter.getByRole("rowheader", { name: "Shared cross-repository analysis" }),
+  ).toBeVisible();
+  await meter
+    .getByText("Recent requests (last 50; export includes all)", {
+      exact: true,
+    })
+    .click();
+  await expect(meter).toContainText("batch-unknown");
+  ledger.attempts[2].usage = {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  };
+  await expect(meter).toContainText("255 reported tokens");
+  await expect(
+    meter.getByRole("rowheader", { name: "Shared cross-repository analysis" }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth + 1,
+    ),
+  ).toBeTruthy();
 });

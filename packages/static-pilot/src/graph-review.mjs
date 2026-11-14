@@ -1,3 +1,4 @@
+import { beginUsageRun, beginAttempt, finishAttempt } from "./token-usage.mjs";
 import { interactionContext, systemModel } from "./system-model.mjs";
 import {
   reviewPacket,
@@ -22,7 +23,10 @@ export const GRAPH_REVIEW_VERSION = "graph-stride-2";
 export function reviewPlan(model, excerpts = new Map()) {
   // Analysis proposals are outputs, not new inputs on each continuation.
   // Explicit reviewer records remain in the workspace and still affect packets.
-  const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
+  const system = systemModel(
+    { ...model, aiReview: undefined },
+    { matrix: false },
+  );
   const contexts = graphContexts(model.sourceGraph);
   // All names are untrusted source metadata, not instructions or established facts.
   for (const [key, value] of contexts) {
@@ -291,6 +295,7 @@ export async function enrichGraphModel(
       "Graph-based review in bounded repository and cross-repository batches.",
     coverage: {},
   };
+  beginUsageRun(model);
   model.aiReview = review;
   model.provider = config.provider;
   const submitted = new Set(retained.flatMap((b) => b.interfaceIds)),
@@ -404,6 +409,7 @@ export async function enrichGraphModel(
     review.batches.push(entry);
     calls++;
     entry.interfaceIds.forEach((i) => submitted.add(i));
+    let attempt;
     try {
       const failed = previous.find(
         (b) =>
@@ -417,9 +423,33 @@ export async function enrichGraphModel(
             failed.error || "",
           ),
       );
+      attempt = beginAttempt(model, config, batch.packet, {
+        batchId: batch.id,
+        phase: batch.phase,
+        retry: model.usageLedger.attempts.some(
+          (a) =>
+            a.batchId === batch.id &&
+            a.provider === config.provider &&
+            a.model === config.model &&
+            a.status !== "succeeded",
+        ),
+      });
+      aggregate();
+      await options.checkpoint?.(
+        structuredClone(review),
+        structuredClone(model.usageLedger),
+      );
       const result = await requestReview(config, batch.packet, fetchImpl, {
         validationRetry: entry.validationRetry,
+        onUsage: async (usage) => {
+          attempt.usage = usage;
+          await options.checkpoint?.(
+            structuredClone(review),
+            structuredClone(model.usageLedger),
+          );
+        },
       });
+      finishAttempt(attempt, "succeeded");
       Object.assign(entry, {
         status: "completed",
         review: result.review,
@@ -428,6 +458,7 @@ export async function enrichGraphModel(
       });
       entry.interfaceIds.forEach((i) => reviewed.add(i));
     } catch (error) {
+      if (attempt) finishAttempt(attempt, "failed");
       entry.status = "failed";
       entry.error = error.message;
       terminalFailure = /HTTP (?:401|403|429)|request failed or timed out/.test(
@@ -435,7 +466,10 @@ export async function enrichGraphModel(
       );
     }
     aggregate();
-    options.checkpoint?.(structuredClone(review));
+    await options.checkpoint?.(
+      structuredClone(review),
+      structuredClone(model.usageLedger),
+    );
   }
   aggregate();
   review.status = !plan.batches.length
@@ -453,6 +487,9 @@ export async function enrichGraphModel(
         (!plan.batches.length
           ? "No collected interfaces to review"
           : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
-  options.checkpoint?.(structuredClone(review));
+  await options.checkpoint?.(
+    structuredClone(review),
+    structuredClone(model.usageLedger),
+  );
   return model;
 }

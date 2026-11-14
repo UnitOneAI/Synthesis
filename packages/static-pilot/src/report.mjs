@@ -1,3 +1,4 @@
+import { tokenUsageHtml } from "./system-exports.mjs";
 import { strideMatrix, STRIDE } from "./graph-review.mjs";
 import { dfdMermaid } from "./graph-exports.mjs";
 
@@ -88,7 +89,7 @@ export function modelReviewHtml(model) {
       })
       .join("; ");
   return (
-    `<h2>Model review · ${escape(a.label)} / ${escape(a.model)}</h2><p class="notice">Status: ${escape(a.status)}. Analysis hypothesis suggestions require human review; severity is unassessed. They do not establish source facts or add accepted DFD connections. ${escape(a.error || "")}</p><p>${a.coverage.submittedInterfaces} of ${a.coverage.totalInterfaces} interface records submitted; ${a.coverage.omittedInterfaces} omitted. Mode: ${escape(a.mode)}; ${a.coverage.excerptCount} excerpts; ${a.coverage.packetBytes} packet bytes. Submission is not semantic coverage.</p><p>${escape(a.summary || "")}</p><small>Prompt ${escape(a.promptVersion)} / ${escape(a.promptHash)} · Packet ${escape(a.packetHash)} · Response ${escape(a.responseHash || "unavailable")} · Based on revision ${escape(a.basedOnRevision)}</small>` +
+    `${tokenUsageHtml(model)}<h2>Model review · ${escape(a.label)} / ${escape(a.model)}</h2><p class="notice">Status: ${escape(a.status)}. Analysis hypothesis suggestions require human review; severity is unassessed. They do not establish source facts or add accepted DFD connections. ${escape(a.error || "")}</p><p>${a.coverage.submittedInterfaces} of ${a.coverage.totalInterfaces} interface records submitted; ${a.coverage.omittedInterfaces} omitted. Mode: ${escape(a.mode)}; ${a.coverage.excerptCount} excerpts; ${a.coverage.packetBytes} packet bytes. Submission is not semantic coverage.</p><p>${escape(a.summary || "")}</p><small>Prompt ${escape(a.promptVersion)} / ${escape(a.promptHash)} · Packet ${escape(a.packetHash)} · Response ${escape(a.responseHash || "unavailable")} · Based on revision ${escape(a.basedOnRevision)}</small>` +
     (a.threats || [])
       .map(
         (t) =>
