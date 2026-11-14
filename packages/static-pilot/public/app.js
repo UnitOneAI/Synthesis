@@ -13,6 +13,7 @@ let repositories = [],
   polling,
   diagramUrl,
   inferenceInitialized = false;
+let providerAvailable = false;
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -46,6 +47,9 @@ function tab(name) {
 document
   .querySelectorAll("[data-tab]")
   .forEach((b) => (b.onclick = () => tab(b.dataset.tab)));
+document
+  .querySelectorAll("[data-go]")
+  .forEach((b) => (b.onclick = () => tab(b.dataset.go)));
 function renderRepos() {
   const term = $("repo-search").value.toLowerCase();
   $("counts").textContent =
@@ -128,6 +132,7 @@ async function status() {
   $("root").textContent = s.sourceRoot;
   if (!inferenceInitialized) {
     inferenceInitialized = true;
+    providerAvailable = Boolean(s.inference);
     $("model-config").textContent = s.inference
       ? `${s.inference.label} · ${s.inference.model}.${s.inference.endpoint ? ` Destination: ${s.inference.endpoint} (API ${s.inference.apiVersion}).` : ""} Model and key are configured on this machine.`
       : "Static discovery only. To enable Claude or Gemini, restart with --provider and --model and the provider key in the environment.";
@@ -140,16 +145,19 @@ async function status() {
   }
   $("analyze").disabled = s.status === "running";
   $("cancel").hidden = s.status !== "running";
+  $("cancel-review").hidden = s.status !== "running" || s.mode !== "review";
+  if (s.status === "running") $("run-review").disabled = true;
   if (s.status === "running") message(s.message);
   if (["failed", "cancelled"].includes(s.status)) {
     clearInterval(polling);
+    polling = null;
     message(s.message, s.status === "failed");
   }
   if (s.status === "ready" && polling) {
     clearInterval(polling);
     polling = null;
     await refresh();
-    tab("model");
+    tab(model?.aiReview ? "stride" : "graph");
     message(s.message);
   }
   return s;
@@ -162,7 +170,7 @@ $("analyze").onclick = async () => {
       repositories,
       declarations: manifestDeclarations,
       analysis: {
-        useModel: $("use-model").checked,
+        useModel: false,
         includeSourceExcerpts:
           $("use-model").checked && $("source-excerpts").checked,
       },
@@ -197,9 +205,25 @@ async function refresh() {
   manifestDeclarations = model.declarations;
   page = 0;
   renderModel();
+  const plan = await api("review-plan");
+  $("review-plan").textContent =
+    `${plan.repositories} repositories · ${plan.batches} planned batches (metadata estimate)`;
 }
 $("refresh").onclick = () => refresh().catch((e) => message(e.message, true));
 function renderModel() {
+  renderGraph();
+  renderMatrix();
+  $("run-review").disabled = !providerAvailable || !$("use-model").checked;
+  $("run-review").textContent =
+    model.aiReview?.coverage?.pendingBatches ||
+    model.aiReview?.coverage?.failedBatches
+      ? "Continue STRIDE review"
+      : "Run STRIDE review";
+  const coverage = model.aiReview?.coverage;
+  $("review-progress").textContent =
+    coverage?.totalBatches !== undefined
+      ? `${coverage.completedBatches}/${coverage.totalBatches} batches completed · ${coverage.failedBatches} failed · ${coverage.pendingBatches} pending · ${coverage.reviewedInterfaces}/${coverage.totalInterfaces} interface records reviewed. ${model.aiReview.error || ""}`
+      : "No graph-based model review yet. Building the source graph makes no model calls.";
   $("summary").innerHTML = [
     [model.sources.length, "Selected sources"],
     [model.interfaces.length, "Interface / control records"],
@@ -257,9 +281,168 @@ function renderModel() {
     )
     .join("");
   updateDiagram().catch((e) => message(e.message, true));
+  fetch("/api/export?format=mermaid", {
+    headers: { "X-Synthesis-Token": token },
+  })
+    .then((r) => (r.ok ? r.text() : "DFD unavailable"))
+    .then((text) => {
+      $("mermaid-preview").textContent = text;
+    })
+    .catch(() => {});
 }
 $("use-model").onchange = () => {
   $("source-excerpts").disabled = !$("use-model").checked;
+  $("run-review").disabled =
+    !providerAvailable || !model || !$("use-model").checked;
+};
+function renderGraph() {
+  const graph = model?.sourceGraph;
+  if (!graph) return;
+  $("graph-summary").innerHTML = [
+    [
+      graph.nodes.filter((n) => n.kind === "function").length,
+      "Functions and methods",
+    ],
+    [graph.nodes.filter((n) => n.kind === "call").length, "Call sites"],
+    [
+      graph.edges.filter((e) => e.kind === "project-reference").length,
+      "Project references",
+    ],
+    [
+      graph.coverage.failed +
+        graph.coverage.syntaxErrors +
+        graph.coverage.limited,
+      "Files with graph gaps",
+    ],
+  ]
+    .map(
+      ([n, label]) =>
+        `<div class="stat"><strong>${n}</strong><span>${esc(label)}</span></div>`,
+    )
+    .join("");
+  $("graph-coverage").innerHTML =
+    `<p>${graph.coverage.parsed} files parsed · ${graph.coverage.syntaxErrors} with syntax errors · ${graph.coverage.failed} failed or timed out · ${graph.coverage.unsupported} without a language parser · ${graph.coverage.limited} limited.</p><p class="hint">Syntax evidence does not resolve dependency injection, overloads, dynamic dispatch or deployed trust. Source collection limits still apply. Full file coverage is in the JSON export.</p>`;
+  const term = $("graph-search").value.toLowerCase();
+  const nodes = graph.nodes.filter(
+    (n) =>
+      n.kind === $("graph-kind").value &&
+      `${n.name} ${n.repository} ${n.path}`.toLowerCase().includes(term),
+  );
+  $("graph-nodes").innerHTML =
+    `<p>${nodes.length} matching nodes · first 100 shown</p><table><thead><tr><th>Symbol or reference</th><th>Repository</th><th>Evidence</th><th>Interpretation</th></tr></thead><tbody>${nodes
+      .slice(0, 100)
+      .map(
+        (n) =>
+          `<tr><td>${esc(n.name)}</td><td>${esc(n.repository)}</td><td>${esc(n.path)}:${n.line}</td><td>${esc(n.basis || "Syntax declaration")}</td></tr>`,
+      )
+      .join("")}</tbody></table>`;
+}
+$("graph-kind").onchange = renderGraph;
+$("graph-search").oninput = renderGraph;
+function renderMatrix() {
+  const rows = model?.strideMatrix || [];
+  const selected = $("matrix-repository").value;
+  $("matrix-repository").innerHTML =
+    '<option value="">All repositories</option>' +
+    [...new Set(rows.map((r) => r.repository))]
+      .map((r) => `<option value="${esc(r)}">${esc(r)}</option>`)
+      .join("");
+  $("matrix-repository").value = selected;
+  const filtered = rows.filter(
+    (r) =>
+      r.rowKind === $("matrix-kind").value &&
+      (!selected || r.repository === selected),
+  );
+  const categories = [
+    "Spoofing",
+    "Tampering",
+    "Repudiation",
+    "Information disclosure",
+    "Denial of service",
+    "Elevation of privilege",
+  ];
+  $("stride-matrix").innerHTML =
+    `<table class="stride-table"><thead><tr><th>Component / flow</th>${categories.map((c, i) => `<th><span class="stride-letter">${"STRIDE"[i]}</span>${c}</th>`).join("")}<th>Model coverage</th></tr></thead><tbody>${filtered
+      .slice(0, 100)
+      .map(
+        (r) =>
+          `<tr><th scope="row">${esc(r.name)}<span class="sub">${esc(r.repository)}</span></th>${r.cells.map((c, i) => `<td><button class="matrix-cell ${c.count ? "has-threats" : ""}" data-matrix-row="${esc(r.id)}" data-category="${i}" aria-label="${esc(r.name + ", " + c.category + ", " + c.status)}"><strong>${c.status === "stale" ? "Stale" : c.count ? `● ${c.count}` : c.status === "not-reviewed" ? "—" : "?"}</strong><span>${c.count ? "AI scenarios" : c.status === "partially-reviewed" ? "Partial review" : c.status === "not-reviewed" ? "Not reviewed" : c.status === "stale" ? "Rerun review" : "No scenario"}</span>${c.promptCount ? `<small>○ ${c.promptCount} rule prompts</small>` : ""}</button></td>`).join("")}<td>${r.reviewed} / ${r.interfaces}<span class="sub">interface records</span></td></tr>`,
+      )
+      .join(
+        "",
+      )}</tbody></table><p class="hint">${filtered.length} rows · first 100 shown · all rows included in export.</p>`;
+}
+$("matrix-repository").onchange = renderMatrix;
+$("matrix-kind").onchange = renderMatrix;
+$("stride-matrix").onclick = (event) => {
+  const button = event.target.closest("[data-matrix-row]");
+  if (!button) return;
+  const row = model.strideMatrix.find((r) => r.id === button.dataset.matrixRow),
+    cell = row.cells[Number(button.dataset.category)];
+  const items = [
+    ...(model.aiReview?.threats || [])
+      .filter((t) => cell.threatIds.includes(t.id))
+      .map((t) => ({
+        ...t,
+        source: "AI scenario · Needs review",
+        evidence: t.evidenceIds,
+      })),
+    ...model.threats
+      .filter((t) => cell.promptIds.includes(t.id))
+      .map((t) => ({
+        ...t,
+        title: "Conditional rule prompt",
+        source: "Rule prompt · Not an AI finding",
+      })),
+  ];
+  const evidence = new Map(model.evidence.map((e) => [e.id, e]));
+  $("stride-detail").innerHTML =
+    `<h3>${esc(row.name)} · ${esc(cell.category)}</h3><p>${cell.count} AI scenarios · ${cell.promptCount} rule prompts · ${esc(cell.status.replaceAll("-", " "))}</p>${
+      items.length
+        ? items
+            .slice(0, 20)
+            .map(
+              (t) =>
+                `<article class="card"><span class="badge unknown">${esc(t.source)}</span><h3>${esc(t.title)}</h3><p>${esc(t.scenario)}</p><p><strong>Actor:</strong> ${esc(model.actors.find((a) => a.id === t.actor)?.name || t.actor)}</p><p><strong>Prerequisites:</strong> ${esc(Array.isArray(t.prerequisites) ? t.prerequisites.join("; ") : t.prerequisites)}</p><p><strong>Controls:</strong> ${esc(t.controls)}</p><p><strong>Next review:</strong> ${esc(t.mitigation)}</p><div class="evidence">${t.evidence
+                  .map((k) => {
+                    const e = evidence.get(k);
+                    return e
+                      ? `${esc(e.repository)}/${esc(e.path)}:${e.line} · ${esc(e.basis)}`
+                      : esc(k);
+                  })
+                  .join("<br>")}</div></article>`,
+            )
+            .join("")
+        : "<p>No scenario is available for this cell. This does not establish safety or non-applicability.</p>"
+    }`;
+};
+$("run-review").onclick = async () => {
+  try {
+    await api("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: Number($("review-budget").value),
+      includeSourceExcerpts: $("source-excerpts").checked,
+    });
+    $("run-review").disabled = true;
+    $("cancel-review").hidden = false;
+    clearInterval(polling);
+    polling = setInterval(
+      () =>
+        status().catch((e) => {
+          clearInterval(polling);
+          message(e.message, true);
+        }),
+      1500,
+    );
+    message("Reviewing the existing graph and DFD. No source rescan.");
+  } catch (e) {
+    message(e.message, true);
+  }
+};
+$("cancel-review").onclick = async () => {
+  await api("cancel", {});
+  await status();
+  $("cancel-review").hidden = true;
 };
 function renderAIReview() {
   const a = model.aiReview;
@@ -394,14 +577,16 @@ async function download(format, preview = false) {
   if (preview) return url;
   const a = document.createElement("a");
   a.href = url;
-  a.download =
-    format === "html"
-      ? "threat-model.html"
-      : format === "svg"
-        ? "dfd.svg"
-        : format === "manifest"
-          ? "reviewed-manifest.json"
-          : "model.json";
+  a.download = {
+    html: "threat-model.html",
+    svg: "dfd.svg",
+    manifest: "reviewed-manifest.json",
+    mermaid: "dfd.mmd",
+    graph: "source-graph.json",
+    "graph-mermaid": "source-graph.mmd",
+    stride: "stride-matrix.csv",
+    json: "model.json",
+  }[format];
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -8,6 +8,8 @@ import { serve } from "./server.mjs";
 import { reportHtml, diagram } from "./report.mjs";
 import { modelConfig } from "./model-review.mjs";
 import { within } from "./sources.mjs";
+import { dfdMermaid, strideCsv } from "./graph-exports.mjs";
+import { strideMatrix } from "./graph-review.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -24,6 +26,7 @@ const { values, positionals } = parseArgs({
     "base-url": { type: "string" },
     "api-version": { type: "string" },
     "include-source-excerpts": { type: "boolean" },
+    "review-batches": { type: "string" },
     help: { type: "boolean" },
   },
 });
@@ -116,22 +119,34 @@ async function main() {
         githubToken: process.env.GITHUB_TOKEN,
         modelConfig: inference,
         includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
+        reviewBatches: values["review-batches"]
+          ? Number(values["review-batches"])
+          : undefined,
         progress: console.log,
       },
     );
     await fs.writeFile(
       path.join(output, "model.json"),
-      JSON.stringify(model, null, 2),
+      JSON.stringify({ ...model, strideMatrix: strideMatrix(model) }, null, 2),
     );
     await fs.writeFile(
       path.join(output, "threat-model.html"),
       reportHtml(model),
     );
     await fs.writeFile(path.join(output, "dfd.svg"), diagram(model));
+    await fs.writeFile(path.join(output, "dfd.mmd"), dfdMermaid(model));
+    await fs.writeFile(
+      path.join(output, "source-graph.json"),
+      JSON.stringify(model.sourceGraph, null, 2),
+    );
+    await fs.writeFile(
+      path.join(output, "stride-matrix.csv"),
+      strideCsv(model),
+    );
     console.log(
       `Draft with gaps: ${model.interfaces.length} interface/control candidates, ${model.flows.length} declared flows. Reports: ${output}`,
     );
-    if (model.aiReview?.status === "failed") {
+    if (["failed", "partial"].includes(model.aiReview?.status)) {
       console.error(
         "Model review failed: " +
           model.aiReview.error +

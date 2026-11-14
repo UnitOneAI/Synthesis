@@ -3,8 +3,14 @@ import { id, sha, localSource, githubSource } from "./sources.mjs";
 import { parseXml } from "./inventory.mjs";
 
 import { collectExcerpts, enrichModel } from "./model-review.mjs";
+import {
+  createSourceGraph,
+  addSourceGraph,
+  finishSourceGraph,
+} from "./source-graph.mjs";
+import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.2.0";
+export const ENGINE_VERSION = "static-pilot-0.3.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -237,6 +243,7 @@ export function extract(source, files) {
       repository: source.name,
       path: file.path,
       line,
+      offset: pointer ? null : offset,
       pointer: pointer || null,
       blobSha256: file.hash,
       extractor: ENGINE_VERSION,
@@ -661,6 +668,7 @@ export function compose(model, declarations = {}) {
       sources: model.sources,
       interfaces: model.interfaces,
       declarations: model.declarations,
+      graphFingerprint: model.sourceGraph?.fingerprint,
     }),
   );
   if (
@@ -699,6 +707,15 @@ export function validateManifest(manifest) {
       )
         throw new Error("Model choices must be true or false");
     }
+    if (
+      manifest.analysis.reviewBatches !== undefined &&
+      (!Number.isInteger(manifest.analysis.reviewBatches) ||
+        manifest.analysis.reviewBatches < 1 ||
+        manifest.analysis.reviewBatches > 100)
+    )
+      throw new Error(
+        "Model batch budget must be 1–100 requests per review action",
+      );
   }
   const selected = manifest.repositories.filter((r) => r.selected !== false);
   if (!selected.length || selected.length > 100)
@@ -730,6 +747,13 @@ export function validateManifest(manifest) {
 }
 export async function analyze(manifest, options = {}) {
   const selected = validateManifest(manifest);
+  if (
+    options.reviewBatches !== undefined &&
+    (!Number.isInteger(options.reviewBatches) ||
+      options.reviewBatches < 1 ||
+      options.reviewBatches > 100)
+  )
+    throw new Error("Model batch budget must be 1–100 requests");
   const excerpts = new Map();
   const model = {
     schemaVersion: 1,
@@ -746,6 +770,7 @@ export async function analyze(manifest, options = {}) {
     evidence: [],
     dependencies: [],
     diagnostics: [],
+    sourceGraph: createSourceGraph(),
     inventoryCount: manifest.repositories.length,
     limitations: [
       "Lexical collectors propose interfaces; they do not establish complete call graphs, effective controls, or deployed reachability.",
@@ -780,10 +805,26 @@ export async function analyze(manifest, options = {}) {
           message:
             "System budget reached; files inventoried but interfaces not extracted",
         });
-        continue;
       }
-      const result = extract(source, snapshot.files);
-      if (options.modelConfig && options.includeSourceExcerpts)
+      const result =
+        model.interfaces.length >= 10000
+          ? {
+              components: [],
+              interfaces: [],
+              evidence: [],
+              dependencies: [],
+              diagnostics: [],
+            }
+          : extract(source, snapshot.files);
+      options.progress?.(`Building source graph for ${source.name}`);
+      await addSourceGraph(
+        model.sourceGraph,
+        source,
+        snapshot.files,
+        result,
+        options.sourceRoot,
+      );
+      if (options.includeSourceExcerpts)
         collectExcerpts(result, snapshot.files, excerpts);
       for (const key of [
         "components",
@@ -831,12 +872,32 @@ export async function analyze(manifest, options = {}) {
           "Dependency declaration resembles an inventory name; confirm package ownership before adding supporting scope",
       })),
   );
+  finishSourceGraph(model.sourceGraph);
   compose(model, manifest.declarations || {});
+  options.onExcerpts?.(excerpts);
   if (options.modelConfig) {
     options.progress?.(
       "Requesting bounded model review; source collection remains static-only",
     );
-    await enrichModel(model, options.modelConfig, excerpts, options.modelFetch);
+    if (options.reviewBatches || manifest.analysis?.reviewBatches)
+      await enrichGraphModel(
+        model,
+        options.modelConfig,
+        excerpts,
+        options.modelFetch,
+        {
+          maxBatches: options.reviewBatches || manifest.analysis.reviewBatches,
+          progress: options.progress,
+          checkpoint: options.checkpoint,
+        },
+      );
+    else
+      await enrichModel(
+        model,
+        options.modelConfig,
+        excerpts,
+        options.modelFetch,
+      );
   }
   return model;
 }

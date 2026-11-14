@@ -1,8 +1,8 @@
 # Static multi-repository pilot
 
-Local source review with optional Claude or Gemini analysis and no target-system access. Import XLSX/CSV inventory, select primary and supporting sources, inspect evidence, declare connections and trust transitions, and export HTML, SVG and JSON.
+Graph-first local source review with optional Claude or Gemini analysis and no target-system access. Add existing clones or import inventory, build the source graph, review the DFD, run bounded STRIDE batches, and export HTML, SVG, Mermaid, CSV and JSON.
 
-**This is a discovery and review pilot, not the completed Synthesis architecture.** Code collectors are bounded lexical recognizers. They do not establish effective authorization, complete call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
+**This is a discovery and review pilot, not the completed Synthesis architecture.** Tree-sitter syntax graphs cover C#, C/C++, JavaScript and TypeScript. Security interface collectors remain bounded lexical recognizers. Neither establishes effective authorization, compiler-resolved call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
 
 ## Run tonight
 
@@ -24,9 +24,11 @@ To preload a prepared inventory selection, append `--manifest "/private/scope.js
 2. Select the installer and any justified supporting repositories. Original selection remains separate from current selection. No customer-specific defaults are embedded in this generic tool.
 3. Name one product variant/release profile. Naming a profile does not evaluate conditional installer/preprocessor branches; verify source applicability during review.
 4. Map folders relative to the source root. For GitHub, choose GitHub and supply `https://github.com/owner/repository` plus an optional ref. It resolves to a pinned commit. Private access requires a server-side `GITHUB_TOKEN` with read access; never put credentials in URLs.
-5. Analyze and review coverage. Missing sources, unsupported formats, parse failures and limits remain visible. File inspection is not semantic coverage. Raw source excerpts/configuration values are omitted from exports; inspect referenced files locally. Optional model-generated text may paraphrase or quote submitted source, so treat reports as confidential.
-6. In **Connect and export**, select interface endpoints and give a rationale. Add data, controls and a trust transition only when justified. Declarations stay declared. Reviewer names are attribution, not authenticated organizational risk approval.
-7. Export HTML, SVG, full model JSON and the reusable manifest. Reports are self-contained with no network assets. SVG contains all flow sheets; registers retain full labels. Printing HTML omits the long SVG, so retain the separate diagram file. Native paginated PDF is not implemented.
+5. Select **Build source graph**. This stage makes no model calls. Review **Source graph** and **Evidence and details** for parsed files, unsupported languages, skipped content and interface coverage. If source excerpts were selected before building, bounded redacted excerpts are retained privately in memory for the later review.
+6. In **Data flows**, select interface endpoints and give a rationale. Add data, controls and a trust transition only when justified. Declarations stay declared. Export the Mermaid DFD to inspect the system graph; dashed edges preserve unresolved candidates. Source project groupings are not established processes or trust domains.
+7. In **STRIDE matrix**, inspect the estimated batch count, choose a request budget (default 12, maximum 100 per action), then **Run STRIDE review**. Review reuses the existing graph and DFD without rescanning source. **Continue STRIDE review** reuses completed batches and processes pending/failed batches in this server session. Changing declarations, profile, graph, provider, model, prompt or packet invalidates incompatible cached batches. Source changes on disk are not detected until you rebuild the graph; continuing explicitly uses the original snapshot.
+8. Select a matrix cell for AI scenarios, separate conditional rule prompts, actor/access assumptions and source evidence. Not reviewed, partial review, stale and no-scenario-returned states remain distinct. No scenario returned is not evidence of safety or non-applicability.
+9. Export HTML (including matrix and threat register), SVG, Mermaid DFD, matrix CSV, source graph JSON, full model JSON and the reusable manifest. State and completed batches are in memory; stopping the server discards them. Exported reports are evidence artifacts, not restart checkpoints. Reports are self-contained with no network assets. Printing HTML omits the long SVG, so retain the separate diagram. Native paginated PDF is not implemented. Excerpts are omitted from exports; model-generated text may paraphrase submitted source, so treat reports as confidential.
 
 ## Claude or Gemini underneath
 
@@ -67,12 +69,14 @@ The **Model review** area shows the configured provider and model. Starting the 
 The same options work with `analyze`:
 
 ```sh
-node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-model-report --provider anthropic --model YOUR_APPROVED_CLAUDE_MODEL --include-source-excerpts
+node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-model-report --provider anthropic --model YOUR_APPROVED_CLAUDE_MODEL --review-batches 12 --include-source-excerpts
 ```
 
-Each run sends **one packet**, selected round-robin across repositories: at most **120 interface/control records and 96 KiB**, with partial excerpts of at most 12 lines / 1,600 characters each. The response budget is 8,192 tokens, with a 120-second timeout and a 1 MiB response limit. Large portfolios are not fully reviewed by this first model layer. The UI and report state submitted and omitted record counts; narrow scope for deeper review. Neither submission nor file inspection measures semantic completeness.
+The graph review plans repository-local batches (round-robin across repositories), cross-repository protocol cohorts, and explicit declared-flow endpoint reviews. Each packet contains at most **60 records and 96 KiB**, including syntax ownership and call-site context. A shared protocol is a review candidate, never proof of a connection. The source graph itself is built before inference and is not replaced by model output. Partial excerpts are at most 12 lines / 1,600 characters each; collection remains bounded to the first 120 interface evidence records per repository and 12,000 overall.
 
-Results are separately labeled **model-inferred / needs review** and must cite valid collected evidence IDs. Suggestions contain actor assumptions, prerequisites, assets, conditional threats, control uncertainty, mitigation questions and possible interface/authority transitions. Schema and citation checks reject fabricated references; they cannot prove the model's reasoning correct. Suggestions never create accepted DFD edges or establish controls/vulnerabilities. Review source before declaring a connection. Changing declarations marks prior suggestions stale. Reanalysis is required to refresh them.
+Each request allows 8,192 output tokens, a 120-second timeout and a 1 MiB response. A review action stops scheduling new requests after 24 minutes or its chosen request budget; completed batches remain available for continuation in the same session. HTTP 401/403/429 and transport failures stop further calls in that action. Other failed batches remain visible. The UI/report tracks completed, failed and pending batches plus unique submitted/reviewed/unreviewed interface IDs. Completing all planned batches does not establish semantic completeness. CLI `analyze` without `--review-batches` retains the legacy one-request path (up to 120 records); use the flag for the graph batch pipeline.
+
+Results are separately labeled **model-inferred / needs review** and must cite valid collected evidence IDs. Suggestions contain actor assumptions, prerequisites, assets, conditional threats, control uncertainty, mitigation questions and possible interface/authority transitions. Schema and citation checks reject fabricated references; they cannot prove the model's reasoning correct. Suggestions never create accepted DFD edges or establish controls/vulnerabilities. Review source before declaring a connection. Changing declarations marks prior suggestions stale. Run STRIDE review again against the revised DFD to refresh them; a source rescan is not required unless the code or scope changed.
 
 Provider/model, prompt version/hash, packet hash, response hash, reviewed record IDs and base model revision are retained in JSON. Raw request/response bodies and keys are not retained. Generated text can still disclose source details. There is **no automatic retry, alternate-provider fallback or demo result**. A rejected, truncated or malformed response produces a visible failure and retains the static draft. HTML exports include model suggestions and status; SVG keeps the reviewer-declared DFD.
 
@@ -80,13 +84,13 @@ Protocol references: [Anthropic Messages API](https://platform.claude.com/docs/e
 
 ### Model response format failures
 
-In **Evidence and model**, the **Model suggestions** card shows the failure reason. `Model did not return the required JSON object` means the provider returned a completed text response that the pilot could not parse; it is distinct from an HTTP authorization or connection error. Version 0.2.2 accepts valid JSON enclosed in a single whole-response Markdown code fence, while preserving schema and evidence validation. Prose around JSON, malformed JSON, multiple objects and invented evidence remain rejected. Failure messages describe the format without exposing returned source text.
+In **Evidence and details**, the **Model suggestions** card shows the failure reason. `Model did not return the required JSON object` means the provider returned a completed text response that the pilot could not parse; it is distinct from an HTTP authorization or connection error. Version 0.2.2 accepts valid JSON enclosed in a single whole-response Markdown code fence, while preserving schema and evidence validation. Prose around JSON, malformed JSON, multiple objects and invented evidence remain rejected. Failure messages describe the format without exposing returned source text.
 
 Export your manifest and results before stopping the server to update. After updating and restarting, open the newly printed access link, load the manifest, and analyze again. If the format failure persists, try one or two selected repositories to narrow the response and report the exact error from the card. A smaller run is a diagnostic step, not a review of the whole portfolio. Changing the gateway key does not address a response-format failure.
 
 ## Offline transfer
 
-On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies are JavaScript-only; no customer-side dependency installation is needed. Node.js 22+ must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.
+On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies include prebuilt WebAssembly parsers and JavaScript; no customer-side dependency installation is needed. Node.js 22+ must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.
 
 Local-source mode with model review disabled needs no network. Optional GitHub acquisition uses `api.github.com` and `codeload.github.com`, never runtime destinations found in code. Keep customer workbooks, manifests, reports, tokens and source outside the public Synthesis checkout. Exports can contain private repository names and architectural metadata even without source excerpts.
 
@@ -97,7 +101,7 @@ node src/cli.mjs import --inventory /private/inventory.xlsx --profile "Server / 
 node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-report
 ```
 
-Import refuses to overwrite a manifest. Analysis requires a new output directory outside the source root. Outputs: `model.json`, `threat-model.html`, `dfd.svg`. Exit 2 means a source was unavailable, exit 3 means the requested model review failed (the static draft is still exported), exit 1 means invalid input/fatal failure, and exit 0 means a draft was generated—not that security or completeness was established.
+Import refuses to overwrite a manifest. Analysis requires a new output directory outside the source root. Outputs: `model.json`, `threat-model.html`, `dfd.svg`, `dfd.mmd`, `source-graph.json`, `stride-matrix.csv`. Exit 2 means a source was unavailable, exit 3 means the requested model review failed or remains partial (the static draft is still exported), exit 1 means invalid input/fatal failure, and exit 0 means a draft was generated—not that security or completeness was established.
 
 Minimal manifest:
 
@@ -113,7 +117,7 @@ Minimal manifest:
 }
 ```
 
-Exported connection declarations include evidence fingerprints. Reusing them after selected source changes fails closed: remove obsolete declarations and review new evidence. Automatic remapping, incremental analysis and risk acceptance are not implemented.
+Exported connection declarations include evidence fingerprints. Reusing them after selected source changes fails closed: remove obsolete declarations and review new evidence. Automatic remapping, durable restart checkpoints, incremental source analysis and risk acceptance are not implemented. Successful model batches can be reused only within the current server session.
 
 ## Actual coverage
 
@@ -142,3 +146,11 @@ node src/cli.mjs analyze --manifest /tmp/synthetic-scope.json --source-root fixt
 ```
 
 Use equivalent writable paths on Windows. Fixtures are synthetic and never executed. Review the generated report and declare a known caller/receiver connection. Then have the customer champion review critical ingress, privileged administration, messaging, data synchronization and certificate/device scenarios against customer source. Synthetic success is not customer-source qualification.
+
+## Source graph bounds and qualification
+
+Source collection still allows at most 20,000 discovered files and 64 MiB inspected content per repository, with a 1 MiB file limit. Security interface extraction still caps at 100 candidates per file and 2,000 per repository, and stops starting extraction for additional repositories once the portfolio reaches 10,000 candidates. These are explicit partial-coverage limits, not promises that every file or interface was understood.
+
+The syntax graph allows 100,000 nodes, 200,000 edges and 5,000 emitted nodes per file. Parser time is bounded per file; malformed/unsupported/limited files remain visible. Call sites are source-supported, but target edges are only unique same-file scope candidates. Literal project-reference paths can link collected projects across local clones. This does not resolve runtime services, build conditions, dependency injection, polymorphism, macros, effective controls or deployed permissions. The graph preview Mermaid is limited to 200 nodes; full graph JSON retains all collected nodes/edges. DFD Mermaid aggregates unresolved interfaces by source component, protocol and direction; it never treats project containment as a trust zone.
+
+The automated 12-repository fixture has 840 extracted interface records and verifies complete packet scheduling, continuation, graph provenance, export behavior and no fabricated DFD flows using mocked model responses. It is not a large customer-codebase performance benchmark or evidence of live provider reasoning quality. Customer qualification requires inspecting coverage ledgers and validating critical flows with the security champion.
