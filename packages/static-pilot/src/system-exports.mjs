@@ -172,15 +172,20 @@ export function systemSvg(
           b.dimension === lens &&
           b.reviewState !== "rejected",
       );
+      const boundaryState = crossings.some((b) => b.reviewState === "stale")
+        ? "stale"
+        : crossings.every((b) => b.reviewState === "accepted")
+          ? "reviewed"
+          : "pending";
       const path = same
         ? `M${a.x + 270} ${a.y + 32} C${a.x + 300} ${a.y - 45} ${b.x - 30} ${b.y - 45} ${b.x} ${b.y + 32}`
         : `M${x1} ${y1} C${x1} ${y1 + 25} ${x2} ${y2 - 25} ${x2} ${y2}`;
-      return `<g data-select="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(f.id + " · " + f.name + " · " + f.basis)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="16"/><path d="${path}" fill="none" stroke="${active.has(f.id) ? "#b56416" : "#61758c"}" stroke-width="${active.has(f.id) ? 3 : 1.5}" ${f.basis === "unresolved" ? 'stroke-dasharray="5 5"' : ""} class="${active.has(f.id) ? "selected" : ""}" marker-end="url(#system-arrow)"/>${text((x1 + x2) / 2 + 4, labelY, String(f.protocol || "flow").slice(0, 18), 10)}${crossings.length ? `<g data-select="${e(crossings[0].id)}" role="button" tabindex="0" aria-label="${e(crossings[0].name)}"><title>${e(crossings.map((b) => b.name + " · " + b.basis).join("; "))}</title><rect x="${(x1 + x2) / 2}" y="${labelY + 6}" width="112" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5"/>${text((x1 + x2) / 2 + 5, labelY + 20, `${crossings.length} trust crossing${crossings.length > 1 ? "s" : ""}`, 10)}</g>` : ""}</g>`;
+      return `<g data-select="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(f.id + " · " + f.name + " · " + f.basis)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="16"/><path d="${path}" fill="none" stroke="${active.has(f.id) ? "#b56416" : "#61758c"}" stroke-width="${active.has(f.id) ? 3 : 1.5}" ${f.basis === "unresolved" ? 'stroke-dasharray="5 5"' : ""} class="${active.has(f.id) ? "selected" : ""}" marker-end="url(#system-arrow)"/>${text((x1 + x2) / 2 + 4, labelY, String(f.protocol || "flow").slice(0, 18), 10)}${crossings.length ? `<g data-select="${e(crossings[0].id)}" role="button" tabindex="0" aria-label="${e(crossings[0].name)}"><title>${e(crossings.map((b) => b.name + " · " + b.basis).join("; "))}</title><rect x="${(x1 + x2) / 2}" y="${labelY + 6}" width="150" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5"/>${text((x1 + x2) / 2 + 5, labelY + 20, `${crossings.length} boundar${crossings.length > 1 ? "ies" : "y"}: ${boundaryState}`, 10)}</g>` : ""}</g>`;
     })
     .join("")}${nodes
     .map((n) => {
       const p = positions.get(n.id);
-      return `<g class="node" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(n.name + " · " + n.basis)}</title><rect x="${p.x}" y="${p.y}" width="270" height="65" rx="${n.type === "external" ? 1 : 10}" fill="#fff" stroke="${activeNodes.has(n.id) ? "#b56416" : "#b7c7da"}" stroke-width="${activeNodes.has(n.id) ? 3 : 1}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<line x1="${p.x}" y1="${p.y + 7}" x2="${p.x + 270}" y2="${p.y + 7}" stroke="#b7c7da"/>` : ""}${text(p.x + 12, p.y + 26, n.name.slice(0, 34), 13)}${text(p.x + 12, p.y + 47, `${n.type} · ${n.basis}`.slice(0, 42), 10)}</g>`;
+      return `<g class="node" data-component-type="${e(n.type)}" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(n.name + " · " + n.basis)}</title><rect x="${p.x}" y="${p.y}" width="270" height="65" rx="${n.type === "external" ? 1 : 10}" fill="#fff" stroke="${activeNodes.has(n.id) ? "#b56416" : "#b7c7da"}" stroke-width="${activeNodes.has(n.id) ? 3 : 1}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<line x1="${p.x}" y1="${p.y + 7}" x2="${p.x + 270}" y2="${p.y + 7}" stroke="#b7c7da"/>` : ""}${n.type === "broker" ? `<path d="M${p.x + 6} ${p.y + 8}V${p.y + 57} M${p.x + 264} ${p.y + 8}V${p.y + 57}" stroke="#61758c"/>` : ""}${text(p.x + 12, p.y + 26, n.name.slice(0, 34), 13)}${text(p.x + 12, p.y + 47, `${n.type} · ${n.basis}`.slice(0, 42), 10)}</g>`;
     })
     .join(
       "",
@@ -194,8 +199,14 @@ export function systemMermaid(model) {
     ];
   for (const n of [...s.components, ...s.entities]) {
     lines.push(`%% Object ${n.id} = ${nid(n.id)}`);
+    const shape = {
+      store: ['[("', '")]'],
+      broker: ['[["', '"]]'],
+      process: ['("', '")'],
+      gateway: ['("', '")'],
+    }[n.type] || ['["', '"]'];
     lines.push(
-      `  ${nid(n.id)}${n.type === "store" ? '[("' : '["'}${label(n.name + " · " + n.basis)}${n.type === "store" ? '")]' : '"]'}`,
+      `  ${nid(n.id)}${shape[0]}${label(n.name + " · " + n.basis)}${shape[1]}`,
     );
   }
   // Identity lens is the default interchange grouping; other dimensions remain explicit below.

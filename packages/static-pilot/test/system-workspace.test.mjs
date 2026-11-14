@@ -348,6 +348,15 @@ test("all exports retain stable IDs, dispositions, gaps and escaped labels with 
       systemSvg(m, { level, focus: s.components[0].id }).includes("<svg"),
     );
   assert.ok(systemMermaid(m).includes("Service authority"));
+  assert.ok(systemSvg(m).includes("boundary: pending"));
+  const broker = edit(m, "components", {
+    name: "Queue broker",
+    type: "broker",
+    interfaceIds: [],
+    evidenceIds: [],
+  });
+  assert.ok(systemSvg(broker).includes('data-component-type="broker"'));
+  assert.ok(systemMermaid(broker).includes('[["Queue broker'));
   for (const f of s.flows) assert.ok(systemMermaid(m).includes(f.id));
   assert.ok(!/AI scenarios|AI finding/.test(html));
   assert.ok(systemSvg(m, { limit: 1 }).includes("omitted objects"));
