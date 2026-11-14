@@ -54,6 +54,7 @@ test("DFD context, focus, trust lenses and actor selection show real source evid
   page,
 }) => {
   await expect(page.locator("#ws-canvas")).toContainText("Static evidence");
+  expect((await page.locator("#ws-canvas").boundingBox()).y).toBeLessThan(600);
   await page.getByLabel("View", { exact: true }).selectOption("context");
   await expect(page.locator("#ws-canvas")).toContainText("context");
   await page.getByLabel("View", { exact: true }).selectOption("system");
@@ -187,6 +188,26 @@ test("STRIDE, threat details, evidence and every register export remain connecte
   await expect(
     page.locator(".ws-matrix th").filter({ hasText: "Elevation of privilege" }),
   ).toBeVisible();
+  const data = await (
+    await fetch(app.url.split("/#")[0] + "/api/model", {
+      headers: { "X-Synthesis-Token": app.token },
+    })
+  ).json();
+  const actorId = data.systemModel.actors[0].id;
+  await page.getByLabel("Actor", { exact: true }).selectOption(actorId);
+  await page.locator(".ws-matrix button.populated").first().click();
+  const visibleIds = await page
+    .locator("#ws-inspector section button[data-select]")
+    .evaluateAll((nodes) => nodes.map((n) => n.dataset.select));
+  expect(visibleIds.length).toBeGreaterThan(0);
+  expect(
+    visibleIds.every((id) =>
+      data.systemModel.threats
+        .find((t) => t.id === id)
+        .actorIds.includes(actorId),
+    ),
+  ).toBeTruthy();
+  await page.getByLabel("Actor", { exact: true }).selectOption("");
   await page.locator(".ws-matrix button.populated").first().click();
   await expect(page.locator("#ws-inspector")).toContainText("Linked scenarios");
   await page

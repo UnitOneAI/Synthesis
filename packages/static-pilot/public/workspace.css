@@ -232,3 +232,83 @@ input:focus-visible {
   stroke: #1555c4;
   stroke-width: 3;
 }
+
+/* Keep the review canvas visible without scrolling past onboarding copy. */
+.has-model .intro {
+  display: none;
+}
+.has-model main {
+  padding-top: 18px;
+}
+header {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.brand {
+  color: #193c69;
+}
+p,
+.muted {
+  color: var(--muted);
+}
+.eyebrow {
+  color: #56718e;
+}
+.pill {
+  border-color: #b6c9e3;
+  color: #315b8e;
+}
+button,
+.button {
+  background: #2458a5;
+  border-color: #2458a5;
+}
+.secondary,
+nav button {
+  background: transparent;
+  color: #345476;
+  border-color: #c7d5e7;
+}
+nav button.active {
+  background: #eaf1fc;
+  color: #184e98;
+  border-color: #a8c0e5;
+}
+nav[aria-label="Workflow"] button {
+  font-size: 13px;
+  padding: 8px 12px;
+}
+.panel {
+  background: white;
+  border-color: var(--line);
+}
+#workspace {
+  padding: 20px;
+}
+#workspace .section-title {
+  margin-bottom: 6px;
+}
+#workspace .section-title h2 {
+  font-size: 21px;
+}
+#workspace .section-title p {
+  font-size: 12px;
+}
+.ws-tabs {
+  margin-bottom: 12px;
+}
+.ws-tabs button {
+  font-size: 12px;
+  padding: 9px;
+}
+.ws-main {
+  padding: 14px;
+}
+@media (max-width: 600px) {
+  #workspace {
+    padding: 12px;
+  }
+  .has-model main {
+    padding-top: 12px;
+  }
+}

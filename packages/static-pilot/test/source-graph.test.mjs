@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   createSourceGraph,
   addSourceGraph,
@@ -470,4 +470,42 @@ async def records(user=Depends(authorize)):
   assert.ok(
     graph.nodes.some((n) => n.kind === "interface" && n.parent === owner.id),
   );
+});
+
+test("explicit continuation retries only failed validation batches with stricter response instructions", async () => {
+  const model = await analyze(
+    { profile: "test", repositories: [{ name: "frontdoor" }] },
+    {
+      sourceRoot: fileURLToPath(
+        new URL("../fixtures/repositories", import.meta.url),
+      ),
+    },
+  );
+  let calls = 0;
+  const first = async () => {
+    calls++;
+    return Response.json({
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: '{"summary":"review","threats":false,"connections":[],"questions":[]}',
+        },
+      ],
+    });
+  };
+  await enrichGraphModel(model, config, new Map(), first, { maxBatches: 1 });
+  assert.equal(model.aiReview.status, "failed");
+  const next = async (url, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.ok(body.system.includes("Validation retry:"));
+    assert.ok(!body.system.includes('"threats":false'));
+    return response();
+  };
+  await enrichGraphModel(model, config, new Map(), next, { maxBatches: 1 });
+  assert.equal(calls, 2);
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  assert.equal(model.aiReview.batches[0].validationRetry, true);
+  assert.ok(model.aiReview.batches[0].requestPromptHash);
 });

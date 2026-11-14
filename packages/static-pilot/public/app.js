@@ -221,6 +221,7 @@ async function refresh() {
 }
 $("refresh").onclick = () => refresh().catch((e) => message(e.message, true));
 function renderModel() {
+  document.body.classList.toggle("has-model", Boolean(model));
   window.SynthesisWorkspace?.render(model, {
     api,
     download,

@@ -400,11 +400,26 @@ export async function enrichGraphModel(
     calls++;
     entry.interfaceIds.forEach((i) => submitted.add(i));
     try {
-      const result = await requestReview(config, batch.packet, fetchImpl);
+      const failed = previous.find(
+        (b) =>
+          b.id === batch.id &&
+          b.packetHash === batch.packetHash &&
+          b.status === "failed",
+      );
+      entry.validationRetry = Boolean(
+        failed &&
+          /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
+            failed.error || "",
+          ),
+      );
+      const result = await requestReview(config, batch.packet, fetchImpl, {
+        validationRetry: entry.validationRetry,
+      });
       Object.assign(entry, {
         status: "completed",
         review: result.review,
         responseHash: result.responseHash,
+        requestPromptHash: result.requestPromptHash,
       });
       entry.interfaceIds.forEach((i) => reviewed.add(i));
     } catch (error) {

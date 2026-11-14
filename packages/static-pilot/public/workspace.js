@@ -348,9 +348,12 @@
         "<h3>Review context</h3><p>Select a diagram object or register entry to inspect its access assumptions, controls and evidence.</p><p>Legitimate external entities and threat-actor profiles are separate records.</p>";
       return;
     }
+    const visibleThreatIds = (r.threatIds || []).filter(
+      (id) => !actor || threatIndex.get(id)?.actorIds.includes(actor),
+    );
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
-    out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${r.kind === "cell" ? `<section><h4>Linked scenarios and checklist items</h4>${r.threatIds.map((id) => `<button data-select="${e(id)}">${e(find(id)?.name || id)}</button>`).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}</section>` : ""}<section><h4>Supporting evidence</h4>${
+    out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${r.kind === "cell" ? `<section><h4>Linked scenarios and checklist items</h4>${visibleThreatIds.map((id) => `<button data-select="${e(id)}">${e(find(id)?.name || id)}</button>`).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}</section>` : ""}<section><h4>Supporting evidence</h4>${
       refs(r.evidenceIds)
         .map((v) => `<p class="evidence">${e(v)}</p>`)
         .join("") ||
@@ -557,6 +560,7 @@
     if (id === "ws-threat-type") threatType = event.target.value;
     if (id === "ws-category") categoryFilter = event.target.value;
     if (id.startsWith("ws-")) renderBody();
+    if (id === "ws-matrix-actor") renderInspector();
   });
   root.addEventListener("submit", async (event) => {
     event.preventDefault();
