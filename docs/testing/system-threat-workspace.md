@@ -1,6 +1,6 @@
 # System threat workspace: functional test specification
 
-Version: static pilot 0.4.0. This is the acceptance contract for the local Windows/macOS/Linux application, with an explicit distinction between deterministic product verification and customer-source qualification.
+Version: static pilot 0.4.1. This is the acceptance contract for the local Windows/macOS/Linux application, with an explicit distinction between deterministic product verification and customer-source qualification.
 
 ## Automated acceptance cases
 
@@ -32,6 +32,10 @@ Run `npm run check`, `npm test`, then `npx playwright install chromium` and `npm
 | SAV-03 | Rebuilding retains reviewer declarations; interrupted review preserves completed work, including later cached batches, and can continue | server rebuild test; worker cancellation test; retry checkpoint test |
 | EXP-01 | Every advertised export downloads and preserves complete scope, stable IDs, uncertainty and dispositions | browser export loop; export unit tests; server export routes |
 | EXP-02 | HTML/SVG escape untrusted labels, CSV neutralizes formula prefixes, Mermaid sanitizes text; no AI-branded findings | export tests; existing security tests |
+| USG-01 | Failed/invalid responses retain provider usage; input/cache totals do not double count; missing usage stays unknown | `token-usage.test.mjs` |
+| USG-02 | Retries retain prior attempts; shared requests count once; cache reuse adds zero tokens | token accounting continuation test |
+| USG-03 | In-flight attempts checkpoint before dispatch; cancellation/rebuild/restart preserve the ledger | staged worker and token persistence tests |
+| USG-04 | Live meter, unknown history, scope breakdown, CSV/JSON/HTML exports remain consistent | browser token meter and export tests; token report tests |
 | UX-01 | Keyboard-selectable diagram objects, labeled controls, narrow layout without page overflow; no script/CSP errors | browser DFD and per-test console assertions |
 
 The HTML report supports browser Print → Save as PDF. Native PDF pagination and visual equivalence across every printer are not asserted by the automated suite. PDF output requires a quick visual check of the chosen scope.

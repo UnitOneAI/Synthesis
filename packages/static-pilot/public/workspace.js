@@ -281,6 +281,10 @@
         .join(
           "",
         )}</tbody></table></div>${!s.matrix.some((r) => r.rowKind === (window.wsRowKind || "boundary")) ? "<p>No subjects of this type. Declare supported boundaries or select component / flow rows.</p>" : ""}`;
+      body.insertAdjacentHTML(
+        "beforeend",
+        `<section id="ws-usage">${usageHtml(jobState.tokenUsage || model.tokenUsage)}</section>`,
+      );
       return;
     }
     let rows = s[view] || [];
@@ -347,6 +351,13 @@
       notify(error.message, true);
     }
   }
+  function usageHtml(u) {
+    if (!u)
+      return "<h3>Token usage</h3><p>No token records available for this snapshot.</p>";
+    const n = (v) =>
+      v == null ? "Unknown" : Number(v).toLocaleString("en-US");
+    return `<h3>Token usage</h3><p><strong>${n(u.totalTokens)} reported tokens</strong> · ${u.requests} requests · ${u.unknownRequests} with unknown totals</p><p>Latest action: ${n(u.lastRun.totalTokens)} reported tokens / ${u.lastRun.requests} requests. Includes failed responses and retries; locally reused batches make no new request.</p>${u.legacyUnmetered ? "<p>Earlier analysis has no token records. Totals cover metered requests only.</p>" : ""}<p class="hint">Input includes cache reads and writes. Cache columns are subsets. Shared requests are counted once, separately from individual repositories. Unknown usage is not zero. These are reported subtotals, not an invoice.</p><details data-usage-details="repositories"><summary>Usage by repository and shared analysis</summary><div class="table-wrap"><table><thead><tr><th>Scope</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Total</th><th>Unknown</th></tr></thead><tbody>${u.groups.map((g) => `<tr><th>${e(g.label)}</th><td>${g.requests}</td><td>${n(g.inputTokens)}</td><td>${n(g.outputTokens)}</td><td>${n(g.cacheReadTokens)}</td><td>${n(g.cacheWriteTokens)}</td><td>${n(g.totalTokens)}</td><td>${g.unknownRequests}</td></tr>`).join("")}</tbody></table></div></details><details data-usage-details="attempts"><summary>Recent requests (last 50; export includes all)</summary><div class="table-wrap"><table><thead><tr><th>Batch / model</th><th>Repositories</th><th>Status</th><th>Input</th><th>Output</th><th>Total</th></tr></thead><tbody>${u.recentAttempts.map((a) => `<tr><td>${e(a.batchId)}<br>${e(a.model)}</td><td>${e(a.repositories.join(", "))}</td><td>${e(a.status)}${a.retry ? " · retry" : ""}</td><td>${n(a.usage?.inputTokens)}</td><td>${n(a.usage?.outputTokens)}</td><td>${n(a.usage?.totalTokens)}</td></tr>`).join("")}</tbody></table></div></details><button data-ws-export="usage">Token usage · CSV</button>`;
+  }
   function renderInspector() {
     const out = root.querySelector("#ws-inspector"),
       r = find(selected);
@@ -358,13 +369,17 @@
     const visibleThreatIds = (r.threatIds || []).filter(
       (id) => !actor || threatIndex.get(id)?.actorIds.includes(actor),
     );
-    const linked = visibleThreatIds.map((id) => threatIndex.get(id)).filter(Boolean);
+    const linked = visibleThreatIds
+      .map((id) => threatIndex.get(id))
+      .filter(Boolean);
     const scenarios = linked.filter((t) => t.origin !== "review checklist");
     const checklist = linked.filter((t) => t.origin === "review checklist");
-    const linkedButton = (t) => `<button class="ws-linked-record" data-select="${e(t.id)}"><strong>${e(t.name)}</strong><small>${e((refs(t.evidenceIds)[0] || t.id).split(" · ")[0])}</small></button>`;
-    const linkedSection = r.kind === "cell"
-      ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
-      : "";
+    const linkedButton = (t) =>
+      `<button class="ws-linked-record" data-select="${e(t.id)}"><strong>${e(t.name)}</strong><small>${e((refs(t.evidenceIds)[0] || t.id).split(" · ")[0])}</small></button>`;
+    const linkedSection =
+      r.kind === "cell"
+        ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
+        : "";
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
     out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
@@ -542,6 +557,7 @@
         ["stride", "STRIDE matrix · CSV"],
         ["json", "Complete model · JSON"],
         ["manifest", "Source manifest"],
+        ["usage", "Token usage · CSV"],
       ]
         .map(([k, l]) => `<button data-ws-export="${k}">${l}</button>`)
         .join("")}</div>`;
@@ -641,6 +657,20 @@
     },
     setStatus(value) {
       jobState = value;
+      const meter = root.querySelector("#ws-usage");
+      if (meter && value.tokenUsage) {
+        const html = usageHtml(value.tokenUsage);
+        if (meter.dataset.signature !== JSON.stringify(value.tokenUsage)) {
+          const open = [...meter.querySelectorAll("details[open]")].map(
+            (d) => d.dataset.usageDetails,
+          );
+          meter.innerHTML = html;
+          meter.querySelectorAll("details").forEach((d) => {
+            d.open = open.includes(d.dataset.usageDetails);
+          });
+          meter.dataset.signature = JSON.stringify(value.tokenUsage);
+        }
+      }
       const run = root.querySelector("[data-start-review]"),
         stop = root.querySelector("[data-stop-review]");
       if (run) run.disabled = !value.inference || value.status === "running";

@@ -1,6 +1,6 @@
 {
   "name": "@synthesis/static-pilot",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "Local, evidence-led multi-repository static threat modeling pilot",
@@ -9,8 +9,8 @@
   },
   "scripts": {
     "start": "node src/cli.mjs serve",
-    "test": "node --test test/pilot.test.mjs test/model-review.test.mjs test/source-graph.test.mjs test/system-workspace.test.mjs",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/server.mjs && node --check src/model-review.mjs && node --check src/source-graph.mjs && node --check src/graph-review.mjs && node --check src/graph-exports.mjs && node --check public/app.js && node --check src/system-model.mjs && node --check src/system-exports.mjs && node --check src/workspace-store.mjs && node --check public/workspace.js",
+    "test": "node --test test/pilot.test.mjs test/model-review.test.mjs test/source-graph.test.mjs test/system-workspace.test.mjs test/token-usage.test.mjs",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/server.mjs && node --check src/model-review.mjs && node --check src/source-graph.mjs && node --check src/graph-review.mjs && node --check src/graph-exports.mjs && node --check public/app.js && node --check src/system-model.mjs && node --check src/system-exports.mjs && node --check src/workspace-store.mjs && node --check public/workspace.js && node --check src/token-usage.mjs",
     "test:ui": "playwright test"
   },
   "dependencies": {

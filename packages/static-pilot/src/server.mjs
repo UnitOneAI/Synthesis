@@ -1,3 +1,9 @@
+import {
+  usageSummary,
+  usageCsv,
+  interruptUsage,
+  mergeUsage,
+} from "./token-usage.mjs";
 import { systemModel, editSystem } from "./system-model.mjs";
 import {
   systemSvg,
@@ -62,6 +68,7 @@ export async function serve({
             "The workspace contains a different manifest; use a separate --workspace folder",
           );
         model = saved.model;
+        interruptUsage(model.usageLedger);
         manifest = saved.manifest;
         validateManifest(manifest);
         if (model.aiReview?.status === "pending") {
@@ -93,6 +100,10 @@ export async function serve({
     ...model,
     strideMatrix: strideMatrix(model),
     systemModel: systemModel(model),
+    tokenUsage: usageSummary(
+      model.usageLedger,
+      !model.usageLedger && Boolean(model.aiReview),
+    ),
   });
   const startJob = (mode, data) => {
     if (mode === "review") scanPriorManifest = null;
@@ -115,6 +126,8 @@ export async function serve({
         model.aiReview.status = "partial";
         model.aiReview.error = message;
       }
+      interruptUsage(model?.usageLedger);
+      checkpoint();
       if (mode !== "review" && model && scanPriorManifest)
         manifest = scanPriorManifest;
       job = { status: model ? "ready" : "failed", message };
@@ -134,9 +147,22 @@ export async function serve({
       if (m.type === "progress") job.message = m.message;
       if (m.type === "checkpoint" && model) {
         model.aiReview = m.aiReview;
+        model.usageLedger = m.usageLedger;
         await checkpoint();
+        if (worker === active)
+          active.postMessage({
+            type: "checkpoint-saved",
+            id: m.id,
+            error: Boolean(persistenceError),
+          });
       }
       if (m.type === "done") {
+        if (mode !== "review")
+          m.model.usageLedger = mergeUsage(
+            model?.usageLedger,
+            m.model.usageLedger,
+            !model?.usageLedger && Boolean(model?.aiReview),
+          );
         if (mode !== "review" && model?.architecture) {
           m.model.architecture = structuredClone(model.architecture);
           m.model.architecture.rebuildNotice =
@@ -234,6 +260,10 @@ export async function serve({
         return send(200, {
           ...job,
           hasModel: Boolean(model),
+          tokenUsage: usageSummary(
+            model?.usageLedger,
+            !model?.usageLedger && Boolean(model?.aiReview),
+          ),
           persistence: store
             ? {
                 enabled: true,
@@ -345,6 +375,7 @@ export async function serve({
           model.aiReview.error =
             "Review cancelled; continue to process remaining batches";
         }
+        interruptUsage(model?.usageLedger);
         if (!preserve) model = null;
         await checkpoint();
         return send(200, job);
@@ -417,6 +448,7 @@ export async function serve({
           "graph-mermaid": "source-graph.mmd",
           stride: "stride-matrix.csv",
           json: "model.json",
+          usage: "token-usage.csv",
         };
         if (!Object.hasOwn(names, format))
           return send(400, { error: "Unknown export format" });
@@ -424,6 +456,12 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
+        if (format === "usage")
+          return send(
+            200,
+            usageCsv(model.usageLedger),
+            "text/csv; charset=utf-8",
+          );
         if (format === "html")
           return send(200, systemReport(model), "text/html");
         if (format === "svg")

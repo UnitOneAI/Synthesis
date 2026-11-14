@@ -161,3 +161,7 @@ The automated 12-repository fixture has 840 extracted interface records and veri
 ## Release verification and Windows operation
 
 See [functional test specification](../../docs/testing/system-threat-workspace.md) and [Windows runbook](../../docs/runbooks/windows-static-workspace.md).
+
+## Token usage
+
+Version 0.4.1 adds provider-reported token accounting in the STRIDE view, full request-ledger CSV/JSON and HTML summaries. Failed responses and retries are included; local cached batches add no requests. Shared cross-repository requests are counted once. Missing usage and older unmetered history remain explicit. See [accounting contract](../../docs/design/token-usage.md) and the [Windows instructions](../../docs/runbooks/windows-static-workspace.md#inspect-token-consumption-041).

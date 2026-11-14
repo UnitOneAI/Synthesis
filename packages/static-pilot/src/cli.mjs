@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { usageCsv, usageSummary } from "./token-usage.mjs";
 import { systemModel } from "./system-model.mjs";
 import {
   systemSvg,
@@ -146,6 +147,10 @@ async function main() {
           ...model,
           strideMatrix: strideMatrix(model),
           systemModel: systemModel(model),
+          tokenUsage: usageSummary(
+            model.usageLedger,
+            !model.usageLedger && Boolean(model.aiReview),
+          ),
         },
         null,
         2,
@@ -154,6 +159,10 @@ async function main() {
     await fs.writeFile(
       path.join(output, "threat-model.html"),
       systemReport(model),
+    );
+    await fs.writeFile(
+      path.join(output, "token-usage.csv"),
+      usageCsv(model.usageLedger),
     );
     await fs.writeFile(path.join(output, "dfd.svg"), systemSvg(model));
     await fs.writeFile(path.join(output, "dfd.mmd"), systemMermaid(model));

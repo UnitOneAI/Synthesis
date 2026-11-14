@@ -107,3 +107,11 @@ gh pr checks --watch
 ```
 
 Review the staged diff before committing. Never stage customer source, workbooks, manifests, snapshots, reports or credentials. Merge the reviewed PR after required checks pass, then update the Windows checkout using the commands above.
+
+## Inspect token consumption (0.4.1)
+
+Open **STRIDE matrix** and scroll to **Token usage**. The meter shows reported workspace totals, the latest action, repository-local usage and shared cross-repository work. Expand recent requests to inspect batch/model, participating repositories, outcome and input/output totals. **Token usage · CSV** exports every recorded attempt; the complete JSON and HTML report also retain accounting.
+
+Rejected responses and retries count when the provider returns usage. Unknown usage is shown explicitly for missing fields, timeouts and interrupted requests. Input already includes cache reads/writes; do not add those columns again. Reusing completed local batches adds zero requests/tokens. The meter updates when the provider returns usage, not for every generated token.
+
+Old reviews cannot be backfilled: an unmetered-history notice means totals cover only newly recorded requests. Keep the same workspace to retain the history through restart and source rebuilds. Customer gateway usage/billing logs are the reconciliation source for requests whose usage was not returned. No change to the configured model deployment or key is needed for this feature.
