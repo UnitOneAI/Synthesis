@@ -272,12 +272,18 @@ export async function enrichGraphModel(
   const cached = new Map(
     previous.filter((b) => b.status === "completed").map((b) => [b.id, b]),
   );
+  const retained = plan.batches
+    .map((b) =>
+      cached.get(b.id)?.packetHash === b.packetHash ? cached.get(b.id) : null,
+    )
+    .filter(Boolean);
+  const order = new Map(plan.batches.map((b, index) => [b.id, index]));
   const review = {
     ...provenance,
     runKey,
     status: "pending",
     mode: excerpts.size ? "source-excerpts" : "metadata",
-    batches: [],
+    batches: [...retained],
     threats: [],
     connections: [],
     questions: [],
@@ -287,12 +293,14 @@ export async function enrichGraphModel(
   };
   model.aiReview = review;
   model.provider = config.provider;
-  const submitted = new Set(),
-    reviewed = new Set();
+  const submitted = new Set(retained.flatMap((b) => b.interfaceIds)),
+    reviewed = new Set(submitted);
   let calls = 0,
     terminalFailure = false;
   const deadline = Date.now() + 24 * 60 * 1000;
   const aggregate = () => {
+    // Every checkpoint retains compatible successes, including later plan entries.
+    review.batches.sort((a, b) => order.get(a.id) - order.get(b.id));
     review.threats = [];
     review.connections = [];
     review.questions = [];
@@ -378,11 +386,6 @@ export async function enrichGraphModel(
   for (const batch of plan.batches) {
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
-      review.batches.push(prior);
-      batch.packet.records.forEach((r) => {
-        submitted.add(r.id);
-        reviewed.add(r.id);
-      });
       continue;
     }
     if (terminalFailure || calls >= maxBatches || Date.now() > deadline)

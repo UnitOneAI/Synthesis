@@ -612,3 +612,30 @@ test("completed model batches persist across restart and continuation reuses the
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("retry checkpoints retain successful batches later in the plan", async () => {
+  const m = await fixture();
+  const config = modelConfig("anthropic", "test-model", { ANTHROPIC_API_KEY: "test-only" });
+  let calls = 0;
+  const good = () => Response.json({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ summary: "Review", threats: [], connections: [], questions: [] }) }] });
+  await enrichGraphModel(m, config, new Map(), async () => {
+    calls++;
+    return calls === 1 || calls === 3
+      ? Response.json({ stop_reason: "end_turn", content: [{ type: "text", text: "invalid" }] })
+      : good();
+  }, { maxBatches: 100 });
+  const retained = m.aiReview.batches.filter(b => b.status === "completed").map(b => b.id);
+  assert.ok(retained.length > 0);
+  let checkpoints = 0;
+  await enrichGraphModel(m, config, new Map(), async () => good(), {
+    maxBatches: 1,
+    checkpoint: review => {
+      checkpoints++;
+      const completed = new Set(review.batches.filter(b => b.status === "completed").map(b => b.id));
+      assert.ok(retained.every(id => completed.has(id)));
+      assert.equal(review.coverage.completedBatches, retained.length + 1);
+    },
+  });
+  assert.equal(checkpoints, 2);
+  assert.equal(m.aiReview.coverage.completedBatches, retained.length + 1);
+});

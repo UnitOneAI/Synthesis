@@ -29,7 +29,7 @@ Run `npm run check`, `npm test`, then `npx playwright install chromium` and `npm
 | REV-02 | Concurrent edits fail revision guard; referenced deletions fail rather than orphaning live records | architecture validation and server integration |
 | SAV-01 | Atomic local snapshot restores exact model; corrupted snapshot and concurrent writer are rejected; credentials/access tokens excluded | durable store and server restart tests |
 | SAV-02 | Completed model batches survive restart; continuing does not repeat compatible completed requests | persisted batch continuation test |
-| SAV-03 | Rebuilding retains reviewer declarations; interrupted review preserves completed work and can continue | server rebuild test; worker cancellation test |
+| SAV-03 | Rebuilding retains reviewer declarations; interrupted review preserves completed work, including later cached batches, and can continue | server rebuild test; worker cancellation test; retry checkpoint test |
 | EXP-01 | Every advertised export downloads and preserves complete scope, stable IDs, uncertainty and dispositions | browser export loop; export unit tests; server export routes |
 | EXP-02 | HTML/SVG escape untrusted labels, CSV neutralizes formula prefixes, Mermaid sanitizes text; no AI-branded findings | export tests; existing security tests |
 | UX-01 | Keyboard-selectable diagram objects, labeled controls, narrow layout without page overflow; no script/CSP errors | browser DFD and per-test console assertions |
