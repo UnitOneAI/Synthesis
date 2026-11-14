@@ -566,7 +566,10 @@
   });
   root.addEventListener("change", (event) => {
     const id = event.target.id;
-    if (id === "ws-request-budget") requestBudget = Number(event.target.value);
+    if (id === "ws-request-budget") {
+      requestBudget = Number(event.target.value);
+      return;
+    }
     if (id === "ws-level") level = event.target.value;
     if (id === "ws-lens") lens = event.target.value;
     if (id === "ws-focus") {

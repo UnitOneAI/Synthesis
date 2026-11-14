@@ -16,7 +16,7 @@ const e = escapeHtml,
       .slice(0, 180);
 export function selectedPath(s, actorId) {
   const a = s.actors.find((a) => a.id === actorId);
-  if (!a) return [];
+  if (!a || ["rejected", "stale"].includes(a.reviewState)) return [];
   let reached = new Set(a.entryIds || []),
     edges = new Set();
   for (let depth = 0; depth < 6; depth++) {
@@ -55,7 +55,9 @@ export function systemSvg(
   ]);
   const selectedThreat = s.threats.find((t) => t.id === threat);
   const activeNodes = new Set([
-    ...(s.actors.find((a) => a.id === actor)?.entryIds || []),
+    ...(s.actors.find(
+      (a) => a.id === actor && !["rejected", "stale"].includes(a.reviewState),
+    )?.entryIds || []),
     ...s.components
       .filter((c) =>
         c.interfaceIds.some((id) => selectedThreat?.interfaceIds.includes(id)),
@@ -334,6 +336,11 @@ export function registerCsv(model, kind) {
 const fieldName = (k) =>
   ({
     id: "ID",
+    actors: "Threat actors",
+    boundaries: "Trust boundaries",
+    domains: "Trust domains",
+    entities: "External entities",
+    assets: "Data assets",
     actorIds: "Threat actors",
     flowIds: "Affected flows",
     boundaryIds: "Trust boundaries",
@@ -372,7 +379,11 @@ export function systemReport(model) {
       r.name,
       r.status,
       r.snapshot,
-      display(r.coverage || {}),
+      display(
+        Object.fromEntries(
+          Object.entries(r.coverage || {}).filter(([key]) => key !== "entries"),
+        ),
+      ),
     ]),
   )}<p>${s.coverage.unresolvedFlows} unresolved relationships. ${s.coverage.pendingBoundaries} boundary decisions pending. Provider submission is not human review coverage.</p><h2>System context</h2>${systemSvg(model, { level: "context" })}<h2>Overall system DFD</h2>${systemSvg(model)}${[
     "actors",

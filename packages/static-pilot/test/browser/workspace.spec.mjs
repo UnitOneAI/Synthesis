@@ -354,3 +354,69 @@ test("component, external entity, asset, flow and threat editors create linked r
     "Integration request",
   );
 });
+
+test("analysis controls submit the chosen budget and cancel without rescanning (mocked provider transport)", async ({
+  page,
+}) => {
+  let running = false,
+    submitted,
+    cancelled = false,
+    scans = 0;
+  page.on("request", (r) => {
+    if (r.method() === "POST" && new URL(r.url()).pathname === "/api/analyze")
+      scans++;
+  });
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    await route.fulfill({
+      json: {
+        ...status,
+        status: running ? "running" : "ready",
+        mode: "review",
+        inference: { label: "Configured provider", model: "test-model" },
+        message: running ? "Review in progress" : "Review stopped",
+      },
+    });
+  });
+  await page.route("**/api/review", async (route) => {
+    submitted = route.request().postDataJSON();
+    running = true;
+    await route.fulfill({ status: 202, json: { status: "running" } });
+  });
+  await page.route("**/api/cancel", async (route) => {
+    cancelled = true;
+    running = false;
+    await route.fulfill({ json: { status: "ready" } });
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  await page.getByLabel("Request budget", { exact: true }).fill("1");
+  await page
+    .getByRole("button", {
+      name: "Run or continue STRIDE analysis",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page
+      .locator("#workspace")
+      .getByRole("button", { name: "Stop review", exact: true }),
+  ).toBeVisible();
+  expect(submitted.maxBatches).toBe(1);
+  expect(typeof submitted.modelRevision).toBe("string");
+  await page
+    .locator("#workspace")
+    .getByRole("button", { name: "Stop review", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Run or continue STRIDE analysis",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  expect(cancelled).toBeTruthy();
+  expect(scans).toBe(0);
+});

@@ -23,6 +23,7 @@ Run `npm run check`, `npm test`, then `npx playwright install chromium` and `npm
 | STR-03 | Matrix → scenario → inspector → DFD selection retains evidence and assumptions; actor filtering preserves scope | browser DFD and STRIDE tests |
 | MOD-01 | Bounded review packets contain graph/architecture context; declared interactions get endpoint review; 12-repository scheduling includes every eligible record | source graph portfolio test; conditional paths/packet test |
 | MOD-03 | Explicit continuation retries failed validation batches with stricter instructions, retaining successful batches and bounded requests | source graph validation-retry test |
+| MOD-04 | The matrix submits the chosen request budget; Stop preserves completed work and does not rescan sources | browser analysis controls test; worker cancellation test |
 | MOD-02 | Strict JSON and evidence validation rejects invented IDs, malformed/truncated output and unsafe redirects; gateway sends exact model/header configuration | `model-review.test.mjs`, `source-graph.test.mjs` |
 | REV-01 | Review annotations preserve claim basis and capture disposition, owner, severity, reviewer and rationale; source changes mark decisions stale | review-decision staleness test |
 | REV-02 | Concurrent edits fail revision guard; referenced deletions fail rather than orphaning live records | architecture validation and server integration |

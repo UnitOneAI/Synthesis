@@ -260,6 +260,10 @@ test("conditional actor paths follow only represented directional relationships 
   const actor = s.actors.find((a) => a.entryIds.includes(f.source));
   assert.ok(actor);
   assert.ok(selectedPath(s, actor.id).includes(f.id));
+  assert.deepEqual(
+    selectedPath(systemModel(decide(m, actor.id, "rejected")), actor.id),
+    [],
+  );
   assert.ok(
     selectedPath(s, actor.id).every(
       (id) => s.flows.find((f) => f.id === id).basis !== "unresolved",
@@ -305,6 +309,7 @@ test("all exports retain stable IDs, dispositions, gaps and escaped labels with 
   });
   const s = systemModel(m);
   const html = systemReport(m);
+  assert.ok(!html.includes("[object Object]"));
   assert.ok(!html.includes("<script>alert"));
   assert.ok(html.includes("&lt;script&gt;"));
   for (const k of [

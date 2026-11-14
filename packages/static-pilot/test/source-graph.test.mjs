@@ -318,7 +318,7 @@ test("staged API builds a graph without model calls and exports matrix and Merma
     await fs.rm(root, { recursive: true, force: true });
   }
 });
-test("staged worker reviews and continues an existing graph after source folders are removed", async () => {
+test("staged worker continues and cancels review without rescanning source", async () => {
   const { root } = await portfolio();
   const harness = await fs.mkdtemp(
     path.join(os.tmpdir(), "synthesis-worker-test-"),
@@ -327,7 +327,7 @@ test("staged worker reviews and continues an existing graph after source folders
     boot = path.join(harness, "server.mjs");
   await fs.writeFile(
     preload,
-    `globalThis.fetch = async () => Response.json({stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});`,
+    `import fs from "node:fs/promises"; globalThis.fetch = async () => {if(await fs.stat(${JSON.stringify(path.join(harness, "hold"))}).then(()=>true,()=>false))await new Promise(resolve=>setTimeout(resolve,60000));return Response.json({stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});};`,
   );
   await fs.writeFile(
     boot,
@@ -427,6 +427,38 @@ test("staged worker reviews and continues an existing graph after source folders
     model = await (await fetch(base + "/api/model", { headers })).json();
     assert.equal(model.aiReview.coverage.completedBatches, 2);
     assert.equal(model.aiReview.coverage.callsThisRun, 1);
+    await fs.writeFile(path.join(harness, "hold"), "hold synthetic provider");
+    await post("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: 12,
+      includeSourceExcerpts: false,
+    });
+    let started = false;
+    for (let i = 0; i < 200; i++) {
+      const status = await (
+        await fetch(base + "/api/status", { headers })
+      ).json();
+      if (status.message.startsWith("STRIDE review")) {
+        started = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(started);
+    assert.equal((await post("cancel", {})).status, 200);
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.aiReview.coverage.completedBatches, 2);
+    assert.equal(model.aiReview.status, "partial");
+    assert.ok(model.sourceGraph.nodes.length);
+    await fs.rm(path.join(harness, "hold"));
+    await post("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: 1,
+      includeSourceExcerpts: false,
+    });
+    await wait();
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.aiReview.coverage.completedBatches, 3);
   } finally {
     child.kill();
     await new Promise((resolve) =>
