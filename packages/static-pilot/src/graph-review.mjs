@@ -1,3 +1,4 @@
+import { interactionContext, systemModel } from "./system-model.mjs";
 import {
   reviewPacket,
   requestReview,
@@ -16,9 +17,12 @@ export const STRIDE = [
   "Denial of Service",
   "Elevation of Privilege",
 ];
-export const GRAPH_REVIEW_VERSION = "graph-stride-1";
+export const GRAPH_REVIEW_VERSION = "graph-stride-2";
 
 export function reviewPlan(model, excerpts = new Map()) {
+  // Analysis proposals are outputs, not new inputs on each continuation.
+  // Explicit reviewer records remain in the workspace and still affect packets.
+  const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
   const contexts = graphContexts(model.sourceGraph);
   // All names are untrusted source metadata, not instructions or established facts.
   for (const [key, value] of contexts) {
@@ -61,6 +65,11 @@ export function reviewPlan(model, excerpts = new Map()) {
         interpretation:
           "Assess relevant categories; no returned threat does not establish safety. Cross-repository cohorts are hypotheses, not data flows.",
       };
+      packet.systemContext = interactionContext(
+        model,
+        packet.records.map((r) => r.id),
+        system,
+      );
       const repos = new Set(packet.records.map((r) => r.repository));
       packet.projectReferences = projectReferences
         .filter(
@@ -79,8 +88,14 @@ export function reviewPlan(model, excerpts = new Map()) {
       while (
         Buffer.byteLength(JSON.stringify(packet)) > 96 * 1024 &&
         packet.records.length
-      )
+      ) {
         packet.records.pop();
+        packet.systemContext = interactionContext(
+          model,
+          packet.records.map((r) => r.id),
+          system,
+        );
+      }
       const included = new Set(packet.records.map((r) => r.id));
       packet.reviewerDeclarations = packet.reviewerDeclarations.filter(
         (d) => included.has(d.from) && included.has(d.to),
@@ -147,6 +162,19 @@ export function reviewPlan(model, excerpts = new Map()) {
         f.id,
       );
     }
+  }
+  for (const flow of system.flows.filter((f) => f.basis !== "unresolved")) {
+    const ids = new Set(flow.interfaceIds || []);
+    const endpoints = model.interfaces.filter((i) => ids.has(i.id));
+    if (
+      endpoints.length &&
+      !batches.some(
+        (b) =>
+          b.phase !== "repository" &&
+          endpoints.every((i) => b.packet.records.some((r) => r.id === i.id)),
+      )
+    )
+      partition(endpoints, "system-flow", flow.id);
   }
   return { batches, omitted };
 }
@@ -244,12 +272,18 @@ export async function enrichGraphModel(
   const cached = new Map(
     previous.filter((b) => b.status === "completed").map((b) => [b.id, b]),
   );
+  const retained = plan.batches
+    .map((b) =>
+      cached.get(b.id)?.packetHash === b.packetHash ? cached.get(b.id) : null,
+    )
+    .filter(Boolean);
+  const order = new Map(plan.batches.map((b, index) => [b.id, index]));
   const review = {
     ...provenance,
     runKey,
     status: "pending",
     mode: excerpts.size ? "source-excerpts" : "metadata",
-    batches: [],
+    batches: [...retained],
     threats: [],
     connections: [],
     questions: [],
@@ -259,12 +293,14 @@ export async function enrichGraphModel(
   };
   model.aiReview = review;
   model.provider = config.provider;
-  const submitted = new Set(),
-    reviewed = new Set();
+  const submitted = new Set(retained.flatMap((b) => b.interfaceIds)),
+    reviewed = new Set(submitted);
   let calls = 0,
     terminalFailure = false;
   const deadline = Date.now() + 24 * 60 * 1000;
   const aggregate = () => {
+    // Every checkpoint retains compatible successes, including later plan entries.
+    review.batches.sort((a, b) => order.get(a.id) - order.get(b.id));
     review.threats = [];
     review.connections = [];
     review.questions = [];
@@ -350,11 +386,6 @@ export async function enrichGraphModel(
   for (const batch of plan.batches) {
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
-      review.batches.push(prior);
-      batch.packet.records.forEach((r) => {
-        submitted.add(r.id);
-        reviewed.add(r.id);
-      });
       continue;
     }
     if (terminalFailure || calls >= maxBatches || Date.now() > deadline)
@@ -374,11 +405,26 @@ export async function enrichGraphModel(
     calls++;
     entry.interfaceIds.forEach((i) => submitted.add(i));
     try {
-      const result = await requestReview(config, batch.packet, fetchImpl);
+      const failed = previous.find(
+        (b) =>
+          b.id === batch.id &&
+          b.packetHash === batch.packetHash &&
+          b.status === "failed",
+      );
+      entry.validationRetry = Boolean(
+        failed &&
+          /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
+            failed.error || "",
+          ),
+      );
+      const result = await requestReview(config, batch.packet, fetchImpl, {
+        validationRetry: entry.validationRetry,
+      });
       Object.assign(entry, {
         status: "completed",
         review: result.review,
         responseHash: result.responseHash,
+        requestPromptHash: result.requestPromptHash,
       });
       entry.interfaceIds.forEach((i) => reviewed.add(i));
     } catch (error) {

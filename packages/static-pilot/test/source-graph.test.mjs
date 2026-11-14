@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   createSourceGraph,
   addSourceGraph,
@@ -318,7 +318,7 @@ test("staged API builds a graph without model calls and exports matrix and Merma
     await fs.rm(root, { recursive: true, force: true });
   }
 });
-test("staged worker reviews and continues an existing graph after source folders are removed", async () => {
+test("staged worker continues and cancels review without rescanning source", async () => {
   const { root } = await portfolio();
   const harness = await fs.mkdtemp(
     path.join(os.tmpdir(), "synthesis-worker-test-"),
@@ -327,15 +327,19 @@ test("staged worker reviews and continues an existing graph after source folders
     boot = path.join(harness, "server.mjs");
   await fs.writeFile(
     preload,
-    `globalThis.fetch = async () => Response.json({stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});`,
+    `import fs from "node:fs/promises"; globalThis.fetch = async () => {if(await fs.stat(${JSON.stringify(path.join(harness, "hold"))}).then(()=>true,()=>false))await new Promise(resolve=>setTimeout(resolve,60000));return Response.json({stop_reason:"end_turn",content:[{type:"text",text:JSON.stringify({summary:"Synthetic test review",threats:[],connections:[],questions:["Review deployment assumptions"]})}]});};`,
   );
   await fs.writeFile(
     boot,
     `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
   );
-  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, boot], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    ["--import", pathToFileURL(preload).href, boot],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   try {
     const info = await new Promise((resolve, reject) => {
       let data = "",
@@ -423,6 +427,38 @@ test("staged worker reviews and continues an existing graph after source folders
     model = await (await fetch(base + "/api/model", { headers })).json();
     assert.equal(model.aiReview.coverage.completedBatches, 2);
     assert.equal(model.aiReview.coverage.callsThisRun, 1);
+    await fs.writeFile(path.join(harness, "hold"), "hold synthetic provider");
+    await post("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: 12,
+      includeSourceExcerpts: false,
+    });
+    let started = false;
+    for (let i = 0; i < 200; i++) {
+      const status = await (
+        await fetch(base + "/api/status", { headers })
+      ).json();
+      if (status.message.startsWith("STRIDE review")) {
+        started = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(started);
+    assert.equal((await post("cancel", {})).status, 200);
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.aiReview.coverage.completedBatches, 2);
+    assert.equal(model.aiReview.status, "partial");
+    assert.ok(model.sourceGraph.nodes.length);
+    await fs.rm(path.join(harness, "hold"));
+    await post("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: 1,
+      includeSourceExcerpts: false,
+    });
+    await wait();
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.aiReview.coverage.completedBatches, 3);
   } finally {
     child.kill();
     await new Promise((resolve) =>
@@ -431,4 +467,77 @@ test("staged worker reviews and continues an existing graph after source folders
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(harness, { recursive: true, force: true });
   }
+});
+
+test("Python route decorators, controls and call owners exclude comments and docstrings", async () => {
+  const files = [
+    file(
+      "api.py",
+      `from fastapi import FastAPI, Depends
+app = FastAPI()
+# @app.get("/comment")
+"""@app.get('/docstring')"""
+@app.get("/records")
+async def records(user=Depends(authorize)):
+    return await httpx.get("https://example.test/records")
+`,
+    ),
+  ];
+  const extracted = extract({ name: "api" }, files),
+    graph = createSourceGraph();
+  await addSourceGraph(graph, { name: "api" }, files, extracted);
+  finishSourceGraph(graph);
+  assert.equal(graph.coverage.parsed, 1);
+  assert.ok(extracted.interfaces.some((i) => i.operation.includes("/records")));
+  assert.ok(
+    !extracted.interfaces.some((i) => /comment|docstring/.test(i.operation)),
+  );
+  assert.ok(extracted.interfaces.some((i) => i.direction === "control"));
+  assert.ok(
+    graph.nodes.some((n) => n.kind === "function" && n.name === "records"),
+  );
+  const owner = graph.nodes.find(
+    (n) => n.kind === "function" && n.name === "records",
+  );
+  assert.ok(
+    graph.nodes.some((n) => n.kind === "interface" && n.parent === owner.id),
+  );
+});
+
+test("explicit continuation retries only failed validation batches with stricter response instructions", async () => {
+  const model = await analyze(
+    { profile: "test", repositories: [{ name: "frontdoor" }] },
+    {
+      sourceRoot: fileURLToPath(
+        new URL("../fixtures/repositories", import.meta.url),
+      ),
+    },
+  );
+  let calls = 0;
+  const first = async () => {
+    calls++;
+    return Response.json({
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: '{"summary":"review","threats":false,"connections":[],"questions":[]}',
+        },
+      ],
+    });
+  };
+  await enrichGraphModel(model, config, new Map(), first, { maxBatches: 1 });
+  assert.equal(model.aiReview.status, "failed");
+  const next = async (url, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.ok(body.system.includes("Validation retry:"));
+    assert.ok(!body.system.includes('"threats":false'));
+    return response();
+  };
+  await enrichGraphModel(model, config, new Map(), next, { maxBatches: 1 });
+  assert.equal(calls, 2);
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  assert.equal(model.aiReview.batches[0].validationRetry, true);
+  assert.ok(model.aiReview.batches[0].requestPromptHash);
 });

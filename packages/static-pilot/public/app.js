@@ -1,6 +1,14 @@
 const $ = (id) => document.getElementById(id);
 let token =
   location.hash.slice(1) || sessionStorage.getItem("synthesis-token") || "";
+window.synthesisAccessToken = token;
+window.addEventListener("hashchange", () => {
+  if (
+    /^[a-f0-9]{64}$/.test(location.hash.slice(1)) &&
+    location.hash.slice(1) !== token
+  )
+    location.reload();
+});
 if (token) {
   sessionStorage.setItem("synthesis-token", token);
   history.replaceState(null, "", "/");
@@ -37,12 +45,22 @@ async function api(route, data) {
   return response.json();
 }
 function tab(name) {
+  const matrixTab = name === "stride" && model && window.SynthesisWorkspace;
+  if (matrixTab) {
+    name = "workspace";
+    window.SynthesisWorkspace.showMatrix();
+  }
   document
     .querySelectorAll(".panel")
     .forEach((p) => (p.hidden = p.id !== name));
   document
     .querySelectorAll("[data-tab]")
-    .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    .forEach((b) =>
+      b.classList.toggle(
+        "active",
+        matrixTab ? b.dataset.tab === "stride" : b.dataset.tab === name,
+      ),
+    );
 }
 document
   .querySelectorAll("[data-tab]")
@@ -130,6 +148,7 @@ $("add-form").onsubmit = (event) => {
 async function status() {
   const s = await api("status");
   $("root").textContent = s.sourceRoot;
+  window.SynthesisWorkspace?.setStatus(s);
   if (!inferenceInitialized) {
     inferenceInitialized = true;
     providerAvailable = Boolean(s.inference);
@@ -148,6 +167,8 @@ async function status() {
   $("cancel-review").hidden = s.status !== "running" || s.mode !== "review";
   if (s.status === "running") $("run-review").disabled = true;
   if (s.status === "running") message(s.message);
+  if (s.persistence?.error)
+    message("Checkpoint failed: " + s.persistence.error, true);
   if (["failed", "cancelled"].includes(s.status)) {
     clearInterval(polling);
     polling = null;
@@ -157,7 +178,7 @@ async function status() {
     clearInterval(polling);
     polling = null;
     await refresh();
-    tab(model?.aiReview ? "stride" : "graph");
+    tab("workspace");
     message(s.message);
   }
   return s;
@@ -211,6 +232,25 @@ async function refresh() {
 }
 $("refresh").onclick = () => refresh().catch((e) => message(e.message, true));
 function renderModel() {
+  document.body.classList.toggle("has-model", Boolean(model));
+  window.SynthesisWorkspace?.render(model, {
+    api,
+    download,
+    notify: message,
+    providerAvailable,
+    startReview: async (budget) => {
+      $("review-budget").value = budget;
+      await $("run-review").onclick();
+      await status();
+    },
+    stopReview: async () => {
+      await $("cancel-review").onclick();
+    },
+    update: (value) => {
+      model = value;
+      renderModel();
+    },
+  });
   renderGraph();
   renderMatrix();
   $("run-review").disabled = !providerAvailable || !$("use-model").checked;
@@ -366,7 +406,7 @@ function renderMatrix() {
       .slice(0, 100)
       .map(
         (r) =>
-          `<tr><th scope="row">${esc(r.name)}<span class="sub">${esc(r.repository)}</span></th>${r.cells.map((c, i) => `<td><button class="matrix-cell ${c.count ? "has-threats" : ""}" data-matrix-row="${esc(r.id)}" data-category="${i}" aria-label="${esc(r.name + ", " + c.category + ", " + c.status)}"><strong>${c.status === "stale" ? "Stale" : c.count ? `● ${c.count}` : c.status === "not-reviewed" ? "—" : "?"}</strong><span>${c.count ? "AI scenarios" : c.status === "partially-reviewed" ? "Partial review" : c.status === "not-reviewed" ? "Not reviewed" : c.status === "stale" ? "Rerun review" : "No scenario"}</span>${c.promptCount ? `<small>○ ${c.promptCount} rule prompts</small>` : ""}</button></td>`).join("")}<td>${r.reviewed} / ${r.interfaces}<span class="sub">interface records</span></td></tr>`,
+          `<tr><th scope="row">${esc(r.name)}<span class="sub">${esc(r.repository)}</span></th>${r.cells.map((c, i) => `<td><button class="matrix-cell ${c.count ? "has-threats" : ""}" data-matrix-row="${esc(r.id)}" data-category="${i}" aria-label="${esc(r.name + ", " + c.category + ", " + c.status)}"><strong>${c.status === "stale" ? "Stale" : c.count ? `● ${c.count}` : c.status === "not-reviewed" ? "—" : "?"}</strong><span>${c.count ? "Threat scenarios" : c.status === "partially-reviewed" ? "Partial review" : c.status === "not-reviewed" ? "Not reviewed" : c.status === "stale" ? "Rerun review" : "No scenario"}</span>${c.promptCount ? `<small>○ ${c.promptCount} checklist items</small>` : ""}</button></td>`).join("")}<td>${r.reviewed} / ${r.interfaces}<span class="sub">interface records</span></td></tr>`,
       )
       .join(
         "",
@@ -384,7 +424,7 @@ $("stride-matrix").onclick = (event) => {
       .filter((t) => cell.threatIds.includes(t.id))
       .map((t) => ({
         ...t,
-        source: "AI scenario · Needs review",
+        source: "Threat scenario · Needs review",
         evidence: t.evidenceIds,
       })),
     ...model.threats
@@ -392,12 +432,12 @@ $("stride-matrix").onclick = (event) => {
       .map((t) => ({
         ...t,
         title: "Conditional rule prompt",
-        source: "Rule prompt · Not an AI finding",
+        source: "Rule prompt · Conditional review item",
       })),
   ];
   const evidence = new Map(model.evidence.map((e) => [e.id, e]));
   $("stride-detail").innerHTML =
-    `<h3>${esc(row.name)} · ${esc(cell.category)}</h3><p>${cell.count} AI scenarios · ${cell.promptCount} rule prompts · ${esc(cell.status.replaceAll("-", " "))}</p>${
+    `<h3>${esc(row.name)} · ${esc(cell.category)}</h3><p>${cell.count} Threat scenarios · ${cell.promptCount} checklist items · ${esc(cell.status.replaceAll("-", " "))}</p>${
       items.length
         ? items
             .slice(0, 20)
@@ -467,7 +507,7 @@ function renderAIReview() {
     (a.threats || [])
       .map(
         (t) =>
-          `<div class="card"><h3>${esc(t.title)}</h3><span class="badge unknown">Model-inferred · Needs review · ${esc(t.category)}</span><p>${esc(t.scenario)}</p><p><strong>Actor / starting access:</strong> ${esc(t.actor)} / ${esc(t.startingAccess)}</p><p><strong>Asset:</strong> ${esc(t.asset)}</p><p><strong>Prerequisites:</strong> ${esc(t.prerequisites)}</p><p><strong>Controls:</strong> ${esc(t.controls)}</p><p><strong>Review and mitigation:</strong> ${esc(t.mitigation)}</p><p class="evidence">${esc(refs(t.evidenceIds))}</p></div>`,
+          `<div class="card"><h3>${esc(t.title)}</h3><span class="badge unknown">Analysis hypothesis · Needs review · ${esc(t.category)}</span><p>${esc(t.scenario)}</p><p><strong>Actor / starting access:</strong> ${esc(t.actor)} / ${esc(t.startingAccess)}</p><p><strong>Asset:</strong> ${esc(t.asset)}</p><p><strong>Prerequisites:</strong> ${esc(t.prerequisites)}</p><p><strong>Controls:</strong> ${esc(t.controls)}</p><p><strong>Review and mitigation:</strong> ${esc(t.mitigation)}</p><p class="evidence">${esc(refs(t.evidenceIds))}</p></div>`,
       )
       .join("") +
     (a.connections || [])
@@ -578,6 +618,13 @@ async function download(format, preview = false) {
   const a = document.createElement("a");
   a.href = url;
   a.download = {
+    securityControls: "control-register.csv",
+    actors: "actor-register.csv",
+    boundaries: "boundary-register.csv",
+    threats: "threat-register.csv",
+    flows: "flow-register.csv",
+    components: "component-register.csv",
+    assets: "asset-register.csv",
     html: "threat-model.html",
     svg: "dfd.svg",
     manifest: "reviewed-manifest.json",
@@ -612,7 +659,7 @@ $("manifest-file").onchange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     if (file.size > 12 * 1024 * 1024) throw new Error("Manifest too large");
-    const m = JSON.parse(await file.text());
+    const m = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
     if (!Array.isArray(m.repositories))
       throw new Error("Manifest needs repositories");
     repositories = m.repositories.map((r) => ({
@@ -645,7 +692,7 @@ status()
       manifestDeclarations = m.declarations || { bindings: [] };
       renderRepos();
     }
-    if (s.status === "ready") await refresh();
+    if (s.status === "ready" || s.hasModel) await refresh();
     if (s.status === "running")
       polling = setInterval(
         () => status().catch((e) => message(e.message, true)),

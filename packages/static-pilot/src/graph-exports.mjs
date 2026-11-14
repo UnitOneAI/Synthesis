@@ -94,7 +94,7 @@ export function strideCsv(model) {
       row.reviewed,
       ...row.cells.map(
         (c) =>
-          `${c.status}: ${c.count} AI scenarios; ${c.promptCount} rule prompts`,
+          `${c.status}: ${c.count} Threat scenarios; ${c.promptCount} rule prompts`,
       ),
       "Draft. No scenario returned is not evidence of safety.",
     ]);

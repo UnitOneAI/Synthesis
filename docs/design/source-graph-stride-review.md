@@ -1,5 +1,7 @@
 # Source graph to STRIDE review
 
+This records the v0.3 baseline. The [system workspace specification](system-threat-model-workspace.md) and [functional tests](../testing/system-threat-workspace.md) describe the v0.4 extension.
+
 ## Product behavior
 
 An analyst supplies existing local clones or GitHub sources, chooses one product profile, and builds a static source graph. Graph construction does not call a model. The analyst reviews the DFD, declares justified connections and authority transitions, then starts bounded model review from a STRIDE matrix. No customer code, build, installer, test, hook or runtime endpoint is executed.
@@ -49,7 +51,7 @@ Successful batches are retained in the current local server session. Continue re
 
 Full model JSON contains the graph, threat register, batch provenance and matrix. Additional exports are source graph JSON, a 200-node graph-preview Mermaid file, architecture DFD Mermaid, matrix CSV, SVG review sheets, HTML report and reusable source/declaration manifest. CSV cells are guarded against formula injection; Mermaid labels are sanitized and IDs are generated independently of source labels. Reports contain architectural metadata and possibly model-paraphrased source and should be handled as confidential.
 
-Source snippets are retained only transiently when explicitly selected. They do not appear as raw fields in browser model JSON or report exports. Provider keys remain server-side. No raw provider error body is disclosed. Pending or completed batches are not durable across server restart; exports are review artifacts, not trusted restart checkpoints.
+Source snippets are retained only transiently when explicitly selected. They do not appear as raw fields in browser model JSON or report exports. Provider keys remain server-side. No raw provider error body is disclosed. Completed batches and local review records are now checkpointed by the v0.4 workspace store. Raw excerpts remain transient; exports are evidence artifacts and do not themselves replace the workspace checkpoint.
 
 ## Qualification and remaining work
 
@@ -57,4 +59,4 @@ The test portfolio contains 12 synthetic repositories and 840 extracted interfac
 
 Collection limits remain 20,000 discovered files and 64 MiB of inspected content per repository, with a 1 MiB per-file limit. Interface extraction remains bounded at 100 candidates per file and 2,000 per repository, with a portfolio guard before starting additional extraction after 10,000 candidates. The graph caps at 100,000 nodes and 200,000 edges. These limits must remain visible; increasing them without measuring memory and model cost is not qualification.
 
-Further qualification requires representative customer source sizes, confirmation of unsupported languages/encodings, critical-flow reference cases from a security champion, parser/extraction coverage measurement, runtime and memory measurement, and live gateway review. Compiler-level symbol resolution, configuration-bound endpoint matching, durable checkpoints, richer actor/data-store semantics, automated architecture inference and organization-authenticated review decisions remain separate work.
+Further qualification requires representative customer source sizes, confirmation of unsupported languages/encodings, critical-flow reference cases from a security champion, parser/extraction coverage measurement, runtime and memory measurement, and live gateway review. Compiler-level symbol resolution, configuration-bound endpoint matching, automated architecture inference and organization-authenticated review decisions remain separate work.

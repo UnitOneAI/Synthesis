@@ -39,3 +39,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 data/
+
+# Browser verification artifacts
+packages/static-pilot/test-results/
+packages/static-pilot/playwright-report/

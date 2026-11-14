@@ -1,0 +1,856 @@
+import { id, sha } from "./sources.mjs";
+import { redact } from "./model-review.mjs";
+
+export const CATEGORIES = [
+  "Spoofing",
+  "Tampering",
+  "Repudiation",
+  "Information Disclosure",
+  "Denial of Service",
+  "Elevation of Privilege",
+];
+export const DIMENSIONS = [
+  "identity",
+  "privilege",
+  "network",
+  "execution",
+  "data-ownership",
+  "third-party",
+];
+const clean = (v) =>
+  redact(String(v ?? ""))
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .slice(0, 2000);
+const uniq = (a) => [...new Set(a)];
+const lists = [
+  "components",
+  "entities",
+  "assets",
+  "securityControls",
+  "flows",
+  "domains",
+  "boundaries",
+  "actors",
+  "threats",
+];
+const empty = () => ({ version: 1, records: {}, removed: [], decisions: [] });
+const fingerprint = (value) => sha(JSON.stringify(value));
+const claim = (basis = "source observation") => ({
+  basis,
+  reviewState: "pending",
+});
+
+// A projection of the source snapshot and explicit reviewer annotations. No deployment inference.
+export function systemModel(model, { matrix = true } = {}) {
+  const w = model.architecture || empty();
+  const assignedOwners = new Map();
+  for (const c of w.records.components || [])
+    for (const iid of c.interfaceIds || []) assignedOwners.set(iid, c.id);
+  const sourceInterfaces = model.interfaces.map((i) => ({
+    ...i,
+    component: assignedOwners.get(i.id) || i.component,
+  }));
+  const components = model.components.map((c) => ({
+    id: c.id,
+    name: c.name,
+    type: "source-group",
+    repositories: [c.repository],
+    interfaceIds: model.interfaces
+      .filter((i) => i.component === c.id)
+      .map((i) => i.id),
+    evidenceIds: uniq(
+      model.interfaces
+        .filter((i) => i.component === c.id)
+        .flatMap((i) => i.evidence),
+    ),
+    ...claim("source grouping"),
+    description: c.basis,
+  }));
+  const entities = [],
+    assets = [],
+    flows = [],
+    boundaries = [],
+    domains = [],
+    actors = [],
+    threats = [];
+  const securityControls = sourceInterfaces
+    .filter((i) => i.direction === "control")
+    .map((i) => ({
+      id: id("control", i.id),
+      name: i.operation,
+      description:
+        "Source control declaration; applicability and enforcement require review.",
+      interfaceIds: [i.id],
+      evidenceIds: i.evidence,
+      flowIds: [],
+      ...claim(),
+    }));
+  const grouped = new Map();
+  const declared = new Set(model.flows.flatMap((f) => [f.from, f.to]));
+  for (const i of sourceInterfaces.filter(
+    (i) => i.direction !== "control" && !declared.has(i.id),
+  )) {
+    const key = [i.component, i.protocol, i.direction].join(":");
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(i);
+  }
+  for (const [key, items] of grouped) {
+    const i = items[0],
+      inbound = i.direction === "inbound",
+      resource = i.direction === "resource";
+    const peer = {
+      id: id("peer", key),
+      name: inbound
+        ? `Unknown ${i.protocol} caller`
+        : `Unresolved ${i.protocol} ${resource ? "resource" : "destination"}`,
+      type: inbound ? "external" : "unknown",
+      repositories: [],
+      interfaceIds: items.map((i) => i.id),
+      evidenceIds: uniq(items.flatMap((i) => i.evidence)),
+      ...claim("unresolved"),
+      description:
+        "Interface candidates do not establish the remote party, deployed endpoint or effective permissions.",
+    };
+    entities.push(peer);
+    flows.push({
+      id: id("candidate-flow", key),
+      name: `${items.length} ${i.protocol} interface candidate(s)`,
+      source: inbound ? peer.id : i.component,
+      target: inbound ? i.component : peer.id,
+      protocol: i.protocol,
+      data: "Unclassified",
+      interfaceIds: items.map((i) => i.id),
+      evidenceIds: peer.evidenceIds,
+      controls: "Not established",
+      ...claim("unresolved"),
+    });
+  }
+  for (const f of model.flows)
+    flows.push({
+      id: f.id,
+      name: f.operation,
+      source:
+        sourceInterfaces.find((i) => i.id === f.from)?.component || f.source,
+      target:
+        sourceInterfaces.find((i) => i.id === f.to)?.component || f.target,
+      protocol:
+        model.interfaces.find((i) => i.id === f.from)?.protocol || "Unknown",
+      data: f.data,
+      controls: f.controls,
+      description: f.reason,
+      interfaceIds: [f.from, f.to],
+      evidenceIds: f.evidence,
+      reviewer: f.reviewer,
+      ...claim("reviewer declaration"),
+    });
+  for (const b of model.boundaries)
+    boundaries.push({
+      id: b.id,
+      name: `${b.before} → ${b.after}`,
+      dimension: b.dimension,
+      before: b.before,
+      after: b.after,
+      enforcement: b.enforcement,
+      flowIds: [b.flow],
+      evidenceIds: b.evidence,
+      ...claim("reviewer declaration"),
+    });
+  for (const f of flows.filter(
+    (f) => f.basis === "unresolved" && f.protocol === "HTTP",
+  )) {
+    if (!entities.some((n) => n.id === f.source && n.type === "external"))
+      continue;
+    const controls = sourceInterfaces.filter(
+      (i) => i.component === f.target && i.direction === "control",
+    );
+    if (!controls.length) continue;
+    boundaries.push({
+      id: id("candidate-boundary", f.id),
+      name: "Caller authentication context requires review",
+      dimension: "identity",
+      before: "Caller identity not established",
+      after: "Application principal (requires confirmation)",
+      enforcement:
+        "Control declarations occur in this component; applicability to the entry point is not established.",
+      flowIds: [f.id],
+      evidenceIds: uniq([
+        ...f.evidenceIds,
+        ...controls.flatMap((i) => i.evidence),
+      ]),
+      ...claim("inference"),
+    });
+  }
+  const actorEntries = new Map();
+  for (const i of model.interfaces) {
+    if (!actorEntries.has(i.component))
+      actorEntries.set(i.component, new Set());
+    actorEntries.get(i.component).add(assignedOwners.get(i.id) || i.component);
+  }
+  for (const a of model.actors)
+    actors.push({
+      id: a.id,
+      name: a.name,
+      startingAccess: a.startingAccess,
+      objectives: a.objectives,
+      excludedCapabilities: "No additional privileges or compromise assumed",
+      entryIds: [...(actorEntries.get(a.component) || [])],
+      evidenceIds: [],
+      ...claim("assumption"),
+    });
+  for (const t of model.threats)
+    threats.push({
+      id: t.id,
+      name: t.scenario.split(".")[0].slice(0, 150),
+      scenario: t.scenario,
+      categories: CATEGORIES.filter((c) =>
+        t.category.toLowerCase().includes(c.toLowerCase()),
+      ),
+      actorIds: [t.actor],
+      interfaceIds: [t.interface],
+      flowIds: t.path || [],
+      boundaryIds: boundaries
+        .filter((b) => b.flowIds.some((f) => t.path?.includes(f)))
+        .map((b) => b.id),
+      asset: t.asset,
+      prerequisites: t.prerequisites.join("; "),
+      controls: t.controls,
+      mitigation: t.mitigation,
+      evidenceIds: t.evidence,
+      origin: "review checklist",
+      ...claim("conditional scenario"),
+    });
+  for (const t of model.aiReview?.threats || []) {
+    const actorId = id("review-actor", t.actor, t.startingAccess);
+    if (!actors.some((a) => a.id === actorId))
+      actors.push({
+        id: actorId,
+        name: t.actor,
+        startingAccess: t.startingAccess,
+        objectives: t.asset,
+        excludedCapabilities: "Additional capabilities require review",
+        entryIds: uniq(
+          sourceInterfaces
+            .filter((i) => t.interfaceIds.includes(i.id))
+            .map((i) => i.component),
+        ),
+        evidenceIds: t.evidenceIds,
+        ...claim("assumption"),
+      });
+    threats.push({
+      id: t.id,
+      name: t.title,
+      scenario: t.scenario,
+      categories: [t.category],
+      actorIds: [actorId],
+      interfaceIds: t.interfaceIds,
+      flowIds: flows
+        .filter(
+          (f) =>
+            f.interfaceIds.some((i) => t.interfaceIds.includes(i)) &&
+            f.basis !== "unresolved",
+        )
+        .map((f) => f.id),
+      boundaryIds: boundaries
+        .filter((b) =>
+          b.flowIds.some((fid) =>
+            flows
+              .find((f) => f.id === fid)
+              ?.interfaceIds.some((i) => t.interfaceIds.includes(i)),
+          ),
+        )
+        .map((b) => b.id),
+      asset: t.asset,
+      prerequisites: t.prerequisites,
+      controls: t.controls,
+      mitigation: t.mitigation,
+      evidenceIds: t.evidenceIds,
+      origin: "analysis",
+      ...claim("inference"),
+      ...(model.aiReview.status === "stale" ? { reviewState: "stale" } : {}),
+    });
+  }
+  const result = {
+    version: 1,
+    title: model.title,
+    profile: model.profile,
+    sourceRevision: model.modelRevision,
+    components,
+    entities,
+    assets,
+    securityControls,
+    flows,
+    domains,
+    boundaries,
+    actors,
+    threats,
+  };
+  for (const kind of lists) {
+    const map = new Map(result[kind].map((r) => [r.id, r]));
+    for (const r of w.records[kind] || []) map.set(r.id, { ...r });
+    result[kind] = [...map.values()].filter((r) => !w.removed.includes(r.id));
+  }
+  const explicitComponents = new Set(
+    (w.records.components || []).map((c) => c.id),
+  );
+  result.components = result.components.filter(
+    (c) =>
+      explicitComponents.has(c.id) ||
+      !c.interfaceIds.length ||
+      c.interfaceIds.some((i) => !assignedOwners.has(i)),
+  );
+  const bound = new Set(
+    result.flows
+      .filter((f) => f.basis !== "unresolved")
+      .flatMap((f) => f.interfaceIds || []),
+  );
+  const removedCandidates = new Set(
+    result.flows
+      .filter(
+        (f) =>
+          f.basis === "unresolved" &&
+          f.interfaceIds.length &&
+          f.interfaceIds.every((i) => bound.has(i)),
+      )
+      .map((f) => f.id),
+  );
+  result.flows = result.flows.filter((f) => !removedCandidates.has(f.id));
+  result.boundaries = result.boundaries.filter(
+    (b) =>
+      !(
+        b.basis === "inference" &&
+        b.flowIds.every((id) => removedCandidates.has(id))
+      ),
+  );
+  const referencedPeers = new Set([
+    ...result.flows.flatMap((f) => [f.source, f.target]),
+    ...result.actors.flatMap((a) => a.entryIds || []),
+    ...result.domains.flatMap((d) => d.memberIds || []),
+  ]);
+  result.entities = result.entities.filter(
+    (n) => n.basis !== "unresolved" || referencedPeers.has(n.id),
+  );
+  const nodes = new Set(
+    [...result.components, ...result.entities].map((n) => n.id),
+  );
+  result.flows.forEach((f) => {
+    if (!nodes.has(f.source) || !nodes.has(f.target)) f.reviewState = "stale";
+  });
+  for (const f of result.flows)
+    f.boundaryIds = result.boundaries
+      .filter((b) => b.flowIds.includes(f.id))
+      .map((b) => b.id);
+  for (const t of result.threats.filter((t) => t.origin === "analysis")) {
+    t.flowIds = result.flows
+      .filter(
+        (f) =>
+          f.basis !== "unresolved" &&
+          f.interfaceIds?.some((i) => t.interfaceIds.includes(i)),
+      )
+      .map((f) => f.id);
+    t.boundaryIds = result.boundaries
+      .filter((b) => b.flowIds.some((id) => t.flowIds.includes(id)))
+      .map((b) => b.id);
+  }
+  const allIds = new Set(lists.flatMap((k) => result[k]).map((r) => r.id));
+  const evidenceIds = new Set(model.evidence.map((e) => e.id)),
+    interfaceIds = new Set(model.interfaces.map((i) => i.id));
+  for (const kind of lists)
+    for (const r of result[kind]) {
+      r.missingReferences = [
+        ...(r.evidenceIds || []).filter((id) => !evidenceIds.has(id)),
+        ...(r.interfaceIds || []).filter((id) => !interfaceIds.has(id)),
+        ...(r.counterEvidenceIds || []).filter((id) => !evidenceIds.has(id)),
+        ...[
+          "flowIds",
+          "boundaryIds",
+          "actorIds",
+          "entryIds",
+          "memberIds",
+          "controlIds",
+          "assetIds",
+        ].flatMap((key) => (r[key] || []).filter((id) => !allIds.has(id))),
+        ...["source", "target", "parentId", "sourceDomainId", "targetDomainId"]
+          .map((key) => r[key])
+          .filter((id) => id && !allIds.has(id)),
+      ];
+      if (r.missingReferences.length) r.reviewState = "stale";
+      r.fingerprint = fingerprint({
+        ...r,
+        sourceRevision: model.sources.map((s) => [
+          s.name,
+          s.snapshot,
+          s.status,
+        ]),
+      });
+      const d = w.decisions.find((d) => d.subjectId === r.id);
+      if (d) {
+        r.decision = { ...d, stale: d.fingerprint !== r.fingerprint };
+        r.reviewState =
+          r.decision.stale || r.missingReferences.length ? "stale" : d.state;
+      }
+    }
+  result.coverage = {
+    repositories: model.sources.length,
+    unavailable: model.sources
+      .filter((s) => s.status === "unavailable")
+      .map((s) => s.name),
+    sourceGaps: model.sources
+      .filter((s) => s.status !== "read" || s.coverage?.truncated)
+      .map((s) => s.name),
+    unresolvedFlows: result.flows.filter((f) => f.basis === "unresolved")
+      .length,
+    pendingBoundaries: result.boundaries.filter(
+      (b) => b.reviewState === "pending" || b.reviewState === "stale",
+    ).length,
+    analysis: model.aiReview?.coverage || null,
+    graph: model.sourceGraph?.coverage || null,
+  };
+  result.questions = [
+    ...(model.aiReview?.questions || []),
+    ...(model.architecture?.rebuildNotice
+      ? [model.architecture.rebuildNotice]
+      : []),
+  ];
+  result.revision = fingerprint([
+    model.modelRevision,
+    w,
+    model.aiReview?.responseHash,
+    model.aiReview?.status,
+  ]);
+  result.matrix = matrix ? systemMatrix(result, model, w) : [];
+  return result;
+}
+
+export function systemMatrix(s, model, w = model.architecture || empty()) {
+  const reviewed = new Set(
+    model.aiReview?.status === "stale"
+      ? []
+      : model.aiReview?.coverage?.reviewedInterfaceIds || [],
+  );
+  const byFlow = new Map(s.flows.map((f) => [f.id, f]));
+  const bySubject = new Map();
+  for (const t of s.threats)
+    for (const subject of new Set([
+      ...(t.flowIds || []),
+      ...(t.boundaryIds || []),
+      ...(t.interfaceIds || []),
+    ])) {
+      if (!bySubject.has(subject)) bySubject.set(subject, []);
+      bySubject.get(subject).push(t);
+    }
+  return [
+    ...s.components.map((c) => ({ ...c, rowKind: "component" })),
+    ...s.flows.map((f) => ({ ...f, rowKind: "flow" })),
+    ...s.boundaries.map((b) => ({
+      ...b,
+      rowKind: "boundary",
+      interfaceIds: uniq(
+        b.flowIds.flatMap((f) => byFlow.get(f)?.interfaceIds || []),
+      ),
+    })),
+  ].map((r) => ({
+    id: r.id,
+    name: r.name,
+    rowKind: r.rowKind,
+    repositories: r.repositories || [],
+    interfaceIds: r.interfaceIds || [],
+    cells: CATEGORIES.map((category) => {
+      const items = [
+        ...new Set(
+          [r.id, ...(r.interfaceIds || [])].flatMap(
+            (id) => bySubject.get(id) || [],
+          ),
+        ),
+      ].filter((t) => t.categories.includes(category));
+      const key = `cell:${r.id}:${category}`,
+        fp = fingerprint([
+          model.modelRevision,
+          r.id,
+          category,
+          items.map((t) => t.fingerprint),
+        ]),
+        decision = w.decisions.find((d) => d.subjectId === key);
+      return {
+        id: key,
+        category,
+        threatIds: items.map((t) => t.id),
+        scenarioCount: items.filter((t) => t.origin !== "review checklist")
+          .length,
+        checklistCount: items.filter((t) => t.origin === "review checklist")
+          .length,
+        fingerprint: fp,
+        decision: decision
+          ? { ...decision, stale: decision.fingerprint !== fp }
+          : null,
+        state: decision
+          ? decision.fingerprint !== fp
+            ? "stale"
+            : decision.state
+          : model.aiReview?.status === "stale"
+            ? "stale"
+            : items.some((t) => t.origin !== "review checklist")
+              ? "needs-review"
+              : r.interfaceIds?.length &&
+                  r.interfaceIds.every((i) => reviewed.has(i))
+                ? "awaiting-review"
+                : "not-analyzed",
+      };
+    }),
+  }));
+}
+
+function validate(s, model, previous) {
+  const previousRecords = new Map(
+    lists.flatMap((k) => previous?.[k] || []).map((r) => [r.id, r]),
+  );
+  const previousIds = new Set([
+    ...previousRecords.keys(),
+    ...model.interfaces.map((i) => i.id),
+    ...model.evidence.map((e) => e.id),
+  ]);
+  const all = lists.flatMap((k) => s[k]);
+  if (all.length > 50000) throw Error("System model limit exceeded");
+  const ids = all.map((r) => r.id);
+  if (new Set(ids).size !== ids.length)
+    throw Error("Object IDs must be unique");
+  const refs = (r, key, valid) => {
+    if (
+      !Array.isArray(r[key] || []) ||
+      (r[key] || []).some(
+        (v) =>
+          typeof v !== "string" ||
+          (!valid.has(v) &&
+            !(
+              !previousIds.has(v) &&
+              previousRecords.get(r.id)?.[key]?.includes(v)
+            )),
+      )
+    )
+      throw Error(`Invalid ${key} reference`);
+  };
+  const nodeIds = new Set([...s.components, ...s.entities].map((r) => r.id)),
+    evidence = new Set(model.evidence.map((e) => e.id)),
+    interfaces = new Set(model.interfaces.map((i) => i.id)),
+    flowIds = new Set(s.flows.map((f) => f.id)),
+    domainIds = new Set(s.domains.map((d) => d.id));
+  for (const r of all) {
+    if (!r.name?.trim()) throw Error("Name is required");
+    refs(r, "evidenceIds", evidence);
+    refs(r, "counterEvidenceIds", evidence);
+    refs(r, "controlIds", new Set(s.securityControls.map((c) => c.id)));
+    refs(r, "interfaceIds", interfaces);
+  }
+  const ownership = new Set();
+  for (const c of model.architecture?.records?.components || [])
+    for (const iid of c.interfaceIds || []) {
+      if (ownership.has(iid))
+        throw Error(
+          "An interface cannot have multiple declared component owners",
+        );
+      ownership.add(iid);
+    }
+  for (const r of s.components) {
+    refs(r, "repositories", new Set(model.sources.map((s) => s.name)));
+    if (
+      !["source-group", "process", "store", "broker", "gateway"].includes(
+        r.type,
+      )
+    )
+      throw Error("Invalid component type");
+  }
+  for (const r of s.entities)
+    if (!["external", "unknown"].includes(r.type))
+      throw Error("Invalid external entity type");
+  for (const f of s.flows) {
+    if (
+      (!nodeIds.has(f.source) &&
+        (previousRecords.get(f.id)?.source !== f.source ||
+          [...(previous?.components || []), ...(previous?.entities || [])].some(
+            (n) => n.id === f.source,
+          ))) ||
+      (!nodeIds.has(f.target) &&
+        (previousRecords.get(f.id)?.target !== f.target ||
+          [...(previous?.components || []), ...(previous?.entities || [])].some(
+            (n) => n.id === f.target,
+          )))
+    )
+      throw Error("Flow endpoints must exist");
+    refs(f, "assetIds", new Set(s.assets.map((a) => a.id)));
+  }
+  for (const c of s.securityControls) refs(c, "flowIds", flowIds);
+  for (const b of s.boundaries) {
+    for (const key of ["sourceDomainId", "targetDomainId"])
+      if (b[key] && !domainIds.has(b[key]))
+        throw Error("Unknown boundary domain");
+    if (
+      !DIMENSIONS.includes(b.dimension) ||
+      !b.before?.trim() ||
+      !b.after?.trim() ||
+      b.before === b.after
+    )
+      throw Error(
+        "Boundary requires distinct authority contexts and a valid dimension",
+      );
+    refs(b, "flowIds", flowIds);
+  }
+  for (const d of s.domains) {
+    if (!DIMENSIONS.includes(d.dimension))
+      throw Error("Invalid domain dimension");
+    refs(d, "memberIds", nodeIds);
+    if (d.parentId && !domainIds.has(d.parentId))
+      throw Error("Unknown parent domain");
+    let parent = d,
+      seen = new Set();
+    while (parent) {
+      if (seen.has(parent.id)) throw Error("Domain cycle");
+      seen.add(parent.id);
+      parent = s.domains.find((p) => p.id === parent.parentId);
+    }
+    if (
+      d.parentId &&
+      s.domains.find((p) => p.id === d.parentId).dimension !== d.dimension
+    )
+      throw Error("Nested domains must share a dimension");
+  }
+  for (const a of s.actors) {
+    refs(a, "entryIds", nodeIds);
+    if (!a.startingAccess?.trim())
+      throw Error("Initial access assumption is required");
+  }
+  for (const t of s.threats) {
+    refs(t, "actorIds", new Set(s.actors.map((a) => a.id)));
+    refs(t, "flowIds", flowIds);
+    refs(t, "boundaryIds", new Set(s.boundaries.map((b) => b.id)));
+    refs(t, "categories", new Set(CATEGORIES));
+  }
+}
+
+export function editSystem(model, input) {
+  const current = systemModel(model);
+  if (input.revision !== current.revision)
+    throw Error("System model changed; refresh before saving");
+  const next = structuredClone(model),
+    w = (next.architecture ||= empty());
+  if (input.action === "decision") {
+    const item =
+      lists.flatMap((k) => current[k]).find((r) => r.id === input.subjectId) ||
+      current.matrix
+        .flatMap((r) => r.cells)
+        .find((c) => c.id === input.subjectId);
+    if (!item) throw Error("Unknown review subject");
+    if (
+      item.missingReferences?.length &&
+      ["accepted", "implemented-in-source", "risk-accepted"].includes(
+        input.state,
+      )
+    )
+      throw Error("Repair missing references before accepting this record");
+    if (
+      ![
+        "accepted",
+        "rejected",
+        "needs-investigation",
+        "mitigation-planned",
+        "implemented-in-source",
+        "risk-accepted",
+        "not-applicable",
+        "reviewed-no-scenario",
+      ].includes(input.state)
+    )
+      throw Error("Invalid review disposition");
+    if (
+      input.severity &&
+      !["unassessed", "low", "medium", "high", "critical"].includes(
+        input.severity,
+      )
+    )
+      throw Error("Invalid severity assessment");
+    if (!input.rationale?.trim() || !input.reviewer?.trim())
+      throw Error("Reviewer and rationale are required");
+    if (
+      input.state === "reviewed-no-scenario" &&
+      (!input.subjectId.startsWith("cell:") || item.threatIds?.length)
+    )
+      throw Error("No-scenario disposition requires an empty matrix cell");
+    w.decisions = w.decisions.filter((d) => d.subjectId !== input.subjectId);
+    w.decisions.push({
+      subjectId: input.subjectId,
+      fingerprint: item.fingerprint,
+      state: input.state,
+      rationale: clean(input.rationale),
+      reviewer: clean(input.reviewer),
+      owner: clean(input.owner),
+      severity: clean(input.severity || "unassessed"),
+      at: new Date().toISOString(),
+    });
+  } else {
+    if (!lists.includes(input.kind)) throw Error("Unknown record type");
+    if (input.action === "delete") {
+      if (!current[input.kind].some((r) => r.id === input.id))
+        throw Error("Unknown object");
+      w.removed = uniq([...w.removed, input.id]);
+      w.records[input.kind] = (w.records[input.kind] || []).filter(
+        (r) => r.id !== input.id,
+      );
+    } else if (input.action === "upsert") {
+      const r = input.record;
+      if (!r || typeof r !== "object" || Array.isArray(r))
+        throw Error("Invalid record");
+      const allowed = [
+        "id",
+        "name",
+        "type",
+        "description",
+        "repositories",
+        "interfaceIds",
+        "evidenceIds",
+        "source",
+        "target",
+        "protocol",
+        "data",
+        "controls",
+        "assetIds",
+        "dimension",
+        "before",
+        "after",
+        "enforcement",
+        "flowIds",
+        "memberIds",
+        "parentId",
+        "startingAccess",
+        "objectives",
+        "excludedCapabilities",
+        "entryIds",
+        "scenario",
+        "categories",
+        "actorIds",
+        "boundaryIds",
+        "asset",
+        "prerequisites",
+        "mitigation",
+        "counterEvidenceIds",
+        "controlIds",
+        "assumptions",
+        "callerIdentity",
+        "calleeIdentity",
+        "credentialType",
+        "authorization",
+        "sourceDomainId",
+        "targetDomainId",
+      ];
+      if (Object.keys(r).some((k) => !allowed.includes(k)))
+        throw Error("Unsupported record field");
+      if (
+        r.id &&
+        !current[input.kind].some((v) => v.id === r.id) &&
+        !/^user-[a-f0-9]{16}$/.test(r.id)
+      )
+        throw Error("Unknown object ID");
+      const record = {};
+      for (const [k, v] of Object.entries(r)) {
+        if (Array.isArray(v)) {
+          if (v.length > 10000 || v.some((x) => typeof x !== "string"))
+            throw Error("Invalid reference list");
+          record[k] = uniq(v);
+        } else if (typeof v === "string") record[k] = clean(v);
+        else throw Error("Invalid field value");
+      }
+      for (const key of [
+        "repositories",
+        "interfaceIds",
+        "evidenceIds",
+        "flowIds",
+        "entryIds",
+        "memberIds",
+        "actorIds",
+        "boundaryIds",
+        "assetIds",
+        "categories",
+        "counterEvidenceIds",
+        "controlIds",
+      ])
+        record[key] ||= [];
+      record.id ||= "user-" + sha(JSON.stringify(r) + Date.now()).slice(0, 16);
+      Object.assign(record, claim("reviewer declaration"));
+      if (input.kind === "threats") record.origin = "reviewer";
+      w.removed = w.removed.filter((v) => v !== record.id);
+      w.records[input.kind] = [
+        ...(w.records[input.kind] || []).filter((v) => v.id !== record.id),
+        record,
+      ];
+    } else throw Error("Unknown edit action");
+    validate(systemModel(next), next, current);
+    next.analysisRevision ||= model.modelRevision;
+    next.modelRevision = fingerprint([
+      next.analysisRevision,
+      w.records,
+      w.removed,
+    ]);
+    if (next.aiReview) {
+      next.aiReview.status = "stale";
+      next.aiReview.error =
+        "Architecture changed; repeat the affected analysis.";
+    }
+  }
+  return next;
+}
+
+// Only the bounded interaction subjects relevant to submitted interface IDs are sent.
+export function interactionContext(model, ids, projection) {
+  const s = projection || systemModel(model, { matrix: false }),
+    included = new Set(ids),
+    relevant = (f) => f.interfaceIds?.some((i) => included.has(i));
+  const flows = s.flows.filter(relevant).slice(0, 20),
+    nodes = new Set(flows.flatMap((f) => [f.source, f.target]));
+  const allowedEvidence = new Set(
+    model.interfaces
+      .filter((i) => included.has(i.id))
+      .flatMap((i) => i.evidence),
+  );
+  const trim = (r) =>
+    Object.fromEntries(
+      Object.entries(r)
+        .filter(
+          ([k]) =>
+            !["decision", "fingerprint", "missingReferences"].includes(k),
+        )
+        .map(([k, v]) => [
+          k,
+          k === "interfaceIds"
+            ? v.filter((id) => included.has(id))
+            : ["evidenceIds", "counterEvidenceIds"].includes(k)
+              ? v.filter((id) => allowedEvidence.has(id))
+              : v,
+        ]),
+    );
+  return {
+    components: [...s.components, ...s.entities]
+      .filter((n) => nodes.has(n.id))
+      .slice(0, 40)
+      .map(trim),
+    assets: s.assets
+      .filter((a) => flows.some((f) => f.assetIds?.includes(a.id)))
+      .slice(0, 20)
+      .map(trim),
+    controls: s.securityControls.filter(relevant).slice(0, 20).map(trim),
+    omittedFlowCount: Math.max(
+      0,
+      s.flows.filter(relevant).length - flows.length,
+    ),
+    flows: flows.map(trim),
+    actors: s.actors
+      .filter(
+        (a) =>
+          a.reviewState !== "rejected" &&
+          a.entryIds.some((id) => nodes.has(id)),
+      )
+      .slice(0, 12)
+      .map(trim),
+    boundaries: s.boundaries
+      .filter((b) => b.flowIds.some((id) => flows.some((f) => f.id === id)))
+      .slice(0, 12)
+      .map(trim),
+    interpretation:
+      "Architecture declarations and actor access assumptions require review. They are not runtime observations. Context is bounded; evidence references are restricted to submitted records. Only cite evidence belonging to the interface IDs listed in each returned scenario.",
+  };
+}

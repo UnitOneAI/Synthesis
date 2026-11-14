@@ -10,7 +10,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.3.0";
+export const ENGINE_VERSION = "static-pilot-0.4.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -41,6 +41,47 @@ function routeLiteral(value) {
 // These bounded lexical collectors locate review candidates, not complete call graphs
 // or effective security controls. Only structured declarations get source-supported status.
 const RULES = [
+  {
+    kind: "http-inbound",
+    direction: "inbound",
+    protocol: "HTTP",
+    regex:
+      /@(?:app|router|[A-Za-z_]+_router)\.(get|post|put|delete|patch|websocket)\(\s*['"]([^'"\n]+)['"]/g,
+    label: (m) => `${m[1].toUpperCase()} ${routeLiteral(m[2])}`,
+  },
+  {
+    kind: "http-inbound",
+    direction: "inbound",
+    protocol: "HTTP",
+    regex:
+      /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*\(/g,
+    label: (m) => `${m[1]} route handler; framework route requires review`,
+  },
+  {
+    kind: "http-outbound",
+    direction: "outbound",
+    protocol: "HTTP",
+    regex:
+      /\b(?:requests|httpx|aiohttp|session|client)\.(get|post|put|delete|patch|request)\s*\(/g,
+    label: (m) => `${m[1]} client call; destination unresolved`,
+  },
+  {
+    kind: "control",
+    direction: "control",
+    protocol: "authorization",
+    regex:
+      /\b(?:Depends|Security|OAuth2PasswordBearer|HTTPBearer|require_auth|verify_token)\s*\(/g,
+    label: (m) =>
+      `${m[0].replace(/\s*\($/, "")} dependency or security reference; enforcement scope unverified`,
+  },
+  {
+    kind: "database",
+    direction: "resource",
+    protocol: "database",
+    regex:
+      /\b(?:cursor|connection|conn|session|db)\.(execute|executemany|query)\s*\(/g,
+    label: (m) => `${m[1]} data access; store and permissions unresolved`,
+  },
   {
     kind: "http-inbound",
     direction: "inbound",
@@ -148,6 +189,14 @@ const RULES = [
   },
 ];
 function stripComments(text, extension) {
+  if (extension === ".py")
+    return text.replace(
+      /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|#[^\n]*/g,
+      (m) =>
+        m.startsWith("#") || m.startsWith('"""') || m.startsWith("'''")
+          ? m.replace(/[^\n]/g, " ")
+          : m,
+    );
   // Preserve line offsets; string literals are retained. Complex language constructs remain a coverage limitation.
   if (
     [
@@ -427,7 +476,7 @@ export function extract(source, files) {
       });
     }
     if (
-      /\.(cs|js|mjs|ts|tsx|jsx|cpp|cc|c|h|hpp|ps1|sql|proto|graphql|sh|bat|cmd)$/i.test(
+      /\.(py|cs|js|mjs|ts|tsx|jsx|cpp|cc|c|h|hpp|ps1|sql|proto|graphql|sh|bat|cmd)$/i.test(
         file.path,
       )
     ) {

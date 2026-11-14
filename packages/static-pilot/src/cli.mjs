@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+import { systemModel } from "./system-model.mjs";
+import {
+  systemSvg,
+  systemMermaid,
+  systemReport,
+  registerCsv,
+} from "./system-exports.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -14,6 +21,7 @@ import { strideMatrix } from "./graph-review.mjs";
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
+    workspace: { type: "string" },
     "source-root": { type: "string" },
     port: { type: "string" },
     inventory: { type: "string" },
@@ -34,7 +42,7 @@ const [command] = positionals;
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
+      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
     );
     return;
   }
@@ -60,11 +68,15 @@ async function main() {
     await serve({
       sourceRoot: values["source-root"],
       port,
+      persist: true,
+      workspace: values.workspace,
       githubToken: process.env.GITHUB_TOKEN,
       modelConfig: inference,
       includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
       initialManifest: values.manifest
-        ? JSON.parse(await fs.readFile(values.manifest, "utf8"))
+        ? JSON.parse(
+            (await fs.readFile(values.manifest, "utf8")).replace(/^\uFEFF/, ""),
+          )
         : undefined,
     });
     return;
@@ -113,7 +125,9 @@ async function main() {
       throw new Error("Report output must be outside the source root");
     await fs.mkdir(output, { recursive: false });
     const model = await analyze(
-      JSON.parse(await fs.readFile(values.manifest, "utf8")),
+      JSON.parse(
+        (await fs.readFile(values.manifest, "utf8")).replace(/^\uFEFF/, ""),
+      ),
       {
         sourceRoot: root,
         githubToken: process.env.GITHUB_TOKEN,
@@ -127,22 +141,43 @@ async function main() {
     );
     await fs.writeFile(
       path.join(output, "model.json"),
-      JSON.stringify({ ...model, strideMatrix: strideMatrix(model) }, null, 2),
+      JSON.stringify(
+        {
+          ...model,
+          strideMatrix: strideMatrix(model),
+          systemModel: systemModel(model),
+        },
+        null,
+        2,
+      ),
     );
     await fs.writeFile(
       path.join(output, "threat-model.html"),
-      reportHtml(model),
+      systemReport(model),
     );
-    await fs.writeFile(path.join(output, "dfd.svg"), diagram(model));
-    await fs.writeFile(path.join(output, "dfd.mmd"), dfdMermaid(model));
+    await fs.writeFile(path.join(output, "dfd.svg"), systemSvg(model));
+    await fs.writeFile(path.join(output, "dfd.mmd"), systemMermaid(model));
     await fs.writeFile(
       path.join(output, "source-graph.json"),
       JSON.stringify(model.sourceGraph, null, 2),
     );
     await fs.writeFile(
       path.join(output, "stride-matrix.csv"),
-      strideCsv(model),
+      registerCsv(model, "matrix"),
     );
+    for (const kind of [
+      "securityControls",
+      "actors",
+      "boundaries",
+      "threats",
+      "flows",
+      "components",
+      "assets",
+    ])
+      await fs.writeFile(
+        path.join(output, kind + ".csv"),
+        registerCsv(model, kind),
+      );
     console.log(
       `Draft with gaps: ${model.interfaces.length} interface/control candidates, ${model.flows.length} declared flows. Reports: ${output}`,
     );

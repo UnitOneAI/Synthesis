@@ -5,18 +5,22 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Synthesis · Static system review</title>
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/workspace.css" />
     <script src="/app.js" defer></script>
+    <script src="/workspace.js" defer></script>
   </head>
   <body>
     <header>
       <a class="brand" href="/">S<span>ynthesis</span></a
       ><span class="pill">STATIC ONLY</span
-      ><span class="muted">Local workspace · Optional model review</span>
+      ><span class="muted"
+        >Local workspace · Evidence-based security review</span
+      >
     </header>
     <main>
       <section class="intro">
         <p class="eyebrow">MULTI-REPOSITORY THREAT MODELING</p>
-        <h1>Understand the system.<br />Keep the evidence in view.</h1>
+        <h1>System threat modeling</h1>
         <p>
           Start with source repositories. Review interfaces, connect the
           evidence, and export a draft your security team can inspect.
@@ -25,11 +29,16 @@
       <nav aria-label="Workflow">
         <button data-tab="sources" class="active">1 · Sources</button
         ><button data-tab="graph">2 · Source graph</button
-        ><button data-tab="review">3 · Data flows</button
+        ><button data-tab="workspace">3 · System model</button
+        ><button data-tab="review">Connection declarations</button
         ><button data-tab="stride">4 · STRIDE matrix</button
         ><button data-tab="model">Evidence and details</button>
       </nav>
       <div id="message" role="status" aria-live="polite"></div>
+      <section id="workspace" class="panel" hidden>
+        <h2>System model</h2>
+        <p>Build the source graph first.</p>
+      </section>
       <section id="sources" class="panel">
         <div class="section-title">
           <div>
@@ -198,7 +207,7 @@
             <strong id="review-plan">Build the source graph first.</strong>
             <p id="review-progress">
               Each review action uses a bounded number of model requests.
-              Successful batches are retained in this session.
+              Completed analysis batches are saved in the local workspace.
             </p>
           </div>
           <label
@@ -215,8 +224,9 @@
         </div>
         <p class="hint">
           Starting review sends the selected evidence and graph context to the
-          configured provider. Continue processes pending or failed batches.
-          Export before closing; session results are not restored after restart.
+          configured provider. Continue processes pending or failed batches. The
+          saved snapshot is restored after restart. Rebuild to inspect changed
+          source files.
         </p>
         <div class="toolbar">
           <label
@@ -231,13 +241,13 @@
           >
         </div>
         <p class="matrix-legend">
-          <span>● AI scenarios to review</span><span>○ Rule prompts</span
+          <span>● Threat scenarios to review</span><span>○ Checklist items</span
           ><span>— Not reviewed</span><span>? No scenario returned</span>
         </p>
         <div id="stride-matrix" class="table-wrap"></div>
         <p class="hint">
           No scenario returned does not mean safe. Counts describe draft
-          scenarios, not confirmed vulnerabilities. Rule prompts do not count as
+          scenarios, not confirmed vulnerabilities. Checklist items do not count as
           model review.
         </p>
         <div id="stride-detail" aria-live="polite">
@@ -257,7 +267,7 @@
         </div>
         <div id="summary" class="stats"></div>
         <div id="coverage"></div>
-        <h3>Model suggestions · Human review required</h3>
+        <h3>Threat analysis · Review required</h3>
         <div id="ai-review"></div>
         <div class="toolbar">
           <h3>Interfaces and control references</h3>
