@@ -85,6 +85,27 @@ main {
 .ws-inspector button {
   font-size: 12px;
 }
+.ws-inspector .ws-linked-record {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px;
+  text-align: left;
+  background: white;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.ws-linked-record small {
+  color: var(--muted);
+  font-weight: normal;
+}
+.ws-checklist summary {
+  cursor: pointer;
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
 .ws-records {
   display: grid;
   gap: 10px;

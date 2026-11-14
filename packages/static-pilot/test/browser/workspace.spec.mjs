@@ -219,6 +219,9 @@ test("STRIDE, threat details, evidence and every register export remain connecte
   await page.getByLabel("Actor", { exact: true }).selectOption("");
   await page.locator(".ws-matrix button.populated").first().click();
   await expect(page.locator("#ws-inspector")).toContainText("Linked scenarios");
+  await expect(page.locator(".ws-checklist .ws-linked-record").first()).not.toBeVisible();
+  await page.locator(".ws-checklist summary").click();
+  await expect(page.locator(".ws-checklist .ws-linked-record small").first()).toContainText(":");
   await page
     .locator("#ws-inspector section button[data-select]")
     .first()
