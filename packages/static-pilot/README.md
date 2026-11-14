@@ -78,6 +78,12 @@ Provider/model, prompt version/hash, packet hash, response hash, reviewed record
 
 Protocol references: [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create) and [Gemini generateContent](https://ai.google.dev/api/generate-content). Provider availability and access policy must be checked in the customer's environment.
 
+### Model response format failures
+
+In **Evidence and model**, the **Model suggestions** card shows the failure reason. `Model did not return the required JSON object` means the provider returned a completed text response that the pilot could not parse; it is distinct from an HTTP authorization or connection error. Version 0.2.2 accepts valid JSON enclosed in a single whole-response Markdown code fence, while preserving schema and evidence validation. Prose around JSON, malformed JSON, multiple objects and invented evidence remain rejected. Failure messages describe the format without exposing returned source text.
+
+Export your manifest and results before stopping the server to update. After updating and restarting, open the newly printed access link, load the manifest, and analyze again. If the format failure persists, try one or two selected repositories to narrow the response and report the exact error from the card. A smaller run is a diagnostic step, not a review of the whole portfolio. Changing the gateway key does not address a response-format failure.
+
 ## Offline transfer
 
 On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies are JavaScript-only; no customer-side dependency installation is needed. Node.js 22+ must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.

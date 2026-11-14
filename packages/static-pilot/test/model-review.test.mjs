@@ -182,6 +182,53 @@ test("Claude and Gemini adapters use configured models, fixed hosts, header keys
     assert.equal(result.responseHash.length, 64);
   }
 });
+test("direct Claude, gateway and Gemini accept whole-response JSON fences without weakening validation", async () => {
+  const packet = reviewPacket(await fixture());
+  const json = JSON.stringify(suggestion(packet));
+  for (const cfg of [config, gatewayConfig(), { ...config, provider: "gemini" }]) {
+    for (const text of [json, `\uFEFF ${json}\n`, `\`\`\`json\n${json}\n\`\`\``, `\`\`\`\r\n${json}\r\n\`\`\``, ` \`\`\`JSON\n${json}\n\`\`\`\n`]) {
+      let calls = 0;
+      const result = await requestReview(cfg, packet, async () => {
+        calls++;
+        return Response.json(cfg.provider === "gemini"
+          ? { candidates: [{ finishReason: "STOP", content: { parts: [{ text }] } }] }
+          : { stop_reason: "end_turn", content: [{ type: "text", text: text.slice(0, 20) }, { type: "text", text: text.slice(20) }] });
+      });
+      assert.equal(calls, 1);
+      assert.equal(result.review.threats[0].status, "needs-review");
+      assert.deepEqual(result.review, validateReview(suggestion(packet), packet));
+    }
+  }
+});
+test("gateway format errors remain safe and ambiguous or invalid responses are rejected", async () => {
+  const packet = reviewPacket(await fixture());
+  const json = JSON.stringify(suggestion(packet));
+  const invalidEvidence = suggestion(packet);
+  invalidEvidence.threats[0].evidenceIds = ["invented"];
+  const cases = [
+    ["", /empty text/],
+    ["private-source-content", /text outside/],
+    [`Here is the review: ${json}`, /text outside/],
+    [`${json}\n${json}`, /invalid or incomplete/],
+    [`\`\`\`json\n${json}\n\`\`\`\nExplanation`, /text outside/],
+    [`\`\`\`json\n${json}\n\`\`\`\n\`\`\`json\n${json}\n\`\`\``, /invalid JSON inside/],
+    ['```json\n{"summary":"private-source-content",}\n```', /invalid JSON inside/],
+    [`\`\`\`json\n${JSON.stringify(invalidEvidence)}\n\`\`\``, /schema or evidence/],
+    ['```json\n[]\n```', /schema or evidence/],
+  ];
+  for (const [text, expected] of cases) {
+    let calls = 0;
+    await assert.rejects(requestReview(gatewayConfig(), packet, async () => {
+      calls++;
+      return Response.json({ stop_reason: "end_turn", content: [{ type: "text", text }] });
+    }), (error) => {
+      assert.match(error.message, expected);
+      assert.ok(!error.message.includes("private-source-content"));
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
 test("model schemas reject invented or unrelated evidence, duplicate endpoints and asserted approval", async () => {
   const packet = reviewPacket(await fixture());
   const edits = [
