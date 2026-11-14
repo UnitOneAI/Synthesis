@@ -310,6 +310,22 @@ test("all exports retain stable IDs, dispositions, gaps and escaped labels with 
   const s = systemModel(m);
   const html = systemReport(m);
   assert.ok(!html.includes("[object Object]"));
+  assert.ok(html.includes("STRIDE analysis coverage"));
+  assert.ok(html.includes("Source parsing"));
+  assert.ok(
+    systemReport({
+      ...m,
+      aiReview: {
+        status: "partial",
+        coverage: {
+          completedBatches: 2,
+          totalBatches: 4,
+          failedBatches: 1,
+          pendingBatches: 1,
+        },
+      },
+    }).includes("2 of 4 batches completed; 1 failed; 1 pending"),
+  );
   assert.ok(!html.includes("<script>alert"));
   assert.ok(html.includes("&lt;script&gt;"));
   for (const k of [
