@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   createSourceGraph,
   addSourceGraph,
@@ -332,7 +333,7 @@ test("staged worker reviews and continues an existing graph after source folders
     boot,
     `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
   );
-  const child = spawn(process.execPath, ["--import", preload, boot], {
+  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, boot], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   try {
