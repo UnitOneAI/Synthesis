@@ -1,3 +1,4 @@
+import { interactionContext, systemModel } from "./system-model.mjs";
 import {
   reviewPacket,
   requestReview,
@@ -16,9 +17,10 @@ export const STRIDE = [
   "Denial of Service",
   "Elevation of Privilege",
 ];
-export const GRAPH_REVIEW_VERSION = "graph-stride-1";
+export const GRAPH_REVIEW_VERSION = "graph-stride-2";
 
 export function reviewPlan(model, excerpts = new Map()) {
+  const system = systemModel(model, { matrix: false });
   const contexts = graphContexts(model.sourceGraph);
   // All names are untrusted source metadata, not instructions or established facts.
   for (const [key, value] of contexts) {
@@ -61,6 +63,11 @@ export function reviewPlan(model, excerpts = new Map()) {
         interpretation:
           "Assess relevant categories; no returned threat does not establish safety. Cross-repository cohorts are hypotheses, not data flows.",
       };
+      packet.systemContext = interactionContext(
+        model,
+        packet.records.map((r) => r.id),
+        system,
+      );
       const repos = new Set(packet.records.map((r) => r.repository));
       packet.projectReferences = projectReferences
         .filter(
@@ -79,8 +86,14 @@ export function reviewPlan(model, excerpts = new Map()) {
       while (
         Buffer.byteLength(JSON.stringify(packet)) > 96 * 1024 &&
         packet.records.length
-      )
+      ) {
         packet.records.pop();
+        packet.systemContext = interactionContext(
+          model,
+          packet.records.map((r) => r.id),
+          system,
+        );
+      }
       const included = new Set(packet.records.map((r) => r.id));
       packet.reviewerDeclarations = packet.reviewerDeclarations.filter(
         (d) => included.has(d.from) && included.has(d.to),
@@ -147,6 +160,19 @@ export function reviewPlan(model, excerpts = new Map()) {
         f.id,
       );
     }
+  }
+  for (const flow of system.flows.filter((f) => f.basis !== "unresolved")) {
+    const ids = new Set(flow.interfaceIds || []);
+    const endpoints = model.interfaces.filter((i) => ids.has(i.id));
+    if (
+      endpoints.length &&
+      !batches.some(
+        (b) =>
+          b.phase !== "repository" &&
+          endpoints.every((i) => b.packet.records.some((r) => r.id === i.id)),
+      )
+    )
+      partition(endpoints, "system-flow", flow.id);
   }
   return { batches, omitted };
 }

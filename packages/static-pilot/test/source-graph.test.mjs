@@ -333,9 +333,13 @@ test("staged worker reviews and continues an existing graph after source folders
     boot,
     `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
   );
-  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, boot], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    ["--import", pathToFileURL(preload).href, boot],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   try {
     const info = await new Promise((resolve, reject) => {
       let data = "",
@@ -431,4 +435,39 @@ test("staged worker reviews and continues an existing graph after source folders
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(harness, { recursive: true, force: true });
   }
+});
+
+test("Python route decorators, controls and call owners exclude comments and docstrings", async () => {
+  const files = [
+    file(
+      "api.py",
+      `from fastapi import FastAPI, Depends
+app = FastAPI()
+# @app.get("/comment")
+"""@app.get('/docstring')"""
+@app.get("/records")
+async def records(user=Depends(authorize)):
+    return await httpx.get("https://example.test/records")
+`,
+    ),
+  ];
+  const extracted = extract({ name: "api" }, files),
+    graph = createSourceGraph();
+  await addSourceGraph(graph, { name: "api" }, files, extracted);
+  finishSourceGraph(graph);
+  assert.equal(graph.coverage.parsed, 1);
+  assert.ok(extracted.interfaces.some((i) => i.operation.includes("/records")));
+  assert.ok(
+    !extracted.interfaces.some((i) => /comment|docstring/.test(i.operation)),
+  );
+  assert.ok(extracted.interfaces.some((i) => i.direction === "control"));
+  assert.ok(
+    graph.nodes.some((n) => n.kind === "function" && n.name === "records"),
+  );
+  const owner = graph.nodes.find(
+    (n) => n.kind === "function" && n.name === "records",
+  );
+  assert.ok(
+    graph.nodes.some((n) => n.kind === "interface" && n.parent === owner.id),
+  );
 });

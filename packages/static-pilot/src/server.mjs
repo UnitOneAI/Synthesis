@@ -1,3 +1,11 @@
+import { systemModel, editSystem } from "./system-model.mjs";
+import {
+  systemSvg,
+  systemMermaid,
+  systemReport,
+  registerCsv,
+} from "./system-exports.mjs";
+import { workspaceStore } from "./workspace-store.mjs";
 import http from "node:http";
 import fs from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -21,6 +29,8 @@ async function body(req) {
 }
 export async function serve({
   sourceRoot,
+  workspace,
+  persist = false,
   port = 4173,
   githubToken,
   quiet = false,
@@ -36,8 +46,56 @@ export async function serve({
     model,
     manifest = initialManifest,
     timer;
-  let reviewExcerpts = [];
+  let reviewExcerpts = [],
+    scanPriorManifest;
+  const store = persist ? await workspaceStore(root, workspace) : null;
+  let persistenceError = null;
+  if (store) {
+    try {
+      const saved = await store.load();
+      if (saved) {
+        if (
+          initialManifest &&
+          JSON.stringify(saved.manifest) !== JSON.stringify(initialManifest)
+        )
+          throw Error(
+            "The workspace contains a different manifest; use a separate --workspace folder",
+          );
+        model = saved.model;
+        manifest = saved.manifest;
+        validateManifest(manifest);
+        if (model.aiReview?.status === "pending") {
+          model.aiReview.status = "partial";
+          model.aiReview.error =
+            "Interrupted review restored; continue pending work.";
+        }
+        job = {
+          status: "ready",
+          message:
+            "Saved snapshot restored. Rebuild to inspect source changes.",
+        };
+      }
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+  }
+  const checkpoint = async () => {
+    if (!store || !model) return;
+    try {
+      await store.save({ manifest, model });
+      persistenceError = null;
+    } catch (error) {
+      persistenceError = error.message;
+    }
+  };
+  const outputModel = () => ({
+    ...model,
+    strideMatrix: strideMatrix(model),
+    systemModel: systemModel(model),
+  });
   const startJob = (mode, data) => {
+    if (mode === "review") scanPriorManifest = null;
     job = {
       status: "running",
       mode,
@@ -57,6 +115,8 @@ export async function serve({
         model.aiReview.status = "partial";
         model.aiReview.error = message;
       }
+      if (mode !== "review" && model && scanPriorManifest)
+        manifest = scanPriorManifest;
       job = { status: model ? "ready" : "failed", message };
     };
     const activeTimer = setTimeout(
@@ -69,11 +129,19 @@ export async function serve({
       30 * 60 * 1000,
     );
     timer = activeTimer;
-    active.on("message", (m) => {
+    active.on("message", async (m) => {
       if (worker !== active || job.status !== "running") return;
       if (m.type === "progress") job.message = m.message;
-      if (m.type === "checkpoint" && model) model.aiReview = m.aiReview;
+      if (m.type === "checkpoint" && model) {
+        model.aiReview = m.aiReview;
+        await checkpoint();
+      }
       if (m.type === "done") {
+        if (mode !== "review" && model?.architecture) {
+          m.model.architecture = structuredClone(model.architecture);
+          m.model.architecture.rebuildNotice =
+            "Reviewer declarations retained from the previous snapshot. Recheck source references and stale decisions after rebuilding.";
+        }
         model = m.model;
         reviewExcerpts = m.excerpts || [];
         job = {
@@ -86,6 +154,7 @@ export async function serve({
                 : "Draft ready; inspect coverage and unresolved relationships.",
         };
         clearTimeout(activeTimer);
+        await checkpoint();
       }
       if (m.type === "error") {
         stop(m.message);
@@ -103,7 +172,13 @@ export async function serve({
   };
   const assets = new Map(
     await Promise.all(
-      ["index.html", "app.js", "style.css"].map(async (name) => [
+      [
+        "index.html",
+        "app.js",
+        "style.css",
+        "workspace.js",
+        "workspace.css",
+      ].map(async (name) => [
         name,
         await fs.readFile(new URL("../public/" + name, import.meta.url)),
       ]),
@@ -158,6 +233,14 @@ export async function serve({
       if (req.method === "GET" && url.pathname === "/api/status")
         return send(200, {
           ...job,
+          hasModel: Boolean(model),
+          persistence: store
+            ? {
+                enabled: true,
+                error: persistenceError,
+                restored: Boolean(model),
+              }
+            : { enabled: false },
           sourceRoot: root,
           githubConfigured: Boolean(githubToken),
           inference: publicModelConfig(modelConfig),
@@ -180,13 +263,14 @@ export async function serve({
       if (req.method === "POST" && url.pathname === "/api/analyze") {
         if (job.status === "running")
           return send(409, { error: "An analysis is already running" });
-        manifest = await body(req);
-        validateManifest(manifest);
-        if (manifest.analysis?.useModel === true && !modelConfig)
+        const proposedManifest = await body(req);
+        validateManifest(proposedManifest);
+        if (proposedManifest.analysis?.useModel === true && !modelConfig)
           throw new Error(
             "Start the server with --provider and --model before requesting model review",
           );
-        model = null;
+        scanPriorManifest = manifest;
+        manifest = proposedManifest;
         reviewExcerpts = [];
         startJob("analyze", {
           manifest,
@@ -230,6 +314,11 @@ export async function serve({
           throw new Error("Choose 1–100 model requests per review action");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
+        if (input.includeSourceExcerpts && !reviewExcerpts.length)
+          return send(400, {
+            error:
+              "Source excerpts are not retained across restarts. Rebuild with excerpts enabled or review metadata only.",
+          });
         startJob("review", {
           model,
           excerpts: input.includeSourceExcerpts ? reviewExcerpts : [],
@@ -238,28 +327,56 @@ export async function serve({
         return send(202, job);
       }
       if (req.method === "POST" && url.pathname === "/api/cancel") {
-        const preserve = job.mode === "review" && model;
+        const reviewing = job.mode === "review",
+          preserve = Boolean(model);
+        if (!reviewing && preserve && scanPriorManifest)
+          manifest = scanPriorManifest;
         job.status = "cancelling";
         await worker?.terminate();
         clearTimeout(timer);
         job = {
           status: preserve ? "ready" : "cancelled",
           message: preserve
-            ? "Review cancelled; source graph and completed batches retained"
+            ? "Operation cancelled; previous snapshot and completed batches retained"
             : "Analysis cancelled; no completed model",
         };
-        if (preserve && model.aiReview) {
+        if (reviewing && preserve && model.aiReview) {
           model.aiReview.status = "partial";
           model.aiReview.error =
             "Review cancelled; continue to process remaining batches";
         }
         if (!preserve) model = null;
+        await checkpoint();
         return send(200, job);
       }
       if (req.method === "GET" && url.pathname === "/api/model")
         return model
-          ? send(200, { ...model, strideMatrix: strideMatrix(model) })
+          ? send(200, outputModel())
           : send(409, { error: "No completed model" });
+      if (req.method === "POST" && url.pathname === "/api/system") {
+        if (job.status === "running")
+          return send(409, {
+            error: "Stop the current analysis before editing the system model",
+          });
+        if (!model) return send(409, { error: "Build the source graph first" });
+        model = editSystem(model, await body(req));
+        await checkpoint();
+        return send(200, outputModel());
+      }
+      if (req.method === "GET" && url.pathname === "/api/system-diagram") {
+        if (!model) return send(409, { error: "Build the source graph first" });
+        return send(
+          200,
+          systemSvg(model, {
+            level: url.searchParams.get("level") || "system",
+            lens: url.searchParams.get("lens") || "identity",
+            focus: url.searchParams.get("focus") || "",
+            actor: url.searchParams.get("actor") || "",
+            threat: url.searchParams.get("threat") || "",
+          }),
+          "image/svg+xml",
+        );
+      }
       if (req.method === "POST" && url.pathname === "/api/bindings") {
         if (job.status === "running")
           return send(409, {
@@ -278,13 +395,21 @@ export async function serve({
         });
         compose(revised, { bindings: input.bindings });
         model = revised;
-        return send(200, { ...model, strideMatrix: strideMatrix(model) });
+        await checkpoint();
+        return send(200, outputModel());
       }
       if (req.method === "GET" && url.pathname === "/api/export") {
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
           html: "threat-model.html",
+          securityControls: "control-register.csv",
+          actors: "actor-register.csv",
+          boundaries: "boundary-register.csv",
+          threats: "threat-register.csv",
+          flows: "flow-register.csv",
+          components: "component-register.csv",
+          assets: "asset-register.csv",
           svg: "dfd.svg",
           manifest: "reviewed-manifest.json",
           mermaid: "dfd.mmd",
@@ -299,18 +424,40 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
-        if (format === "html") return send(200, reportHtml(model), "text/html");
-        if (format === "svg") return send(200, diagram(model), "image/svg+xml");
+        if (format === "html")
+          return send(200, systemReport(model), "text/html");
+        if (format === "svg")
+          return send(200, systemSvg(model), "image/svg+xml");
         if (format === "mermaid")
-          return send(200, dfdMermaid(model), "text/plain");
+          return send(200, systemMermaid(model), "text/plain");
         if (format === "graph-mermaid")
           return send(200, sourceGraphMermaid(model), "text/plain");
         if (format === "graph") return send(200, model.sourceGraph);
         if (format === "stride")
-          return send(200, strideCsv(model), "text/csv; charset=utf-8");
+          return send(
+            200,
+            registerCsv(model, "matrix"),
+            "text/csv; charset=utf-8",
+          );
+        if (
+          [
+            "securityControls",
+            "actors",
+            "boundaries",
+            "threats",
+            "flows",
+            "components",
+            "assets",
+          ].includes(format)
+        )
+          return send(
+            200,
+            registerCsv(model, format),
+            "text/csv; charset=utf-8",
+          );
         if (format === "manifest")
           return send(200, { ...manifest, declarations: model.declarations });
-        return send(200, { ...model, strideMatrix: strideMatrix(model) });
+        return send(200, outputModel());
       }
       return send(404, { error: "Not found" });
     } catch (error) {
@@ -318,18 +465,37 @@ export async function serve({
     }
   });
   server.requestTimeout = 30000;
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", resolve);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", resolve);
+    });
+  } catch (error) {
+    await store?.close();
+    throw error;
+  }
   const url = `http://127.0.0.1:${server.address().port}/#${token}`;
   if (!quiet)
     process.stdout.write(
       `Synthesis static pilot\nSource root: ${root}\nOpen this local access link:\n${url}\nModel: ${modelConfig ? modelConfig.provider + " / " + modelConfig.model : "none"}. Sources are read only. Stop with Ctrl+C.\n`,
     );
+  let closing;
   server.on("close", () => {
     clearTimeout(timer);
     worker?.terminate();
+    closing = store?.close();
   });
-  return { server, url, token };
+  return {
+    server,
+    url,
+    token,
+    close: async () => {
+      if (server.listening)
+        await new Promise((resolve) => {
+          server.close(resolve);
+          server.closeAllConnections();
+        });
+      await closing;
+    },
+  };
 }

@@ -4,7 +4,7 @@ AI-powered threat modeling platform. Analyze GitHub repositories or design docum
 
 ## Local static multi-repository pilot
 
-For a local, provider-free portfolio review, use the [static pilot](packages/static-pilot/README.md). It imports XLSX/CSV inventory, reads local clones or pinned GitHub sources, collects evidence-linked candidates, supports declared connections and trust transitions, and exports HTML/SVG/JSON. It is a separate draft-review workflow; see its coverage matrix before using it for an assessment.
+For static portfolio review, use the [local workspace](packages/static-pilot/README.md). It reads existing clones or pinned GitHub sources, builds a source graph, and connects a system DFD with actor, boundary, control and STRIDE registers. Review annotations and completed analysis batches survive restart. Export HTML, SVG, Mermaid, CSV and JSON. Inventory workbooks and model review are optional. See the [Windows runbook](docs/runbooks/windows-static-workspace.md) and [functional acceptance tests](docs/testing/system-threat-workspace.md).
 
 ```sh
 cd packages/static-pilot

@@ -6,6 +6,7 @@ import { id, sha } from "./sources.mjs";
 const require = createRequire(import.meta.url);
 const { Parser, Language } = TreeSitter;
 const grammars = {
+  ".py": "python",
   ".cs": "c-sharp",
   ".c": "cpp",
   ".h": "cpp",
@@ -19,6 +20,7 @@ const grammars = {
   ".tsx": "tsx",
 };
 const types = new Set([
+  "class_definition",
   "class_declaration",
   "struct_declaration",
   "interface_declaration",
@@ -36,7 +38,7 @@ const functions = new Set([
   "arrow_function",
   "function_expression",
 ]);
-const calls = new Set(["invocation_expression", "call_expression"]);
+const calls = new Set(["invocation_expression", "call_expression", "call"]);
 const languages = new Map();
 const localLinks = new WeakMap();
 let initialized;
@@ -209,7 +211,10 @@ export async function addSourceGraph(graph, source, files, result, sourceRoot) {
             path: file.path,
             line: node.startPosition.row + 1,
             endLine: node.endPosition.row + 1,
-            start: node.startIndex,
+            start:
+              node.parent?.type === "decorated_definition"
+                ? node.parent.startIndex
+                : node.startIndex,
             end: node.endIndex,
             blobSha256: file.hash,
           };
@@ -241,7 +246,8 @@ export async function addSourceGraph(graph, source, files, result, sourceRoot) {
             const name =
               fn?.childForFieldName("name") ||
               fn?.childForFieldName("property") ||
-              fn?.childForFieldName("field");
+              fn?.childForFieldName("field") ||
+              fn?.childForFieldName("attribute");
             const callee = identifier(name?.text || fn?.text);
             const receiver =
               fn?.childForFieldName("expression") ||
