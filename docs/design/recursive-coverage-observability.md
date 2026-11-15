@@ -23,6 +23,8 @@ The retained syntax graph still has 100,000-node, 200,000-edge and 5,000-emitted
 
 These safeguards are not a claim of unlimited codebase support. Full disk-backed syntax-graph shards, compiler-aware cross-file resolution and out-of-core traversal are **not implemented**. The diagnostic ledger identifies when they are required. A run reaching a graph or process limit cannot be described as full graph coverage.
 
+The proposed [disk-backed static graph architecture](disk-backed-static-graph.md) specifies persistent graph storage, incremental resolution, disk-backed traversal, streaming exports, delivery gates and single-VM deployment. It is a future implementation contract, not a change to the limits above.
+
 ## Recursive review worklist
 
 The planner is deterministic for a source/system revision, packet content and planner version. Generated scenarios and actor proposals are outputs; they do not recursively expand source inputs.

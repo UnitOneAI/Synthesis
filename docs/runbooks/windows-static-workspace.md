@@ -2,6 +2,8 @@
 
 Requires Node.js 22 or 24, Git, a current Edge/Chrome browser, and readable local clones. No target application, build, installer, database, container or runtime service is started. Keep the source root, Synthesis checkout, workspace and exports in separate folders.
 
+This can run inside a Windows VM. Open the browser inside that VM (including through Remote Desktop) using the printed local access link. Model review requires outbound access to the configured provider; static collection and manual review do not. The proposed [disk-backed graph and VM architecture](../design/disk-backed-static-graph.md) is not yet implemented; these commands still run the current pilot with its documented graph and process limits.
+
 ## Install or update
 
 For a new checkout:
