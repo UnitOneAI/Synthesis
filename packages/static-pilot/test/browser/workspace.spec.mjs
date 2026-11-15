@@ -159,6 +159,8 @@ test("actor, boundary and domain declarations save, edit and survive restart", a
     "Service identity domain",
   );
   const restartPort = app.server.address().port;
+  // Stop page polling before deliberately taking the server offline.
+  await page.goto("about:blank");
   await app.close();
   app = await serve({
     sourceRoot: root,
