@@ -432,7 +432,7 @@ function parseReviewText(text) {
           : "text outside the required JSON format";
     // Report the shape, never source-bearing response text or JSON.parse details.
     throw new Error(
-      `Model did not return the required JSON object (${format}). The provider responded; this is a response-format failure. Retry with fewer selected repositories; if it persists, report this error.`,
+      `Model did not return the required JSON object (${format}). The provider responded; this is a response-format failure. Retry the pending batch; inspect the diagnostic bundle if it persists.`,
     );
   }
 }
@@ -481,28 +481,39 @@ export async function requestReview(
       };
   let data;
   try {
-    data = await responseJson(
-      await fetchImpl(url, {
-        method: "POST",
-        redirect: "error",
-        signal: AbortSignal.timeout(120000),
-        headers: {
-          "Content-Type": "application/json",
-          ...(gateway
+    const response = await fetchImpl(url, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(120000),
+      headers: {
+        "Content-Type": "application/json",
+        ...(gateway
+          ? {
+              "Ocp-Apim-Subscription-Key": config.apiKey,
+              "anthropic-version": gateway.apiVersion,
+            }
+          : anthropic
             ? {
-                "Ocp-Apim-Subscription-Key": config.apiKey,
-                "anthropic-version": gateway.apiVersion,
+                "x-api-key": config.apiKey,
+                "anthropic-version": "2026-10-21",
               }
-            : anthropic
-              ? {
-                  "x-api-key": config.apiKey,
-                  "anthropic-version": "2026-10-21",
-                }
-              : { "x-goog-api-key": config.apiKey }),
-        },
-        body: JSON.stringify(body),
-      }),
-    );
+            : { "x-goog-api-key": config.apiKey }),
+      },
+      body: JSON.stringify(body),
+    });
+    const requestIds = {};
+    for (const key of [
+      "request-id",
+      "x-request-id",
+      "x-ms-request-id",
+      "apim-request-id",
+    ]) {
+      const value = response.headers?.get(key);
+      if (value && /^[a-zA-Z0-9._:-]{1,200}$/.test(value))
+        requestIds[key] = value;
+    }
+    await options.onResponse?.({ httpStatus: response.status, requestIds });
+    data = await responseJson(response);
   } catch (error) {
     // Do not echo SDK/network exception messages, provider error bodies, or request content.
     if (
@@ -515,6 +526,25 @@ export async function requestReview(
       "Provider request failed or timed out; no automatic retry or provider fallback",
     );
   }
+  const reason = anthropic
+    ? data.stop_reason
+    : data.candidates?.[0]?.finishReason;
+  await options.onStop?.({
+    stopReason: [
+      "end_turn",
+      "max_tokens",
+      "stop_sequence",
+      "tool_use",
+      "refusal",
+      "pause_turn",
+      "STOP",
+      "MAX_TOKENS",
+      "SAFETY",
+      "RECITATION",
+    ].includes(reason)
+      ? reason
+      : "unknown",
+  });
   const usage = providerUsage(data, config.provider);
   await options.onUsage?.(usage);
   let text;

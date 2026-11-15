@@ -228,7 +228,7 @@ async function refresh() {
   renderModel();
   const plan = await api("review-plan");
   $("review-plan").textContent =
-    `${plan.repositories} repositories · ${plan.batches} planned batches (metadata estimate)`;
+    `${plan.repositories} repositories · ${plan.batches} planned batches · ${plan.obligations} review obligations · ${plan.gaps} recorded gaps (metadata estimate)`;
 }
 $("refresh").onclick = () => refresh().catch((e) => message(e.message, true));
 function renderModel() {
@@ -633,6 +633,8 @@ async function download(format, preview = false) {
     "graph-mermaid": "source-graph.mmd",
     stride: "stride-matrix.csv",
     json: "model.json",
+    usage: "token-usage.csv",
+    diagnostics: "synthesis-diagnostics.zip",
   }[format];
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);

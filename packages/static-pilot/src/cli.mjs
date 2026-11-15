@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+import {
+  traceStore,
+  diagnosticBundle,
+  readTraces,
+  failureDetail,
+} from "./diagnostics.mjs";
+import { sha } from "./sources.mjs";
 import { usageCsv, usageSummary } from "./token-usage.mjs";
 import { systemModel } from "./system-model.mjs";
 import {
@@ -17,12 +24,13 @@ import { reportHtml, diagram } from "./report.mjs";
 import { modelConfig } from "./model-review.mjs";
 import { within } from "./sources.mjs";
 import { dfdMermaid, strideCsv } from "./graph-exports.mjs";
-import { strideMatrix } from "./graph-review.mjs";
+import { strideMatrix, reviewPlan } from "./graph-review.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     workspace: { type: "string" },
+    "trace-dir": { type: "string" },
     "source-root": { type: "string" },
     port: { type: "string" },
     inventory: { type: "string" },
@@ -40,10 +48,43 @@ const { values, positionals } = parseArgs({
   },
 });
 const [command] = positionals;
+let trace;
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
+      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\ndiagnostics --workspace <folder> --out <new-file.zip> [--trace-dir <folder>]\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
+    );
+    return;
+  }
+  if (command === "diagnostics") {
+    if (!values.workspace || !values.out)
+      throw Error("Diagnostics requires --workspace and --out <new-file.zip>");
+    const file = path.join(path.resolve(values.workspace), "snapshot.json");
+    let model;
+    try {
+      if ((await fs.stat(file)).size > 180 * 1024 * 1024)
+        throw Error("Workspace snapshot exceeds size limit");
+      const envelope = JSON.parse(await fs.readFile(file, "utf8"));
+      if (
+        envelope.version !== 1 ||
+        envelope.digest !== sha(JSON.stringify(envelope.data))
+      )
+        throw Error("Workspace snapshot validation failed");
+      model = envelope.data.model;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const traces = await readTraces(
+      values["trace-dir"] || path.join(values.workspace, "traces"),
+    );
+    const bundle = await diagnosticBundle({
+      model,
+      plan: model && !model.aiReview?.plan ? reviewPlan(model) : undefined,
+      traces,
+    });
+    await fs.writeFile(values.out, bundle, { flag: "wx", mode: 0o600 });
+    console.log(
+      `Diagnostic bundle written to ${values.out}. Inspect confidential architecture metadata before sharing.`,
     );
     return;
   }
@@ -71,6 +112,7 @@ async function main() {
       port,
       persist: true,
       workspace: values.workspace,
+      traceDirectory: values["trace-dir"],
       githubToken: process.env.GITHUB_TOKEN,
       modelConfig: inference,
       includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
@@ -125,6 +167,16 @@ async function main() {
     if (within(root, output))
       throw new Error("Report output must be outside the source root");
     await fs.mkdir(output, { recursive: false });
+    trace = await traceStore({
+      directory: values["trace-dir"] || path.join(output, "traces"),
+      sourceRoot: root,
+      secrets: [inference?.apiKey, process.env.GITHUB_TOKEN],
+    });
+    await trace.record("cli.started", {
+      mode: "analyze",
+      provider: inference?.provider || "none",
+      model: inference?.model,
+    });
     const model = await analyze(
       JSON.parse(
         (await fs.readFile(values.manifest, "utf8")).replace(/^\uFEFF/, ""),
@@ -138,6 +190,7 @@ async function main() {
           ? Number(values["review-batches"])
           : undefined,
         progress: console.log,
+        trace: trace.record,
       },
     );
     await fs.writeFile(
@@ -187,6 +240,18 @@ async function main() {
         path.join(output, kind + ".csv"),
         registerCsv(model, kind),
       );
+    await fs.writeFile(
+      path.join(output, "synthesis-diagnostics.zip"),
+      await diagnosticBundle({
+        model,
+        plan: !model.aiReview?.plan ? reviewPlan(model) : undefined,
+        traces: await trace.export(),
+        config: inference,
+        secrets: [inference?.apiKey, process.env.GITHUB_TOKEN],
+        roots: [root],
+      }),
+    );
+    await trace.close();
     console.log(
       `Draft with gaps: ${model.interfaces.length} interface/control candidates, ${model.flows.length} declared flows. Reports: ${output}`,
     );
@@ -203,7 +268,11 @@ async function main() {
   }
   throw new Error("Unknown command; use --help");
 }
-main().catch((error) => {
+main().catch(async (error) => {
+  await trace
+    ?.record("cli.failed", { failure: failureDetail(error.message) })
+    .catch(() => {});
+  await trace?.close();
   console.error(error.message);
   process.exitCode = 1;
 });

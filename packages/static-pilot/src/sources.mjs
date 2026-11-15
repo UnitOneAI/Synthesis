@@ -54,17 +54,17 @@ function ledger() {
     entries: [],
   };
 }
-function accept(name, size, coverage) {
+function accept(name, size, coverage, streamed = false) {
   if (excludedPath(name)) return "excluded";
   if (!supported.test(name)) return "unsupported";
   if (size > LIMITS.fileBytes) return "oversized";
-  if (coverage.bytes + size > LIMITS.totalBytes) {
+  if (!streamed && coverage.bytes + size > LIMITS.totalBytes) {
     coverage.truncated = true;
     return "budget";
   }
   return "inspect";
 }
-export async function localSource(source, root) {
+export async function localSource(source, root, options = {}) {
   const realRoot = await fs.realpath(root);
   const candidate = path.resolve(realRoot, source.localPath || source.name);
   if (!within(realRoot, candidate))
@@ -77,11 +77,32 @@ export async function localSource(source, root) {
     throw new Error("Source path escapes the configured root");
   const coverage = ledger(),
     files = [];
+  const projectPaths = [];
+  if (options.onFile) {
+    coverage.mode = "streamed-local";
+    // Discover ownership declarations before streaming file contents; do not retain source text.
+    async function projects(dir) {
+      for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name),
+          name = path.relative(real, file).split(path.sep).join("/");
+        if (entry.isSymbolicLink() || excludedPath(name)) continue;
+        if (entry.isDirectory()) {
+          if (within(real, await fs.realpath(file))) await projects(file);
+        } else if (
+          entry.isFile() &&
+          /\.(csproj|vbproj|vcxproj|wixproj)$|(^|\/)package\.json$/i.test(name)
+        )
+          projectPaths.push(name);
+      }
+    }
+    await projects(real);
+    projectPaths.sort();
+  }
   async function walk(dir) {
     for (const entry of (await fs.readdir(dir, { withFileTypes: true })).sort(
       (a, b) => a.name.localeCompare(b.name, "en"),
     )) {
-      if (coverage.discovered >= LIMITS.files) {
+      if (!options.onFile && coverage.discovered >= LIMITS.files) {
         coverage.truncated = true;
         return;
       }
@@ -106,9 +127,10 @@ export async function localSource(source, root) {
         coverage.entries.push({ path: name, status: "rejected-nonregular" });
         continue;
       }
+      let processing = false;
       try {
         const s = await fs.lstat(file),
-          status = accept(name, s.size, coverage);
+          status = accept(name, s.size, coverage, Boolean(options.onFile));
         if (status !== "inspect") {
           if (status in coverage) coverage[status]++;
           coverage.entries.push({ path: name, status });
@@ -146,17 +168,23 @@ export async function localSource(source, root) {
         }
         coverage.inspected++;
         coverage.bytes += bytes.length;
-        files.push({
+        const record = {
           path: name,
           text: bytes.toString("utf8"),
           hash: sha(bytes),
-        });
+        };
+        if (options.onFile) {
+          processing = true;
+          await options.onFile(record, projectPaths);
+          processing = false;
+        } else files.push(record);
         coverage.entries.push({
           path: name,
           status: "inspected",
           hash: sha(bytes),
         });
-      } catch {
+      } catch (error) {
+        if (processing) throw error;
         coverage.failed++;
         coverage.entries.push({ path: name, status: "read-failed" });
       }

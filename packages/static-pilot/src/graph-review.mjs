@@ -1,3 +1,9 @@
+import { failureDetail } from "./diagnostics.mjs";
+import {
+  coverageObligations,
+  obligationFits,
+  coverageStatus,
+} from "./coverage-plan.mjs";
 import { beginUsageRun, beginAttempt, finishAttempt } from "./token-usage.mjs";
 import { interactionContext, systemModel } from "./system-model.mjs";
 import {
@@ -18,7 +24,7 @@ export const STRIDE = [
   "Denial of Service",
   "Elevation of Privilege",
 ];
-export const GRAPH_REVIEW_VERSION = "graph-stride-2";
+export const GRAPH_REVIEW_VERSION = "graph-stride-3";
 
 export function reviewPlan(model, excerpts = new Map()) {
   // Analysis proposals are outputs, not new inputs on each continuation.
@@ -54,71 +60,119 @@ export function reviewPlan(model, excerpts = new Map()) {
       to: graphNodes.get(e.to),
       basis: e.basis,
     }));
-  function partition(interfaces, phase, label) {
-    let pending = interfaces;
-    while (pending.length) {
-      const packet = reviewPacket(
-        { ...model, interfaces: pending.slice(0, 60) },
-        excerpts,
-        contexts,
-      );
-      packet.reviewFocus = {
-        phase,
-        scope: label,
-        categories: STRIDE,
-        interpretation:
-          "Assess relevant categories; no returned threat does not establish safety. Cross-repository cohorts are hypotheses, not data flows.",
+  const structure = coverageObligations(model, system);
+  const splits = [];
+  function partition(interfaces, phase, label, obligations = [], depth = 0) {
+    if (!interfaces.length) return;
+    const packet = reviewPacket({ ...model, interfaces }, excerpts, contexts);
+    packet.reviewFocus = {
+      phase,
+      scope: label,
+      categories: STRIDE,
+      interpretation:
+        "Assess relevant categories; no returned threat does not establish safety. Candidate paths and cross-repository cohorts are hypotheses, not established data flows.",
+    };
+    packet.systemContext = interactionContext(
+      model,
+      packet.records.map((r) => r.id),
+      system,
+    );
+    // Focused requests select the relevant declarations before context limits apply.
+    for (const o of obligations.filter((o) => o.contextKind)) {
+      const focused = {
+        ...system,
+        flows: system.flows.filter((f) =>
+          o.interfaceIds.every((x) => f.interfaceIds?.includes(x)),
+        ),
+        actors: system.actors.filter(
+          (a) => o.contextKind !== "actors" || a.id === o.contextId,
+        ),
+        boundaries: system.boundaries.filter(
+          (b) => o.contextKind !== "boundaries" || b.id === o.contextId,
+        ),
       };
       packet.systemContext = interactionContext(
         model,
         packet.records.map((r) => r.id),
-        system,
+        focused,
       );
-      const repos = new Set(packet.records.map((r) => r.repository));
-      packet.projectReferences = projectReferences
-        .filter(
-          (e) => repos.has(e.from?.repository) || repos.has(e.to?.repository),
-        )
-        .slice(0, 20)
-        .map((e) => ({
-          fromRepository: redact(e.from.repository),
-          fromFile: redact(e.from.path),
-          declaration: redact(e.from.pointer || ""),
-          toRepository: redact(e.to.repository),
-          toFile: redact(e.to.path),
-          basis: e.basis,
-        }));
-      // Reserve room for the phase label in the normal packet size limit.
-      while (
-        Buffer.byteLength(JSON.stringify(packet)) > 96 * 1024 &&
-        packet.records.length
-      ) {
-        packet.records.pop();
-        packet.systemContext = interactionContext(
-          model,
-          packet.records.map((r) => r.id),
-          system,
-        );
+    }
+    packet.graphPaths = obligations
+      .filter((o) => o.graphNodeIds)
+      .map((o) => ({
+        obligationId: o.id,
+        interfaceIds: o.interfaceIds,
+        nodeIds: o.graphNodeIds,
+        nodes: o.graphNodeIds
+          .map((id) => graphNodes.get(id))
+          .filter(Boolean)
+          .map((n) => ({
+            id: n.id,
+            name: redact(n.name),
+            kind: n.kind,
+            path: redact(n.path || ""),
+            line: n.line,
+          })),
+        basis: o.basis,
+      }));
+    const repos = new Set(packet.records.map((r) => r.repository));
+    const references = projectReferences.filter(
+      (e) => repos.has(e.from?.repository) || repos.has(e.to?.repository),
+    );
+    packet.projectReferences = references.slice(0, 20).map((e) => ({
+      fromRepository: redact(e.from.repository),
+      fromFile: redact(e.from.path),
+      declaration: redact(e.from.pointer || ""),
+      toRepository: redact(e.to.repository),
+      toFile: redact(e.to.path),
+      basis: e.basis,
+    }));
+    packet.omittedProjectReferenceCount = Math.max(
+      0,
+      references.length - packet.projectReferences.length,
+    );
+    if (
+      interfaces.length > 60 ||
+      packet.records.length !== interfaces.length ||
+      Buffer.byteLength(JSON.stringify(packet)) > 96 * 1024
+    ) {
+      if (interfaces.length === 1) {
+        omitted.push(interfaces[0].id);
+        return;
       }
-      const included = new Set(packet.records.map((r) => r.id));
-      packet.reviewerDeclarations = packet.reviewerDeclarations.filter(
-        (d) => included.has(d.from) && included.has(d.to),
-      );
-      if (!included.size) {
-        omitted.push(pending[0].id);
-        pending = pending.slice(1);
-        continue;
-      }
-      const packetHash = sha(JSON.stringify(packet));
-      batches.push({
-        id: id(GRAPH_REVIEW_VERSION, phase, packetHash),
+      const middle = Math.ceil(interfaces.length / 2);
+      splits.push({
         phase,
         label,
-        packetHash,
-        packet,
+        depth,
+        records: interfaces.length,
+        reason: "packet-budget",
       });
-      pending = pending.filter((i) => !included.has(i.id));
+      // Remove spanning obligations from children; an atomic bridge request is planned below.
+      for (const half of [
+        interfaces.slice(0, middle),
+        interfaces.slice(middle),
+      ]) {
+        const ids = new Set(half.map((i) => i.id));
+        partition(
+          half,
+          phase,
+          label,
+          obligations.filter((o) => o.interfaceIds.every((x) => ids.has(x))),
+          depth + 1,
+        );
+      }
+      return;
     }
+    const packetHash = sha(JSON.stringify(packet));
+    batches.push({
+      id: id(GRAPH_REVIEW_VERSION, phase, packetHash),
+      phase,
+      label,
+      depth,
+      packetHash,
+      packet,
+    });
   }
   const repositories = new Map();
   for (const i of model.interfaces) {
@@ -149,38 +203,133 @@ export function reviewPlan(model, excerpts = new Map()) {
       for (const g of groups) if (g[n]) ordered.push(g[n]);
     partition(ordered, "cross-repository", protocol);
   }
-  // Always co-review explicitly declared endpoints, even across protocol partitions.
   const byId = new Map(model.interfaces.map((i) => [i.id, i]));
-  for (const f of model.flows || []) {
-    if (
-      !batches.some(
-        (b) =>
-          b.phase !== "repository" &&
-          b.packet.records.some((r) => r.id === f.from) &&
-          b.packet.records.some((r) => r.id === f.to),
-      )
-    ) {
+  const neighborhoods = new Map();
+  for (const o of structure.obligations.filter((o) => o.graphNodeIds)) {
+    const repo = byId.get(o.interfaceIds[0])?.repository || "unknown";
+    if (!neighborhoods.has(repo)) neighborhoods.set(repo, []);
+    neighborhoods.get(repo).push(o);
+  }
+  for (const [repo, group] of neighborhoods) {
+    for (let offset = 0; offset < group.length; offset += 20) {
+      const obligations = group.slice(offset, offset + 20);
+      const ids = [...new Set(obligations.flatMap((o) => o.interfaceIds))];
       partition(
-        [byId.get(f.from), byId.get(f.to)].filter(Boolean),
-        "declared-flow",
-        f.id,
+        ids.map((x) => byId.get(x)),
+        "graph-neighborhood",
+        repo,
+        obligations,
       );
     }
   }
-  for (const flow of system.flows.filter((f) => f.basis !== "unresolved")) {
-    const ids = new Set(flow.interfaceIds || []);
-    const endpoints = model.interfaces.filter((i) => ids.has(i.id));
+  // Two invalid responses on the same packet trigger deterministic subdivision on continuation.
+  // Persist the parent/child tree so successful children remain reusable after restart.
+  const refinements = [];
+  const priorRefinements = new Map(
+    (model.aiReview?.plan?.refinements || []).map((r) => [r.parentId, r]),
+  );
+  const failedCounts = new Map();
+  for (const a of model.usageLedger?.attempts || [])
     if (
-      endpoints.length &&
-      !batches.some(
-        (b) =>
-          b.phase !== "repository" &&
-          endpoints.every((i) => b.packet.records.some((r) => r.id === i.id)),
+      a.status === "failed" &&
+      ["response-format", "evidence-validation", "output-limit"].includes(
+        a.failure?.code,
       )
     )
-      partition(endpoints, "system-flow", flow.id);
+      failedCounts.set(a.batchId, (failedCounts.get(a.batchId) || 0) + 1);
+  for (let index = 0; index < batches.length; index++) {
+    const batch = batches[index],
+      prior = priorRefinements.get(batch.id);
+    if (
+      !(
+        prior?.packetHash === batch.packetHash ||
+        (failedCounts.get(batch.id) || 0) >= 2
+      ) ||
+      batch.packet.records.length <= 2 ||
+      (batch.refinementDepth || 0) >= 6
+    )
+      continue;
+    const records = batch.packet.records.map((r) => byId.get(r.id));
+    const middle = Math.ceil(records.length / 2),
+      children = [];
+    for (const half of [records.slice(0, middle), records.slice(middle)]) {
+      const ids = new Set(half.map((i) => i.id));
+      const relevant = structure.obligations.filter(
+        (o) =>
+          (batch.packet.graphPaths || []).some(
+            (p) => p.obligationId === o.id,
+          ) && o.interfaceIds.every((x) => ids.has(x)),
+      );
+      const start = batches.length;
+      partition(half, batch.phase, batch.label, relevant);
+      children.push(
+        ...batches
+          .splice(start)
+          .map((b) => ({
+            ...b,
+            parentId: batch.id,
+            refinementDepth: (batch.refinementDepth || 0) + 1,
+          })),
+      );
+    }
+    refinements.push({
+      parentId: batch.id,
+      packetHash: batch.packetHash,
+      childIds: children.map((b) => b.id),
+      reason: "repeated-invalid-response",
+      depth: (batch.refinementDepth || 0) + 1,
+    });
+    batches.splice(index, 1, ...children);
+    index--;
   }
-  return { batches, omitted };
+  // Recursively split large scopes, then explicitly bridge obligations cut by partitions.
+  // A relationship is never counted as reviewed merely because its endpoints were reviewed separately.
+  const byInterface = new Map();
+  let indexed = 0;
+  const candidates = (obligation) => {
+    while (indexed < batches.length) {
+      const b = batches[indexed++];
+      for (const r of b.packet.records) {
+        if (!byInterface.has(r.id)) byInterface.set(r.id, []);
+        byInterface.get(r.id).push(b);
+      }
+    }
+    return byInterface.get(obligation.interfaceIds[0]) || [];
+  };
+  for (const obligation of structure.obligations.filter(
+    (o) => o.kind !== "interface",
+  )) {
+    if (candidates(obligation).some((b) => obligationFits(obligation, b)))
+      continue;
+    partition(
+      obligation.interfaceIds.map((x) => byId.get(x)).filter(Boolean),
+      obligation.kind,
+      obligation.subject,
+      [obligation],
+    );
+  }
+  const uniqueBatches = new Set();
+  for (let index = batches.length - 1; index >= 0; index--) {
+    if (uniqueBatches.has(batches[index].id)) batches.splice(index, 1);
+    else uniqueBatches.add(batches[index].id);
+  }
+  for (const obligation of structure.obligations) {
+    obligation.batchIds = candidates(obligation)
+      .filter((b) => obligationFits(obligation, b))
+      .map((b) => b.id);
+    if (!obligation.batchIds.length)
+      structure.gaps.push({
+        kind: "obligation-does-not-fit",
+        subject: obligation.id,
+      });
+  }
+  return {
+    batches,
+    omitted: [...new Set(omitted)],
+    splits,
+    refinements,
+    ...structure,
+  };
 }
 
 export function strideMatrix(model) {
@@ -271,6 +420,19 @@ export async function enrichGraphModel(
     basedOnRevision: model.modelRevision,
   };
   const runKey = sha(JSON.stringify(provenance));
+  await options.trace?.("review.planned", {
+    runKey,
+    sourceRevision: model.modelRevision,
+    graphFingerprint: model.sourceGraph?.fingerprint,
+    counts: {
+      batches: plan.batches.length,
+      obligations: plan.obligations.length,
+      gaps: plan.gaps.length,
+      splits: plan.splits.length,
+      refinements: plan.refinements.length,
+    },
+    budget: maxBatches,
+  });
   const previous =
     model.aiReview?.runKey === runKey ? model.aiReview.batches || [] : [];
   const cached = new Map(
@@ -294,6 +456,21 @@ export async function enrichGraphModel(
     summary:
       "Graph-based review in bounded repository and cross-repository batches.",
     coverage: {},
+    plan: {
+      basedOnRevision: model.modelRevision,
+      version: GRAPH_REVIEW_VERSION,
+      splits: plan.splits,
+      refinements: plan.refinements,
+      obligations: plan.obligations,
+      gaps: plan.gaps,
+      limits: plan.limits,
+      semantics: plan.semantics,
+      batches: plan.batches.map(({ packet, ...b }) => ({
+        ...b,
+        interfaceIds: packet.records.map((r) => r.id),
+        packetBytes: Buffer.byteLength(JSON.stringify(packet)),
+      })),
+    },
   };
   beginUsageRun(model);
   model.aiReview = review;
@@ -343,6 +520,13 @@ export async function enrichGraphModel(
     const sentBatches = new Set(review.batches.map((b) => b.id));
     const sentPackets = plan.batches.filter((b) => sentBatches.has(b.id));
     review.coverage = {
+      obligations: (() => {
+        const { obligations, gaps, ...summary } = coverageStatus(
+          plan,
+          review.batches,
+        );
+        return { ...summary, gapCount: gaps.length };
+      })(),
       totalInterfaces: model.interfaces.length,
       submittedInterfaces: submitted.size,
       omittedInterfaces: model.interfaces.length - submitted.size,
@@ -391,6 +575,11 @@ export async function enrichGraphModel(
   for (const batch of plan.batches) {
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
+      await options.trace?.("review.cache-reused", {
+        runKey,
+        batchId: batch.id,
+        packetHash: batch.packetHash,
+      });
       continue;
     }
     if (terminalFailure || calls >= maxBatches || Date.now() > deadline)
@@ -426,13 +615,30 @@ export async function enrichGraphModel(
       attempt = beginAttempt(model, config, batch.packet, {
         batchId: batch.id,
         phase: batch.phase,
-        retry: model.usageLedger.attempts.some(
-          (a) =>
-            a.batchId === batch.id &&
-            a.provider === config.provider &&
-            a.model === config.model &&
-            a.status !== "succeeded",
-        ),
+        retry:
+          Boolean(batch.parentId) ||
+          model.usageLedger.attempts.some(
+            (a) =>
+              a.batchId === batch.id &&
+              a.provider === config.provider &&
+              a.model === config.model &&
+              a.status !== "succeeded",
+          ),
+      });
+      if (batch.parentId) attempt.parentBatchId = batch.parentId;
+      await options.trace?.("model.request-started", {
+        runKey,
+        batchId: batch.id,
+        attemptId: attempt.id,
+        phase: batch.phase,
+        packetHash: batch.packetHash,
+        counts: {
+          records: batch.packet.records.length,
+          packetBytes: Buffer.byteLength(JSON.stringify(batch.packet)),
+        },
+        provider: config.provider,
+        model: config.model,
+        retry: attempt.retry,
       });
       aggregate();
       await options.checkpoint?.(
@@ -441,8 +647,28 @@ export async function enrichGraphModel(
       );
       const result = await requestReview(config, batch.packet, fetchImpl, {
         validationRetry: entry.validationRetry,
+        onResponse: (response) =>
+          options.trace?.("model.response-received", {
+            runKey,
+            batchId: batch.id,
+            attemptId: attempt.id,
+            ...response,
+          }),
+        onStop: (response) =>
+          options.trace?.("model.stop-reason", {
+            runKey,
+            batchId: batch.id,
+            attemptId: attempt.id,
+            ...response,
+          }),
         onUsage: async (usage) => {
           attempt.usage = usage;
+          await options.trace?.("model.usage-received", {
+            runKey,
+            batchId: batch.id,
+            attemptId: attempt.id,
+            usage,
+          });
           await options.checkpoint?.(
             structuredClone(review),
             structuredClone(model.usageLedger),
@@ -457,10 +683,26 @@ export async function enrichGraphModel(
         requestPromptHash: result.requestPromptHash,
       });
       entry.interfaceIds.forEach((i) => reviewed.add(i));
+      await options.trace?.("model.request-completed", {
+        runKey,
+        batchId: batch.id,
+        attemptId: attempt.id,
+        responseHash: result.responseHash,
+        requestPromptHash: result.requestPromptHash,
+      });
     } catch (error) {
-      if (attempt) finishAttempt(attempt, "failed");
+      if (attempt) {
+        finishAttempt(attempt, "failed");
+        attempt.failure = failureDetail(error.message);
+      }
       entry.status = "failed";
       entry.error = error.message;
+      await options.trace?.("model.request-failed", {
+        runKey,
+        batchId: batch.id,
+        attemptId: attempt?.id,
+        failure: failureDetail(error.message),
+      });
       terminalFailure = /HTTP (?:401|403|429)|request failed or timed out/.test(
         error.message,
       );
@@ -475,7 +717,8 @@ export async function enrichGraphModel(
   review.status = !plan.batches.length
     ? "skipped"
     : review.coverage.completedBatches === plan.batches.length &&
-        !plan.omitted.length
+        !plan.omitted.length &&
+        !review.coverage.obligations.blocked
       ? "completed-needs-review"
       : review.coverage.completedBatches
         ? "partial"
@@ -487,6 +730,23 @@ export async function enrichGraphModel(
         (!plan.batches.length
           ? "No collected interfaces to review"
           : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
+  await options.trace?.("review.finished", {
+    runKey,
+    status: review.status,
+    counts: {
+      completed: review.coverage.completedBatches,
+      failed: review.coverage.failedBatches,
+      pending: review.coverage.pendingBatches,
+      obligations: review.coverage.obligations,
+    },
+    stopReason: terminalFailure
+      ? "provider-failure"
+      : calls >= maxBatches
+        ? "request-budget"
+        : Date.now() > deadline
+          ? "time-budget"
+          : "plan-exhausted",
+  });
   await options.checkpoint?.(
     structuredClone(review),
     structuredClone(model.usageLedger),

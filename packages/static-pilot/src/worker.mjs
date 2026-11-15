@@ -19,6 +19,40 @@ try {
       parentPort.on("message", ack);
       parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger });
     });
+  const trace = (event, data) =>
+    new Promise((resolve, reject) => {
+      const id = ++checkpointId;
+      const ack = (message) => {
+        if (message.type !== "trace-saved" || message.id !== id) return;
+        parentPort.off("message", ack);
+        message.error
+          ? reject(
+              Error("Trace output could not be written; operation stopped"),
+            )
+          : resolve();
+      };
+      parentPort.on("message", ack);
+      parentPort.postMessage({
+        type: "trace",
+        id,
+        event,
+        data: { ...data, workerHeapUsedBytes: process.memoryUsage().heapUsed },
+      });
+    });
+  const onStaticModel = (model) =>
+    new Promise((resolve, reject) => {
+      const id = ++checkpointId;
+      const ack = (message) => {
+        if (message.type !== "static-saved" || message.id !== id) return;
+        parentPort.off("message", ack);
+        message.error
+          ? reject(Error("Workspace checkpoint failed; review stopped"))
+          : resolve(message.model);
+      };
+      parentPort.on("message", ack);
+      parentPort.postMessage({ type: "static-checkpoint", id, model });
+    });
+  await trace("worker.started", { mode: workerData.mode });
   const model =
     workerData.mode === "review"
       ? await enrichGraphModel(
@@ -30,11 +64,15 @@ try {
             maxBatches: workerData.options.reviewBatches,
             progress,
             checkpoint,
+            trace,
           },
         )
       : await analyze(workerData.manifest, {
           ...workerData.options,
           progress,
+          trace,
+          checkpoint,
+          onStaticModel,
           onExcerpts: (value) => {
             excerpts = value;
           },

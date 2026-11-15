@@ -41,6 +41,7 @@ const functions = new Set([
 const calls = new Set(["invocation_expression", "call_expression", "call"]);
 const languages = new Map();
 const localLinks = new WeakMap();
+const nodeIds = new WeakMap();
 let initialized;
 export const GRAPH_LIMITS = {
   nodes: 100000,
@@ -93,11 +94,23 @@ export function createSourceGraph() {
     ],
   };
 }
-export async function addSourceGraph(graph, source, files, result, sourceRoot) {
+export async function addSourceGraph(
+  graph,
+  source,
+  files,
+  result,
+  sourceRoot,
+  trace,
+) {
   initialized ??= Parser.init();
   await initialized;
+  if (!nodeIds.has(graph))
+    nodeIds.set(graph, new Set(graph.nodes.map((n) => n.id)));
+  const ids = nodeIds.get(graph);
   const add = (node) => {
+    if (ids.has(node.id)) return node;
     if (graph.nodes.length >= GRAPH_LIMITS.nodes) return null;
+    ids.add(node.id);
     graph.nodes.push(node);
     return node;
   };
@@ -135,6 +148,11 @@ export async function addSourceGraph(graph, source, files, result, sourceRoot) {
       ? path.resolve(sourceRoot, source.localPath || source.name)
       : null;
   for (const file of files) {
+    await trace?.("graph.file-started", {
+      repository: source.name,
+      path: file.path,
+      blobSha256: file.hash,
+    });
     const fileNode = add({
       id: id("graph-file", source.name, file.path),
       kind: "file",
@@ -147,6 +165,19 @@ export async function addSourceGraph(graph, source, files, result, sourceRoot) {
     });
     if (!fileNode) {
       graph.coverage.limited++;
+      graph.files.push({
+        repository: source.name,
+        path: file.path,
+        status: "graph-limit",
+        parser: null,
+        symbols: 0,
+        calls: 0,
+      });
+      await trace?.("graph.file-completed", {
+        repository: source.name,
+        path: file.path,
+        status: "graph-limit",
+      });
       continue;
     }
     fileNodes.set(file.path, fileNode);
@@ -339,6 +370,12 @@ export async function addSourceGraph(graph, source, files, result, sourceRoot) {
             : "same file; callable unresolved",
         );
     }
+    await trace?.("graph.file-completed", {
+      repository: source.name,
+      path: file.path,
+      status: entry.status,
+      counts: { symbols: entry.symbols, calls: entry.calls },
+    });
   }
   for (const dependency of result.dependencies) {
     const fileNode = fileNodes.get(dependency.path);
@@ -396,6 +433,7 @@ export function finishSourceGraph(graph) {
       });
   }
   localLinks.delete(graph);
+  nodeIds.delete(graph);
   const ids = new Set(graph.nodes.map((n) => n.id));
   graph.edges = graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
   graph.fingerprint = sha(
@@ -442,6 +480,14 @@ export function graphContexts(graph) {
                 target: "unresolved",
               }))
           : [],
+      omittedCalls:
+        owner?.kind === "function"
+          ? Math.max(0, peers.filter((p) => p.kind === "call").length - 12)
+          : 0,
+      omittedNearbyInterfaces: Math.max(
+        0,
+        peers.filter((p) => p.kind === "interface").length - 12,
+      ),
       nearbyInterfaceIds: peers
         .filter((p) => p.kind === "interface")
         .map((p) => p.id)
