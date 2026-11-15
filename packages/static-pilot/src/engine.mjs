@@ -236,6 +236,29 @@ function stripComments(text, extension) {
   return text;
 }
 export function extract(source, files, options = {}) {
+  const interfaceIds = new Set(),
+    lineIndexes = new Map();
+  const lineAt = (file, offset) => {
+    let index = lineIndexes.get(file);
+    if (!index) {
+      index = [];
+      for (
+        let at = file.text.indexOf("\n");
+        at !== -1;
+        at = file.text.indexOf("\n", at + 1)
+      )
+        index.push(at);
+      lineIndexes.set(file, index);
+    }
+    let low = 0,
+      high = index.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (index[middle] < offset) low = middle + 1;
+      else high = middle;
+    }
+    return low + 1;
+  };
   const components = [],
     interfaces = [],
     evidence = [],
@@ -282,7 +305,7 @@ export function extract(source, files, options = {}) {
     operation,
     basis,
   ) => {
-    const line = file.text.slice(0, offset).split("\n").length,
+    const line = lineAt(file, offset),
       c = componentFor(file.path);
     const e = {
       id: id(
@@ -324,7 +347,8 @@ export function extract(source, files, options = {}) {
       effectiveExposure: "unknown",
       effectiveIdentity: "unknown",
     };
-    if (!interfaces.some((x) => x.id === item.id)) {
+    if (!interfaceIds.has(item.id)) {
+      interfaceIds.add(item.id);
       evidence.push(e);
       interfaces.push(item);
     }
