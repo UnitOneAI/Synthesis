@@ -646,3 +646,37 @@ test("optional OWASP risk assessment leaves missing factors unknown", async ({
   );
   await expect(page.locator("#ws-inspector")).toContainText("unassessed");
 });
+
+test("coverage reports grouped unresolved call counts rather than summary record counts", async ({
+  page,
+}) => {
+  await page.route("**/api/model", async (route) => {
+    const response = await route.fetch();
+    const model = await response.json();
+    model.diagnosticCoverage.review ||= {
+      total: 0,
+      reviewed: 0,
+      pending: 0,
+      blocked: 0,
+      byKind: {},
+      gaps: [],
+    };
+    model.diagnosticCoverage.review.gaps.push({
+      kind: "additional-unresolved-call-targets",
+      repository: "frontdoor",
+      count: 20000,
+    });
+    model.sourceGraph.coverage.unsupported = 46;
+    await route.fulfill({ json: model });
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  await expect(page.locator("#ws-coverage")).toContainText(
+    "20000 additional unresolved call targets",
+  );
+  await expect(page.locator("#ws-coverage")).toContainText(
+    "46 unsupported files",
+  );
+});
