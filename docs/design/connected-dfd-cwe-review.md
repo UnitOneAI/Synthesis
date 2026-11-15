@@ -45,7 +45,7 @@ Current guards: 1 MiB collected file limit, 2 GiB staging and 100,000 staged fil
 
 ## Model CWE review
 
-`cwe-model.mjs` builds a coverage plan from every safely collected local file, including configuration. The first pass retains segment metadata and hashes, not code. Segments contain up to 80 lines/20 KB with 10-line overlap. Up to eight segments are grouped into a source packet with a 60 KB estimated code budget. Repository packets are interleaved. Additional packets review discovered interactions using up to four source segments and their evidence basis.
+`cwe-model.mjs` builds a coverage plan from every safely collected local file, including configuration. The first pass retains segment metadata and hashes, not code. Segments contain up to 80 lines/20 KB with 10-line overlap. Up to eight segments are grouped into a source packet with a 60 KB estimated code budget. Packets containing current Semgrep findings are reviewed first, followed by graph interactions and remaining source. Repositories are interleaved within each priority group. Scanner evidence participates in cache invalidation. Additional packets review discovered interactions using up to four source segments and their evidence basis.
 
 The configured model reviews injection, access control, filesystem, memory/concurrency, cryptography/secrets, deserialization/parsing and outbound/isolation families. These are review obligations and proposed CWE mappings, not a claim that every CWE is covered or that model recall is complete. Findings must cite submitted record IDs and valid file line ranges, include prerequisites, counterevidence and remediation, and use an allowed CWE identifier. Invalid evidence or output is rejected. Severity remains unassessed until review.
 

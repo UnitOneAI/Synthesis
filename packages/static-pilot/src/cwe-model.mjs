@@ -120,9 +120,20 @@ export async function reviewCweCode(
     throw Error("Configure an approved model provider before CWE code review");
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("CWE request budget must be 1–100");
+  const scannerFindings =
+    model.cweReview?.basedOnRevision === model.modelRevision
+      ? model.cweReview.findings.filter((f) => f.sourceMatchesGraph !== false)
+      : [];
+  const scannerFingerprint = sha(
+    JSON.stringify([
+      model.cweReview?.rulePack?.sha256,
+      scannerFindings.map((f) => f.id).sort(),
+    ]),
+  );
   const key = sha(
     JSON.stringify([
-      "cwe-source-plan-2",
+      "cwe-source-plan-3",
+      scannerFingerprint,
       model.modelRevision,
       config.provider,
       config.model,
@@ -313,6 +324,22 @@ export async function reviewCweCode(
           reason: "interaction-context-limited-to-four-segments",
         });
     }
+    const signalledFiles = new Set(
+      scannerFindings.map((f) => f.repository + "\0" + f.path),
+    );
+    for (const batch of planned)
+      batch.priority = batch.records.some((r) =>
+        signalledFiles.has(r.repository + "\0" + r.path),
+      )
+        ? 2
+        : batch.phase === "cwe-interaction"
+          ? 1
+          : 0;
+    planned.sort((a, b) => b.priority - a.priority);
+    report.scannerFingerprint = scannerFingerprint;
+    report.priorityBatches = planned.filter((b) => b.priority === 2).length;
+    report.order =
+      "Scanner findings, graph interactions, remaining source; repositories interleaved within priority";
     report.totalBatches = planned.length;
     report.totalSegments = chunks.length;
     const selected = planned.filter((p) => !done.has(p.id)).slice(0, budget);
@@ -389,7 +416,7 @@ export async function reviewCweCode(
         records,
         interfaces,
         connection: batch.connection,
-        scannerFindings: (model.cweReview?.findings || [])
+        scannerFindings: scannerFindings
           .filter((f) => fileKeys.has(f.repository + "\0" + f.path))
           .slice(0, 20)
           .map((f) => ({

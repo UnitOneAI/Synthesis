@@ -205,3 +205,37 @@ test("CWE scope follows implicit manifest selections and preserves explicit excl
   assert.deepEqual(r.requestedRepositories, ["one", "three"]);
   assert.equal(r.completedBatches, 2);
 });
+
+test("current Semgrep findings are reviewed first without dropping the remaining source plan", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  model.cweReview = {
+    basedOnRevision: model.modelRevision,
+    rulePack: { sha256: "fixture" },
+    findings: [
+      {
+        id: "scanner-finding",
+        repository: "three",
+        path: "query.py",
+        sourceMatchesGraph: true,
+        cwe: "CWE-89",
+        line: 2,
+        title: "Formatted query",
+      },
+    ],
+  };
+  let packet;
+  const r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    fetchImpl: async (url, options) => {
+      packet = JSON.parse(JSON.parse(options.body).messages[0].content);
+      return response({ findings: [], limitations: [] });
+    },
+  });
+  assert.equal(packet.records[0].repository, "three");
+  assert.equal(packet.scannerFindings.length, 1);
+  assert.equal(r.priorityBatches, 1);
+  assert.equal(r.totalBatches, 3);
+  assert.equal(r.pendingBatches, 2);
+});

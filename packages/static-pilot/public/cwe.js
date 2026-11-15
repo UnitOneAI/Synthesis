@@ -91,7 +91,7 @@
         ? `${review.status} · ${review.completedBatches || 0} / ${review.totalBatches || 0} packets completed · ${review.pendingBatches ?? "Unknown"} pending · ${review.findings.length} potential weaknesses${review.error ? " · " + review.error : ""}`
         : "No source review has run.";
       $("cwe-model-results").innerHTML = review
-        ? `<p>${esc(review.provider)} / ${esc(review.model)} · Source and interaction evidence. Token usage is included in the workspace token meter and export.</p><table><thead><tr><th>Repository</th><th>Reviewed / planned segments</th></tr></thead><tbody>${review.repositories.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.reviewedSegments || 0} / ${r.chunks}</td></tr>`).join("")}</tbody></table>${review.gaps.length ? `<p>${review.gaps.length} coverage gaps. Inspect the export before accepting coverage.</p>` : ""}${review.findings
+        ? `<p>${esc(review.provider)} / ${esc(review.model)} · Scanner findings are reviewed first, then graph interactions and remaining source. Token usage is included in the workspace token meter and export.</p><table><thead><tr><th>Repository</th><th>Reviewed / planned segments</th></tr></thead><tbody>${review.repositories.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.reviewedSegments || 0} / ${r.chunks}</td></tr>`).join("")}</tbody></table>${review.gaps.length ? `<p>${review.gaps.length} coverage gaps. Inspect the export before accepting coverage.</p>` : ""}${review.findings
             .slice(0, 200)
             .map(
               (f) =>
