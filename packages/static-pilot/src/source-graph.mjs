@@ -1,3 +1,4 @@
+import { wrapperConnection } from "./connection-discovery.mjs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import TreeSitter from "@vscode/tree-sitter-wasm";
@@ -320,13 +321,53 @@ export async function addSourceGraph(
               s.name === call.name &&
               s.parent === (owner?.parent || fileNode.id),
           );
-          if (candidates.length === 1)
+          if (candidates.length === 1) {
+            const target = candidates[0];
+            const connection = wrapperConnection(
+              file.text.slice(call.start, call.end),
+              file.text.slice(target.start, target.end),
+            );
+            const wrapped = (interfacesByFile.get(file.path) || []).find(
+              ({ item, evidence }) =>
+                item.protocol === "HTTP" &&
+                item.direction === "outbound" &&
+                evidence.offset >= target.start &&
+                evidence.offset < target.end,
+            );
+            if (connection && wrapped && count < GRAPH_LIMITS.perFile) {
+              const e = {
+                ...wrapped.evidence,
+                id: id("wrapper-evidence", call.id, file.hash),
+                offset: call.start,
+                line: call.line,
+                pointer: null,
+                basis:
+                  "AST call to unique same-file HTTP wrapper; argument propagation candidate",
+              };
+              const item = {
+                ...wrapped.item,
+                id: id("wrapper-interface", call.id),
+                kind: "http-wrapper-call",
+                operation: `${connection.method} ${connection.path}`,
+                connection: {
+                  ...connection,
+                  viaGraphNodeIds: [call.id, target.id],
+                },
+                evidence: [e.id, ...wrapped.item.evidence],
+                basis: e.basis,
+              };
+              result.evidence.push(e);
+              result.interfaces.push(item);
+              interfacesByFile.get(file.path).push({ item, evidence: e });
+              count++;
+            }
             edge(
               call.id,
               candidates[0].id,
               "candidate-call-target",
               "unique same-file enclosing-scope name; binding unverified",
             );
+          }
         }
       } catch {
         entry.status = "parse-failed-or-timed-out";
@@ -359,6 +400,7 @@ export async function addSourceGraph(
         parent: owner?.id || fileNode.id,
         evidenceIds: item.evidence,
         basis: item.basis,
+        ...(item.connection ? { connection: item.connection } : {}),
       });
       if (n)
         edge(

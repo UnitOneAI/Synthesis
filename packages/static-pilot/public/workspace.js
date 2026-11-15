@@ -220,7 +220,7 @@
         "<h2>System model</h2><p>Build the source graph to review the system architecture.</p>";
       return;
     }
-    root.innerHTML = `<div class="section-title"><div><p class="eyebrow">SYSTEM THREAT MODEL</p><h2>${e(s.title)}</h2><p>${e(s.profile)} · ${s.coverage.repositories} selected repositories · Static analysis</p></div><button id="ws-export">Export review package</button></div><div class="ws-status"><span>Draft</span><span>${s.flows.length} flows / candidates</span><span>${s.coverage.unresolvedFlows} unresolved relationships</span><span>${s.coverage.pendingBoundaries} boundary decisions pending</span>${s.coverage.unavailable.length ? `<strong>Unavailable: ${e(s.coverage.unavailable.join(", "))}</strong>` : ""}</div><nav class="ws-tabs" aria-label="System model views">${[
+    root.innerHTML = `<div class="section-title"><div><p class="eyebrow">SYSTEM THREAT MODEL</p><h2>${e(s.title)}</h2><p>${e(s.profile)} · ${s.coverage.repositories} selected repositories · Static analysis</p></div><button id="ws-export">Export review package</button></div><div class="ws-status"><span>Draft</span><span>${s.flows.length} flows / candidates</span><span>${s.coverage.discoveredFlows || 0} discovered connections (${s.coverage.inferredConnections || 0} route hypotheses)</span><span>${s.coverage.unresolvedFlows} unresolved relationships</span><span>${s.coverage.pendingBoundaries} boundary decisions pending</span>${s.coverage.unavailable.length ? `<strong>Unavailable: ${e(s.coverage.unavailable.join(", "))}</strong>` : ""}</div><nav class="ws-tabs" aria-label="System model views">${[
       ["system", "System DFD"],
       ["actors", "Threat actors"],
       ["boundaries", "Trust boundaries"],
@@ -262,11 +262,11 @@
     if (view === "matrix") {
       const review = model.aiReview,
         c = review?.coverage;
-      body.innerHTML = `<div class="ws-analysis"><div><strong>${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "boundary"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Scenario counts and checklist items are separate. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
-        .filter((r) => r.rowKind === (window.wsRowKind || "boundary"))
+      body.innerHTML = `<div class="ws-analysis"><div><strong>${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p class="hint">Request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+        .filter((r) => r.rowKind === (window.wsRowKind || "component"))
         .map(
           (r) =>
-            `<tr><th>${e(r.name)}</th>${r.cells
+            `<tr><th>${e(r.name)}<small>${r.reviewedInterfaces || 0} / ${r.interfaceIds.length} interfaces reviewed</small></th>${r.cells
               .map((c) => {
                 const ts = c.threatIds
                   .map((id) => threatIndex.get(id))
@@ -275,13 +275,17 @@
                     (t) => t.origin !== "review checklist",
                   ).length,
                   checklist = ts.length - scenarios;
-                return `<td><button data-select="${e(c.id)}" class="${ts.length ? "populated" : ""}"><b>${scenarios || "—"}</b>${checklist ? `<small>${checklist} checklist items</small>` : ""}<small>${e(c.state.replaceAll("-", " "))}</small></button></td>`;
+                return `<td><button data-select="${e(c.id)}" class="${ts.length ? "populated" : ""}"><b>${scenarios || "—"}</b>${scenarios ? `<small>threat scenario${scenarios === 1 ? "" : "s"}</small>` : ""}<small>${e(c.state.replaceAll("-", " "))}</small></button></td>`;
               })
               .join("")}</tr>`,
         )
         .join(
           "",
-        )}</tbody></table></div>${!s.matrix.some((r) => r.rowKind === (window.wsRowKind || "boundary")) ? "<p>No subjects of this type. Declare supported boundaries or select component / flow rows.</p>" : ""}`;
+        )}</tbody></table></div>${!s.matrix.some((r) => r.rowKind === (window.wsRowKind || "component")) ? "<p>No subjects of this type. Component rows show analysis results without requiring boundary declarations.</p>" : ""}`;
+      body.insertAdjacentHTML(
+        "beforeend",
+        `<h3>Repository review progress</h3><table><thead><tr><th>Repository</th><th>Reviewed interfaces</th><th>State</th></tr></thead><tbody>${(c?.repositories || model.sources.map((source) => ({ repository: source.name, reviewedInterfaces: 0, totalInterfaces: model.interfaces.filter((i) => i.repository === source.name).length, state: "not-reviewed" }))).map((r) => `<tr><td>${e(r.repository)}</td><td>${r.reviewedInterfaces} / ${r.totalInterfaces}</td><td>${e(r.state)}</td></tr>`).join("")}</tbody></table>`,
+      );
       body.insertAdjacentHTML(
         "beforeend",
         `<section id="ws-coverage">${coverageHtml(model)}</section><section id="ws-usage">${usageHtml(jobState.tokenUsage || model.tokenUsage)}</section>`,

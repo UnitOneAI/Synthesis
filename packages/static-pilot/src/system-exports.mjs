@@ -181,7 +181,7 @@ export function systemSvg(
       const path = same
         ? `M${a.x + 270} ${a.y + 32} C${a.x + 300} ${a.y - 45} ${b.x - 30} ${b.y - 45} ${b.x} ${b.y + 32}`
         : `M${x1} ${y1} C${x1} ${y1 + 25} ${x2} ${y2 - 25} ${x2} ${y2}`;
-      return `<g data-select="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(f.id + " · " + f.name + " · " + f.basis)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="16"/><path d="${path}" fill="none" stroke="${active.has(f.id) ? "#b56416" : "#61758c"}" stroke-width="${active.has(f.id) ? 3 : 1.5}" ${f.basis === "unresolved" ? 'stroke-dasharray="5 5"' : ""} class="${active.has(f.id) ? "selected" : ""}" marker-end="url(#system-arrow)"/>${text((x1 + x2) / 2 + 4, labelY, String(f.protocol || "flow").slice(0, 18), 10)}${crossings.length ? `<g data-select="${e(crossings[0].id)}" role="button" tabindex="0" aria-label="${e(crossings[0].name)}"><title>${e(crossings.map((b) => b.name + " · " + b.basis).join("; "))}</title><rect x="${(x1 + x2) / 2}" y="${labelY + 6}" width="150" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5"/>${text((x1 + x2) / 2 + 5, labelY + 20, `${crossings.length} boundar${crossings.length > 1 ? "ies" : "y"}: ${boundaryState}`, 10)}</g>` : ""}</g>`;
+      return `<g data-select="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(f.id + " · " + f.name + " · " + f.basis)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="16"/><path d="${path}" fill="none" stroke="${active.has(f.id) ? "#b56416" : "#61758c"}" stroke-width="${active.has(f.id) ? 3 : 1.5}" ${f.basis === "unresolved" || ["inferred route match", "static queue candidate", "static configuration"].includes(f.basis) ? 'stroke-dasharray="5 5"' : ""} class="${active.has(f.id) ? "selected" : ""}" marker-end="url(#system-arrow)"/>${text((x1 + x2) / 2 + 4, labelY, String(f.protocol || "flow").slice(0, 18), 10)}${crossings.length ? `<g data-select="${e(crossings[0].id)}" role="button" tabindex="0" aria-label="${e(crossings[0].name)}"><title>${e(crossings.map((b) => b.name + " · " + b.basis).join("; "))}</title><rect x="${(x1 + x2) / 2}" y="${labelY + 6}" width="150" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5"/>${text((x1 + x2) / 2 + 5, labelY + 20, `${crossings.length} boundar${crossings.length > 1 ? "ies" : "y"}: ${boundaryState}`, 10)}</g>` : ""}</g>`;
     })
     .join("")}${nodes
     .map((n) => {
@@ -233,7 +233,7 @@ export function systemMermaid(model) {
     lines.push(`%% Flow ${f.id}: ${f.source} -> ${f.target}`);
     const b = s.boundaries.filter((b) => b.flowIds.includes(f.id));
     lines.push(
-      `  ${nid(f.source)} ${f.basis === "unresolved" ? "-.->" : "-->"}|"${label([f.protocol, f.name, f.basis, ...b.map((b) => `${b.dimension}: ${b.before} to ${b.after}`)].join(" · "))}"| ${nid(f.target)}`,
+      `  ${nid(f.source)} ${f.basis === "unresolved" || ["inferred route match", "static queue candidate", "static configuration"].includes(f.basis) ? "-.->" : "-->"}|"${label([f.protocol, f.name, f.basis, ...b.map((b) => `${b.dimension}: ${b.before} to ${b.after}`)].join(" · "))}"| ${nid(f.target)}`,
     );
   }
   return lines.join("\n") + "\n";

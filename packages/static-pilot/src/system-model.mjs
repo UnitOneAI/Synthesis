@@ -87,7 +87,13 @@ export function systemModel(model, { matrix = true } = {}) {
       ...claim(),
     }));
   const grouped = new Map();
-  const declared = new Set(model.flows.flatMap((f) => [f.from, f.to]));
+  const declaredSources = new Set(model.flows.map((f) => f.from));
+  const discovered = (model.connectionDiscovery?.flows || []).filter(
+    (f) => !f.from || !declaredSources.has(f.from),
+  );
+  entities.push(...(model.connectionDiscovery?.entities || []));
+  const connectedFlows = [...model.flows, ...discovered];
+  const declared = new Set(connectedFlows.flatMap((f) => [f.from, f.to]));
   for (const i of sourceInterfaces.filter(
     (i) => i.direction !== "control" && !declared.has(i.id),
   )) {
@@ -126,7 +132,7 @@ export function systemModel(model, { matrix = true } = {}) {
       ...claim("unresolved"),
     });
   }
-  for (const f of model.flows)
+  for (const f of connectedFlows)
     flows.push({
       id: f.id,
       name: f.operation,
@@ -135,14 +141,18 @@ export function systemModel(model, { matrix = true } = {}) {
       target:
         sourceInterfaces.find((i) => i.id === f.to)?.component || f.target,
       protocol:
-        model.interfaces.find((i) => i.id === f.from)?.protocol || "Unknown",
+        f.protocol ||
+        model.interfaces.find((i) => i.id === f.from)?.protocol ||
+        "Unknown",
       data: f.data,
       controls: f.controls,
       description: f.reason,
-      interfaceIds: [f.from, f.to],
+      interfaceIds: [f.from, f.to].filter(Boolean),
       evidenceIds: f.evidence,
       reviewer: f.reviewer,
-      ...claim("reviewer declaration"),
+      confidence: f.confidence,
+      graphNodeIds: f.graphNodeIds,
+      ...claim(f.basis === "declared" ? "reviewer declaration" : f.basis),
     });
   for (const b of model.boundaries)
     boundaries.push({
@@ -156,23 +166,25 @@ export function systemModel(model, { matrix = true } = {}) {
       evidenceIds: b.evidence,
       ...claim("reviewer declaration"),
     });
-  for (const f of flows.filter(
-    (f) => f.basis === "unresolved" && f.protocol === "HTTP",
-  )) {
-    if (!entities.some((n) => n.id === f.source && n.type === "external"))
+  for (const f of flows.filter((f) => f.protocol === "HTTP")) {
+    if (
+      !entities.some((n) => n.id === f.source && n.type === "external") &&
+      !discovered.some((d) => d.id === f.id)
+    )
       continue;
     const controls = sourceInterfaces.filter(
       (i) => i.component === f.target && i.direction === "control",
     );
-    if (!controls.length) continue;
+
     boundaries.push({
       id: id("candidate-boundary", f.id),
-      name: "Caller authentication context requires review",
+      name: "Caller-to-service identity boundary candidate",
       dimension: "identity",
       before: "Caller identity not established",
       after: "Application principal (requires confirmation)",
-      enforcement:
-        "Control declarations occur in this component; applicability to the entry point is not established.",
+      enforcement: controls.length
+        ? "Control declarations occur in this component; applicability to the entry point is not established."
+        : "Identity enforcement is not established in the collected source. Confirm caller identity and service authorization context.",
       flowIds: [f.id],
       evidenceIds: uniq([
         ...f.evidenceIds,
@@ -195,7 +207,15 @@ export function systemModel(model, { matrix = true } = {}) {
       objectives: a.objectives,
       excludedCapabilities: "No additional privileges or compromise assumed",
       entryIds: [...(actorEntries.get(a.component) || [])],
-      evidenceIds: [],
+      evidenceIds: uniq(
+        sourceInterfaces
+          .filter(
+            (i) =>
+              i.component === a.component ||
+              (actorEntries.get(a.component) || new Set()).has(i.component),
+          )
+          .flatMap((i) => i.evidence),
+      ),
       ...claim("assumption"),
     });
   for (const t of model.threats)
@@ -400,6 +420,11 @@ export function systemModel(model, { matrix = true } = {}) {
     sourceGaps: model.sources
       .filter((s) => s.status !== "read" || s.coverage?.truncated)
       .map((s) => s.name),
+    discoveredFlows: discovered.length,
+    inferredConnections: discovered.filter(
+      (f) => f.basis === "inferred route match",
+    ).length,
+    connectionGaps: model.connectionDiscovery?.gaps || [],
     unresolvedFlows: result.flows.filter((f) => f.basis === "unresolved")
       .length,
     pendingBoundaries: result.boundaries.filter(
@@ -457,6 +482,8 @@ export function systemMatrix(s, model, w = model.architecture || empty()) {
     rowKind: r.rowKind,
     repositories: r.repositories || [],
     interfaceIds: r.interfaceIds || [],
+    reviewedInterfaces: (r.interfaceIds || []).filter((i) => reviewed.has(i))
+      .length,
     cells: CATEGORIES.map((category) => {
       const items = [
         ...new Set(
@@ -496,7 +523,9 @@ export function systemMatrix(s, model, w = model.architecture || empty()) {
               : r.interfaceIds?.length &&
                   r.interfaceIds.every((i) => reviewed.has(i))
                 ? "awaiting-review"
-                : "not-analyzed",
+                : r.interfaceIds?.some((i) => reviewed.has(i))
+                  ? "partially-reviewed"
+                  : "not-analyzed",
       };
     }),
   }));
@@ -562,7 +591,7 @@ function validate(s, model, previous) {
       throw Error("Invalid component type");
   }
   for (const r of s.entities)
-    if (!["external", "unknown"].includes(r.type))
+    if (!["external", "unknown", "store", "broker"].includes(r.type))
       throw Error("Invalid external entity type");
   for (const f of s.flows) {
     if (
@@ -817,6 +846,8 @@ export function editSystem(model, input) {
       w.records,
       w.removed,
     ]);
+    if (next.cweReview) next.cweReview.status = "stale";
+    if (next.cweModelReview) next.cweModelReview.status = "stale";
     if (next.aiReview) {
       next.aiReview.status = "stale";
       next.aiReview.error =

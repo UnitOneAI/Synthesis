@@ -1,3 +1,6 @@
+import { reviewCweCode } from "./cwe-model.mjs";
+import { redact } from "./model-review.mjs";
+import { scanCwe, cweCsv, cweSarif } from "./cwe-scan.mjs";
 import { GUIDANCE_HASH } from "./analysis-guidance.mjs";
 import { GraphStore, attachGraph } from "./graph-store.mjs";
 import {
@@ -61,6 +64,8 @@ export async function serve({
   initialManifest,
   modelConfig,
   includeSourceExcerpts = false,
+  cweScanner = process.env.SYNTHESIS_CWE_SCANNER || "semgrep",
+  cweModelFetch = fetch,
 }) {
   const root = await fs.realpath(sourceRoot),
     token = randomBytes(32).toString("hex");
@@ -70,6 +75,7 @@ export async function serve({
     model,
     manifest = initialManifest,
     timer;
+  let cweController, cweTask;
   let reviewExcerpts = [],
     scanPriorManifest;
   if (!["memory", "sqlite"].includes(graphStorage))
@@ -193,6 +199,15 @@ export async function serve({
           sourceRevision: model.modelRevision,
           priorStatus: model.aiReview?.status,
         });
+        if (model.cweModelReview?.status === "running") {
+          model.cweModelReview.status = "partial";
+          model.cweModelReview.error =
+            "Interrupted model review; continue pending CWE batches.";
+        }
+        if (model.cweReview?.status === "running") {
+          model.cweReview.status = "partial";
+          model.cweReview.error = "Interrupted scan; run CWE review again.";
+        }
         interruptUsage(model.usageLedger);
         manifest = saved.manifest;
         validateManifest(manifest);
@@ -335,6 +350,16 @@ export async function serve({
             m.model.architecture.rebuildNotice =
               "Reviewer declarations retained. Recheck references and stale decisions after rebuilding.";
           }
+          if (model?.cweModelReview) {
+            m.model.cweModelReview = structuredClone(model.cweModelReview);
+            if (model.cweModelReview.basedOnRevision !== m.model.modelRevision)
+              m.model.cweModelReview.status = "stale";
+          }
+          if (model?.cweReview) {
+            m.model.cweReview = structuredClone(model.cweReview);
+            if (model.cweReview.basedOnRevision !== m.model.modelRevision)
+              m.model.cweReview.status = "stale";
+          }
           model = m.model;
           scanPriorManifest = null;
           await checkpoint();
@@ -418,6 +443,7 @@ export async function serve({
         "style.css",
         "workspace.js",
         "workspace.css",
+        "cwe.js",
       ].map(async (name) => [
         name,
         await fs.readFile(new URL("../public/" + name, import.meta.url)),
@@ -507,7 +533,7 @@ export async function serve({
         );
       }
       if (req.method === "POST" && url.pathname === "/api/analyze") {
-        if (job.status === "running")
+        if (["running", "cancelling"].includes(job.status))
           return send(409, { error: "An analysis is already running" });
         const proposedManifest = await body(req);
         validateManifest(proposedManifest);
@@ -548,7 +574,7 @@ export async function serve({
         });
       }
       if (req.method === "POST" && url.pathname === "/api/review") {
-        if (job.status === "running")
+        if (["running", "cancelling"].includes(job.status))
           return send(409, { error: "An analysis is already running" });
         if (!model) return send(409, { error: "Build the source graph first" });
         if (!modelConfig)
@@ -585,6 +611,179 @@ export async function serve({
         });
         return send(202, job);
       }
+      if (req.method === "POST" && url.pathname === "/api/cwe") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error:
+              "Build a source graph and wait for the current operation to finish",
+          });
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, {
+            error: "Source snapshot changed; refresh before scanning",
+          });
+        cweController = new AbortController();
+        const jobId = randomBytes(12).toString("hex");
+        job = {
+          status: "running",
+          mode: "cwe",
+          jobId,
+          message: "Starting local CWE review",
+        };
+        const prior = model.cweReview;
+        cweTask = scanCwe(manifest, model, {
+          sourceRoot: root,
+          scanner: cweScanner,
+          signal: cweController.signal,
+          trace: (event, data) => traces.record(event, { ...data, jobId }),
+          progress: (message) => {
+            job.message = message;
+          },
+          checkpoint: async (report) => {
+            if (prior?.rulePack.sha256 === report.rulePack.sha256)
+              for (const f of report.findings) {
+                const previous = prior.findings.find((p) => p.id === f.id);
+                if (previous?.review) {
+                  f.review = previous.review;
+                  f.status = previous.status;
+                }
+              }
+            model.cweReview = structuredClone(report);
+            await checkpoint();
+            if (persistenceError) throw Error("CWE checkpoint failed");
+          },
+        })
+          .then((report) => {
+            job = {
+              status: "ready",
+              mode: "cwe",
+              jobId,
+              message: `CWE review ${report.status}: ${report.findings.length} potential weaknesses. Inspect repository coverage.`,
+            };
+          })
+          .catch(() => {
+            job = {
+              status: "failed",
+              mode: "cwe",
+              jobId,
+              message:
+                "CWE review failed; inspect saved coverage and diagnostic traces",
+            };
+          });
+        return send(202, job);
+      }
+      if (req.method === "POST" && url.pathname === "/api/cwe/model") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error:
+              "Build a source graph and wait for the current operation to finish",
+          });
+        if (!modelConfig)
+          return send(409, {
+            error:
+              "Configure an approved provider and model for CWE source review",
+          });
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, {
+            error: "Refresh the current source snapshot before reviewing",
+          });
+        if (
+          input.includeSourceCode !== true ||
+          !Number.isInteger(input.budget) ||
+          input.budget < 1 ||
+          input.budget > 100
+        )
+          throw Error(
+            "Enable source-code review and choose a request budget from 1 to 100",
+          );
+        cweController = new AbortController();
+        const jobId = randomBytes(12).toString("hex");
+        job = {
+          status: "running",
+          mode: "cwe-model",
+          jobId,
+          message: "Planning CWE source review",
+        };
+        cweTask = reviewCweCode(manifest, model, {
+          sourceRoot: root,
+          config: modelConfig,
+          fetchImpl: cweModelFetch,
+          budget: input.budget,
+          signal: cweController.signal,
+          trace: (event, data) => traces.record(event, { ...data, jobId }),
+          progress: (message) => {
+            job.message = message;
+          },
+          checkpoint: async (report) => {
+            model.cweModelReview = structuredClone(report);
+            await checkpoint();
+            if (persistenceError) throw Error("CWE model checkpoint failed");
+          },
+        })
+          .then((report) => {
+            job = {
+              status: "ready",
+              mode: "cwe-model",
+              jobId,
+              message: `CWE source review ${report.status}: ${report.findings.length} potential weaknesses. ${report.pendingBatches ?? "Unknown"} packets remain.`,
+            };
+          })
+          .catch(() => {
+            job = {
+              status: "failed",
+              mode: "cwe-model",
+              jobId,
+              message:
+                "CWE source review failed; inspect the saved report and traces",
+            };
+          });
+        return send(202, job);
+      }
+      if (req.method === "POST" && url.pathname === "/api/cwe/decision") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, { error: "Wait for the scan to finish" });
+        const input = await body(req),
+          report =
+            input.origin === "model" ? model.cweModelReview : model.cweReview;
+        if (!report)
+          return send(409, { error: "Run the corresponding CWE review first" });
+        if (
+          input.modelRevision !== model.modelRevision ||
+          report.basedOnRevision !== model.modelRevision
+        )
+          return send(409, {
+            error:
+              "Rebuild and rescan the current source before recording a decision",
+          });
+        const f = report.findings.find((f) => f.id === input.id);
+        if (
+          !f ||
+          ![
+            "needs-review",
+            "confirmed",
+            "false-positive",
+            "accepted-risk",
+          ].includes(input.status) ||
+          typeof input.reviewer !== "string" ||
+          !input.reviewer.trim() ||
+          input.reviewer.length > 200 ||
+          typeof input.reason !== "string" ||
+          !input.reason.trim() ||
+          input.reason.length > 2000
+        )
+          throw Error(
+            "Choose a finding and provide status, reviewer and rationale",
+          );
+        f.status = input.status;
+        f.review = {
+          reviewer: redact(input.reviewer),
+          reason: redact(input.reason),
+          at: new Date().toISOString(),
+        };
+        await checkpoint();
+        return send(200, outputModel());
+      }
       if (req.method === "POST" && url.pathname === "/api/cancel") {
         const reviewing = job.mode === "review",
           preserve = Boolean(model);
@@ -594,6 +793,8 @@ export async function serve({
         await traces
           .record("job.cancelled", { jobId: job.jobId, mode: job.mode })
           .catch(() => {});
+        cweController?.abort();
+        await cweTask;
         await worker?.terminate();
         clearTimeout(timer);
         job = {
@@ -636,7 +837,7 @@ export async function serve({
           ? send(200, outputModel())
           : send(409, { error: "No completed model" });
       if (req.method === "POST" && url.pathname === "/api/system") {
-        if (job.status === "running")
+        if (["running", "cancelling"].includes(job.status))
           return send(409, {
             error: "Stop the current analysis before editing the system model",
           });
@@ -660,7 +861,7 @@ export async function serve({
         );
       }
       if (req.method === "POST" && url.pathname === "/api/bindings") {
-        if (job.status === "running")
+        if (["running", "cancelling"].includes(job.status))
           return send(409, {
             error:
               "Wait for or cancel the current review before editing the DFD",
@@ -730,6 +931,10 @@ export async function serve({
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
+          "cwe-model-json": "cwe-source-review.json",
+          "cwe-json": "cwe-review.json",
+          "cwe-csv": "cwe-findings.csv",
+          "cwe-sarif": "cwe-findings.sarif",
           html: "threat-model.html",
           securityControls: "control-register.csv",
           actors: "actor-register.csv",
@@ -753,6 +958,26 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
+        if (format === "cwe-model-json")
+          return model.cweModelReview
+            ? send(200, model.cweModelReview)
+            : send(409, { error: "Run CWE source review first" });
+        if (format.startsWith("cwe-")) {
+          if (!model.cweReview)
+            return send(409, { error: "Run CWE review first" });
+          if (format === "cwe-csv")
+            return send(
+              200,
+              cweCsv(model.cweReview),
+              "text/csv; charset=utf-8",
+            );
+          return send(
+            200,
+            format === "cwe-sarif"
+              ? cweSarif(model.cweReview)
+              : model.cweReview,
+          );
+        }
         if (format === "usage")
           return send(
             200,
@@ -843,6 +1068,8 @@ export async function serve({
     const previousStatus = job.status;
     job.status = "closed";
     closing = (async () => {
+      cweController?.abort();
+      await cweTask;
       await worker?.terminate();
       await Promise.all([...queryWorkers].map((w) => w.terminate()));
       if (model?.aiReview?.status === "pending") {

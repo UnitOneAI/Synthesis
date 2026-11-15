@@ -40,6 +40,7 @@ const { values, positionals } = parseArgs({
     workspace: { type: "string" },
     "graph-storage": { type: "string" },
     "trace-dir": { type: "string" },
+    "cwe-scanner": { type: "string" },
     "source-root": { type: "string" },
     port: { type: "string" },
     inventory: { type: "string" },
@@ -79,7 +80,7 @@ async function writeStreamFile(file, write) {
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (current Node.js 24 recommended for disk storage)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173] [--graph-storage sqlite|memory]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\ndiagnostics --workspace <folder> --out <new-file.zip> [--trace-dir <folder>]\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
+      'Synthesis static pilot (current Node.js 24 recommended for disk storage)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173] [--graph-storage sqlite|memory] [--cwe-scanner <semgrep-executable>]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\ndiagnostics --workspace <folder> --out <new-file.zip> [--trace-dir <folder>]\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
     );
     return;
   }
@@ -166,6 +167,7 @@ async function main() {
       graphStorage: values["graph-storage"] || "sqlite",
       workspace: values.workspace,
       traceDirectory: values["trace-dir"],
+      cweScanner: values["cwe-scanner"],
       githubToken: process.env.GITHUB_TOKEN,
       modelConfig: inference,
       includeSourceExcerpts: Boolean(values["include-source-excerpts"]),

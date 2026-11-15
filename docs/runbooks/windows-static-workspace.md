@@ -160,3 +160,27 @@ For collection troubleshooting, bring the ZIP and the approximate failure time/t
 Traces rotate at 8 MiB without automatic deletion. A ZIP includes the newest trace segments up to 64 MiB and lists any omissions in `trace-index.json`; preserve the workspace if older segments are needed. Unknown token usage after interrupted requests is not zero. Source graph limits, unrecognized formats and unresolved dynamic relationships remain coverage gaps, even when every planned request succeeds.
 
 Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.
+
+## Connected DFD, STRIDE results and CWE review (0.7.0)
+
+After updating, **Build source graph** once. This upgrades stored interface facts and automatically creates candidate HTTP, queue and shared-resource connections. Open **System model**. Solid endpoint matches and dashed route hypotheses retain their evidence; unresolved destinations remain visible. Actor assumptions and identity-boundary candidates are supplied for review. Manual connection entry is optional correction, not a prerequisite.
+
+**STRIDE matrix** opens component rows by default. Counts are returned threat scenarios; checklist prompts are inside cell details. Read the repository progress table. **Request budget = 1 means one model call**, not one completed repository. Select **Run or continue STRIDE analysis** to process remaining packets. An empty cell does not mean that no threat exists.
+
+For deterministic local CWE scanning, install Python 3.12 on the VM, then:
+
+```powershell
+py -3.12 -m venv C:/Tools/SynthesisScanner
+& 'C:/Tools/SynthesisScanner/Scripts/python.exe' -m pip install semgrep==1.185.0
+& 'C:/Tools/SynthesisScanner/Scripts/semgrep.exe' --version
+$env:PYTHONUTF8 = '1'
+$env:SYNTHESIS_CWE_SCANNER = 'C:/Tools/SynthesisScanner/Scripts/semgrep.exe'
+```
+
+Restart Synthesis in this same PowerShell window with your existing source-root, workspace, provider, model and gateway arguments. The scanner path can also be passed with `--cwe-scanner`. Scanner installation does not require installing dependencies in any target repository.
+
+In **CWE code review**, **Scan selected repositories** runs the local rule pack. Inspect scanned/eligible file counts, source snapshot agreement and gaps. Select a finding to inspect its file hash, location and remediation; record reviewer and rationale. Export JSON, CSV or SARIF.
+
+In the same tab, **CWE source review** uses the configured model, independently of whether Semgrep is installed. Enable **Send redacted source segments to the configured provider**, choose a model request budget, then **Run or continue CWE source review**. This transmits code to your approved gateway; it does not execute the code or contact the target product. The gateway deployment name must remain exactly the provisioned name. Continue until the source and interaction packets are processed, then review remaining gaps. Export the CWE source review and token-usage CSV. A budget stop preserves completed findings and batches.
+
+The diagnostic bundle includes source graph, discovered connections, CWE coverage, failure traces and model token accounting. Model source segments are not saved in it. Inspect confidential architecture metadata before transferring the bundle. See the [architecture](../design/connected-dfd-cwe-review.md) and [test specification](../testing/connected-dfd-cwe-review.md) for supported cases and limits.

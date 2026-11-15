@@ -3,6 +3,11 @@ import {
   GUIDANCE_HASH,
   GUIDANCE_SOURCES,
 } from "./analysis-guidance.mjs";
+import {
+  interfaceConnection,
+  configurationConnection,
+  discoverConnections,
+} from "./connection-discovery.mjs";
 import { GraphStore, attachGraph } from "./graph-store.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import path from "node:path";
@@ -17,7 +22,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.6.0";
+export const ENGINE_VERSION = "static-pilot-0.7.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -126,7 +131,8 @@ const RULES = [
     kind: "message-publish",
     direction: "outbound",
     protocol: "messaging",
-    regex: /\b(?:BasicPublish(?:Async)?|PublishAsync|SendMessageAsync)\s*\(/g,
+    regex:
+      /\b(?:BasicPublish(?:Async)?|PublishAsync|SendMessageAsync|sendToQueue|basic_publish)\s*\(/g,
     label: () => "Message publish candidate; broker and resource unresolved",
   },
   {
@@ -134,7 +140,7 @@ const RULES = [
     direction: "inbound",
     protocol: "messaging",
     regex:
-      /\b(?:BasicConsume(?:Async)?|SubscribeAsync|RegisterMessageHandler)\s*\(/g,
+      /\b(?:BasicConsume(?:Async)?|SubscribeAsync|RegisterMessageHandler|consume|basic_consume)\s*\(/g,
     label: () => "Message consumer candidate; broker and resource unresolved",
   },
   {
@@ -358,6 +364,7 @@ export function extract(source, files, options = {}) {
       evidence.push(e);
       interfaces.push(item);
     }
+    return item;
   };
   for (const file of files) {
     const ext = path.posix.extname(file.path).toLowerCase();
@@ -382,6 +389,20 @@ export function extract(source, files, options = {}) {
         tree = parseXml(file.text);
       if (tree)
         walkObject(tree, (key, value, pointer) => {
+          const connection = configurationConnection(key, value, pointer);
+          if (connection) {
+            const item = add(
+              file,
+              pointer,
+              0,
+              "connection-config",
+              "resource",
+              connection.protocol || "HTTP",
+              "Literal endpoint configuration; deployment unverified",
+              "static configuration",
+            );
+            item.connection = connection;
+          }
           if (
             key === "paths" &&
             value &&
@@ -540,6 +561,13 @@ export function extract(source, files, options = {}) {
         message:
           "File hashed and inventoried; no semantic adapter for this format",
       });
+  }
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const byEvidence = new Map(evidence.map((e) => [e.id, e]));
+  for (const item of interfaces) {
+    const e = byEvidence.get(item.evidence[0]);
+    if (!item.connection && Number.isInteger(e.offset))
+      item.connection = interfaceConnection(item, byPath.get(e.path), e.offset);
   }
   return { components, interfaces, evidence, dependencies, diagnostics };
 }
@@ -1077,6 +1105,15 @@ export async function analyze(manifest, options = {}) {
         storage: disk.capacity(),
       });
     } else finishSourceGraph(model.sourceGraph);
+    model.connectionDiscovery = discoverConnections(
+      model,
+      disk
+        ? disk.nodes(generation, { kind: "interface" })
+        : model.sourceGraph.nodes,
+    );
+    await options.trace?.("connections.discovered", {
+      counts: model.connectionDiscovery.coverage,
+    });
     compose(model, manifest.declarations || {});
     await options.trace?.("scan.completed", {
       sourceRevision: model.modelRevision,
