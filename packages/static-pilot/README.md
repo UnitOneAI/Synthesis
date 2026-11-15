@@ -6,7 +6,7 @@ Graph-first local source review with optional Claude or Gemini analysis and no t
 
 ## Run tonight
 
-Prerequisites: **Node.js 22 or later**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, Python, database or application services are needed. Provider-free discovery needs no AI key; model review requires the selected provider key.
+Prerequisites: **a current Node.js 24 release**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, Python, database or application services are needed. Provider-free discovery needs no AI key; model review requires the selected provider key.
 
 From the Synthesis repository:
 
@@ -92,7 +92,7 @@ Back up the workspace folder before updating. Stop the server, update, restart w
 
 ## Offline transfer
 
-On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies include prebuilt WebAssembly parsers and JavaScript; no customer-side dependency installation is needed. Node.js 22+ must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.
+On a connected preparation machine run `npm ci --ignore-scripts`, `npm test` and `npm run check`. Transfer this package directory **including `node_modules`** through the approved transfer process. Dependencies include prebuilt WebAssembly parsers and JavaScript; no customer-side dependency installation is needed. A current Node.js 24 release must be installed for the customer's OS. Start with `node src/cli.mjs serve --source-root ...`.
 
 Local-source mode with model review disabled needs no network. Optional GitHub acquisition uses `api.github.com` and `codeload.github.com`, never runtime destinations found in code. Keep customer workbooks, manifests, reports, tokens and source outside the public Synthesis checkout. Exports can contain private repository names and architectural metadata even without source excerpts.
 
@@ -154,7 +154,7 @@ Use equivalent writable paths on Windows. Fixtures are synthetic and never execu
 
 Version 0.5.0 removes the previous local aggregate collection and candidate cutoffs. Each eligible local file is extracted independently, so a large repository does not prevent later repositories from contributing interfaces. Per-file, parser, graph, process and checkpoint safeguards remain; inspect their ledgers before claiming coverage.
 
-The syntax graph allows 100,000 nodes, 200,000 edges and 5,000 emitted nodes per file. Parser time is bounded per file; malformed/unsupported/limited files remain visible. Call sites are source-supported, but target edges are only unique same-file scope candidates. Literal project-reference paths can link collected projects across local clones. This does not resolve runtime services, build conditions, dependency injection, polymorphism, macros, effective controls or deployed permissions. The graph preview Mermaid is limited to 200 nodes; full graph JSON retains all collected nodes/edges. DFD Mermaid aggregates unresolved interfaces by source component, protocol and direction; it never treats project containment as a trust zone.
+The default SQLite graph has no fixed aggregate node/edge cap; it is constrained by disk quota and the remaining parser/process/planner limits. Explicit `--graph-storage memory` mode retains the 100,000-node/200,000-edge caps. Both modes retain 5,000 emitted nodes per file. Parser time is bounded per file; malformed/unsupported/limited files remain visible. Call sites are source-supported, but target edges are only unique same-file scope candidates. Literal project-reference paths can link collected projects across local clones. This does not resolve runtime services, build conditions, dependency injection, polymorphism, macros, effective controls or deployed permissions. The graph preview Mermaid is limited to 200 nodes; full graph JSON retains all collected nodes/edges. DFD Mermaid aggregates unresolved interfaces by source component, protocol and direction; it never treats project containment as a trust zone.
 
 The automated 12-repository fixture has 840 extracted interface records and verifies complete packet scheduling, continuation, graph provenance, export behavior and no fabricated DFD flows using mocked model responses. It is not a large customer-codebase performance benchmark or evidence of live provider reasoning quality. Customer qualification requires inspecting coverage ledgers and validating critical flows with the security champion.
 
@@ -173,4 +173,16 @@ Version 0.4.1 adds provider-reported token accounting in the STRIDE view, full r
 
 **Download diagnostic bundle** is available even before a completed scan. It exports the retained source graph, source/parser ledgers, recursive worklist, request attempts, safe failure codes, provider request IDs, token counts and durable traces in one ZIP. Traces default to `<workspace>/traces`; `--trace-dir` chooses another directory outside the source root. The offline `diagnostics` command works without a provider key. Raw excerpts, prompts and model-response prose are excluded; graph metadata remains confidential.
 
-See the [recursive review and observability contract](../../docs/design/recursive-coverage-observability.md) and [Windows diagnostic instructions](../../docs/runbooks/windows-static-workspace.md#collect-portable-diagnostics-050). The retained graph still has resource limits; full disk-backed graph indexing and compiler-aware cross-file dispatch are not implemented.
+See the [recursive review and observability contract](../../docs/design/recursive-coverage-observability.md) and [Windows diagnostic instructions](../../docs/runbooks/windows-static-workspace.md#collect-portable-diagnostics-050). The SQLite graph backend is available in 0.6.0. Compiler-aware cross-file dispatch and a fully disk-backed metadata/coverage model remain unimplemented; existing traversal, obligation, worker and metadata snapshot limits still apply.
+
+## Disk graph and analysis method (0.6.0)
+
+`serve` and `analyze` default to SQLite. Check `node -p "process.versions.sqlite"`: disk mode requires 3.51.3 or newer. Qualification used Node 24.22.1 / SQLite 3.54.1. `--graph-storage memory` explicitly selects the previous capped mode; no silent fallback occurs.
+
+Keep the workspace on local attached storage outside the clone root. Unchanged files are hashed again but their parsed results are reused. Graph facts are generation-pinned; source search is paged and complete graph JSON/diagnostic graph entries stream from disk. Optional source excerpts are never persisted in packet storage. Stop Synthesis before backing up the **whole workspace**, including snapshot, graph database and traces.
+
+Review now includes a bundled, pinned adaptation of the existing UnitOne threat-modeling skill, .NET supplement, STRIDE/ATT&CK prompts and OWASP guidance. It requests structured attack reasoning and proposed framework mappings with validated identifiers. The optional reviewer risk form calculates the existing OWASP technical-risk matrix only when all factors are supplied; unknown factors do not receive defaults. Compatible prior analysis survives rebuild, while changed evidence/methodology marks it stale.
+
+See the [implementation boundary](../../docs/design/disk-backed-static-graph.md#06-implementation-boundary), [analysis method](../../docs/design/static-analysis-methodology.md), [test specification](../../docs/testing/disk-graph-and-analysis-quality.md), and [Windows runbook](../../docs/runbooks/windows-static-workspace.md).
+
+Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.

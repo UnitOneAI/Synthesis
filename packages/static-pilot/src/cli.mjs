@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+import { createWriteStream } from "node:fs";
+import { finished } from "node:stream/promises";
+import { GraphStore, attachGraph } from "./graph-store.mjs";
+import {
+  streamGraph,
+  streamModel,
+  streamDiagnosticBundle,
+} from "./graph-stream.mjs";
 import {
   traceStore,
   diagnosticBundle,
@@ -30,6 +38,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     workspace: { type: "string" },
+    "graph-storage": { type: "string" },
     "trace-dir": { type: "string" },
     "source-root": { type: "string" },
     port: { type: "string" },
@@ -48,11 +57,29 @@ const { values, positionals } = parseArgs({
   },
 });
 const [command] = positionals;
-let trace;
+let trace, graphStore;
+async function writeStreamFile(file, write) {
+  const temporary = file + ".partial";
+  const stream = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
+  const completion = finished(stream);
+  completion.catch(() => {});
+  try {
+    await write(stream);
+    stream.end();
+    await completion;
+    await fs.link(temporary, file);
+    await fs.unlink(temporary);
+  } catch (error) {
+    stream.destroy();
+    await completion.catch(() => {});
+    await fs.rm(temporary, { force: true });
+    throw error;
+  }
+}
 async function main() {
   if (values.help || !command) {
     console.log(
-      'Synthesis static pilot (Node.js 22+)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\ndiagnostics --workspace <folder> --out <new-file.zip> [--trace-dir <folder>]\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
+      'Synthesis static pilot (current Node.js 24 recommended for disk storage)\n\nserve --source-root <folder> [--workspace <folder-outside-source-root>] [--port 4173] [--graph-storage sqlite|memory]\nimport --inventory <xlsx|csv> --profile <name> --out <manifest.json> [--add <repository>]\nanalyze --manifest <json> --source-root <folder> --out <new-report-folder>\n\ndiagnostics --workspace <folder> --out <new-file.zip> [--trace-dir <folder>]\n\nGitHub sources use source: "github", url, and optional ref in the manifest.\nGITHUB_TOKEN is optional for public sources and required for private sources.\nNo target execution. Optional: --provider anthropic|anthropic-gateway|gemini --model <approved-model-id> [--include-source-excerpts]. Gateway: --base-url <https-base> [--api-version 2023-06-01]. Keys: ANTHROPIC_API_KEY, CLAUDE_API_KEY (gateway), or GOOGLE_GEMINI_API_KEY (environment only).',
     );
     return;
   }
@@ -77,6 +104,26 @@ async function main() {
     const traces = await readTraces(
       values["trace-dir"] || path.join(values.workspace, "traces"),
     );
+    if (model?.sourceGraph?.storage === "sqlite") {
+      graphStore = new GraphStore(
+        path.join(path.resolve(values.workspace), "graph.sqlite"),
+        { readOnly: true },
+      );
+      attachGraph(model.sourceGraph, graphStore);
+      await writeStreamFile(values.out, (stream) =>
+        streamDiagnosticBundle(stream, graphStore, {
+          model,
+          plan: model.aiReview?.plan ? undefined : reviewPlan(model),
+          traces,
+        }),
+      );
+      graphStore.close();
+      graphStore = null;
+      console.log(
+        `Diagnostic bundle written to ${values.out}. Contains confidential architecture metadata.`,
+      );
+      return;
+    }
     const bundle = await diagnosticBundle({
       model,
       plan: model && !model.aiReview?.plan ? reviewPlan(model) : undefined,
@@ -88,6 +135,11 @@ async function main() {
     );
     return;
   }
+  if (
+    values["graph-storage"] &&
+    !["sqlite", "memory"].includes(values["graph-storage"])
+  )
+    throw Error("Graph storage must be sqlite or memory");
   const inference =
     command === "import"
       ? null
@@ -111,6 +163,7 @@ async function main() {
       sourceRoot: values["source-root"],
       port,
       persist: true,
+      graphStorage: values["graph-storage"] || "sqlite",
       workspace: values.workspace,
       traceDirectory: values["trace-dir"],
       githubToken: process.env.GITHUB_TOKEN,
@@ -183,6 +236,10 @@ async function main() {
       ),
       {
         sourceRoot: root,
+        graphDatabase:
+          values["graph-storage"] === "memory"
+            ? undefined
+            : path.join(output, "graph.sqlite"),
         githubToken: process.env.GITHUB_TOKEN,
         modelConfig: inference,
         includeSourceExcerpts: Boolean(values["include-source-excerpts"]),
@@ -193,22 +250,30 @@ async function main() {
         trace: trace.record,
       },
     );
-    await fs.writeFile(
-      path.join(output, "model.json"),
-      JSON.stringify(
-        {
-          ...model,
-          strideMatrix: strideMatrix(model),
-          systemModel: systemModel(model),
-          tokenUsage: usageSummary(
-            model.usageLedger,
-            !model.usageLedger && Boolean(model.aiReview),
-          ),
-        },
-        null,
-        2,
+    if (model.sourceGraph?.storage === "sqlite") {
+      graphStore = new GraphStore(path.join(output, "graph.sqlite"), {
+        readOnly: true,
+      });
+      attachGraph(model.sourceGraph, graphStore);
+    }
+    const exported = {
+      ...model,
+      strideMatrix: strideMatrix(model),
+      systemModel: systemModel(model),
+      tokenUsage: usageSummary(
+        model.usageLedger,
+        !model.usageLedger && Boolean(model.aiReview),
       ),
-    );
+    };
+    if (graphStore)
+      await writeStreamFile(path.join(output, "model.json"), (stream) =>
+        streamModel(stream, exported, graphStore),
+      );
+    else
+      await fs.writeFile(
+        path.join(output, "model.json"),
+        JSON.stringify(exported, null, 2),
+      );
     await fs.writeFile(
       path.join(output, "threat-model.html"),
       systemReport(model),
@@ -219,10 +284,15 @@ async function main() {
     );
     await fs.writeFile(path.join(output, "dfd.svg"), systemSvg(model));
     await fs.writeFile(path.join(output, "dfd.mmd"), systemMermaid(model));
-    await fs.writeFile(
-      path.join(output, "source-graph.json"),
-      JSON.stringify(model.sourceGraph, null, 2),
-    );
+    if (graphStore)
+      await writeStreamFile(path.join(output, "source-graph.json"), (stream) =>
+        streamGraph(stream, model.sourceGraph, graphStore),
+      );
+    else
+      await fs.writeFile(
+        path.join(output, "source-graph.json"),
+        JSON.stringify(model.sourceGraph, null, 2),
+      );
     await fs.writeFile(
       path.join(output, "stride-matrix.csv"),
       registerCsv(model, "matrix"),
@@ -240,17 +310,27 @@ async function main() {
         path.join(output, kind + ".csv"),
         registerCsv(model, kind),
       );
-    await fs.writeFile(
-      path.join(output, "synthesis-diagnostics.zip"),
-      await diagnosticBundle({
-        model,
-        plan: !model.aiReview?.plan ? reviewPlan(model) : undefined,
-        traces: await trace.export(),
-        config: inference,
-        secrets: [inference?.apiKey, process.env.GITHUB_TOKEN],
-        roots: [root],
-      }),
-    );
+    const diagnosticOptions = {
+      model,
+      plan: !model.aiReview?.plan ? reviewPlan(model) : undefined,
+      traces: await trace.export(),
+      config: inference,
+      secrets: [inference?.apiKey, process.env.GITHUB_TOKEN],
+      roots: [root],
+    };
+    if (graphStore)
+      await writeStreamFile(
+        path.join(output, "synthesis-diagnostics.zip"),
+        (stream) =>
+          streamDiagnosticBundle(stream, graphStore, diagnosticOptions),
+      );
+    else
+      await fs.writeFile(
+        path.join(output, "synthesis-diagnostics.zip"),
+        await diagnosticBundle(diagnosticOptions),
+      );
+    graphStore?.close();
+    graphStore = null;
     await trace.close();
     console.log(
       `Draft with gaps: ${model.interfaces.length} interface/control candidates, ${model.flows.length} declared flows. Reports: ${output}`,
@@ -273,6 +353,7 @@ main().catch(async (error) => {
     ?.record("cli.failed", { failure: failureDetail(error.message) })
     .catch(() => {});
   await trace?.close();
+  graphStore?.close();
   console.error(error.message);
   process.exitCode = 1;
 });

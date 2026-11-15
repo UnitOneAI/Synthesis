@@ -1,6 +1,6 @@
 # Recursive static review and portable diagnostics
 
-Status: implemented in static-pilot 0.5.0, with the limitations below. Supersedes the fixed candidate cutoffs in the 0.4 source-graph design. The scope is source-only analysis; neither collection nor validation runs target builds, installers, tests or services.
+Status: v0.5.0 baseline. The [0.6.0 disk graph implementation](disk-backed-static-graph.md#06-implementation-boundary) supersedes aggregate graph storage limits only for the SQLite path; remaining limits below still apply. Supersedes the fixed candidate cutoffs in the 0.4 source-graph design. The scope is source-only analysis; neither collection nor validation runs target builds, installers, tests or services.
 
 ## Problem and acceptance criteria
 

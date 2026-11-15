@@ -1,3 +1,4 @@
+import { assessRisk, RISK_FACTORS } from "./analysis-guidance.mjs";
 import { id, sha } from "./sources.mjs";
 import { redact } from "./model-review.mjs";
 
@@ -265,6 +266,8 @@ export function systemModel(model, { matrix = true } = {}) {
       mitigation: t.mitigation,
       evidenceIds: t.evidenceIds,
       origin: "analysis",
+      analysis: t.analysis,
+      analysisQuality: t.analysisQuality,
       ...claim("inference"),
       ...(model.aiReview.status === "stale" ? { reviewState: "stale" } : {}),
     });
@@ -672,6 +675,28 @@ export function editSystem(model, input) {
       (!input.subjectId.startsWith("cell:") || item.threatIds?.length)
     )
       throw Error("No-scenario disposition requires an empty matrix cell");
+    let riskAssessment;
+    if (input.riskFactors !== undefined) {
+      if (
+        !input.riskFactors ||
+        typeof input.riskFactors !== "object" ||
+        Array.isArray(input.riskFactors)
+      )
+        throw Error("Invalid risk factors");
+      const factors = Object.fromEntries(
+        Object.entries(RISK_FACTORS).map(([group, keys]) => [
+          group,
+          Object.fromEntries(
+            keys.map((key) => [key, input.riskFactors[group]?.[key] ?? null]),
+          ),
+        ]),
+      );
+      riskAssessment = {
+        ...assessRisk(factors),
+        factors,
+        basis: "reviewer estimate",
+      };
+    }
     w.decisions = w.decisions.filter((d) => d.subjectId !== input.subjectId);
     w.decisions.push({
       subjectId: input.subjectId,
@@ -680,7 +705,13 @@ export function editSystem(model, input) {
       rationale: clean(input.rationale),
       reviewer: clean(input.reviewer),
       owner: clean(input.owner),
-      severity: clean(input.severity || "unassessed"),
+      severity: riskAssessment
+        ? riskAssessment.status === "estimate" &&
+          riskAssessment.severity !== "note"
+          ? riskAssessment.severity
+          : "unassessed"
+        : clean(input.severity || "unassessed"),
+      ...(riskAssessment ? { riskAssessment } : {}),
       at: new Date().toISOString(),
     });
   } else {

@@ -1,3 +1,10 @@
+import { GUIDANCE_HASH } from "./analysis-guidance.mjs";
+import { GraphStore, attachGraph } from "./graph-store.mjs";
+import {
+  streamGraph,
+  streamModel,
+  streamDiagnosticBundle,
+} from "./graph-stream.mjs";
 import path from "node:path";
 import {
   traceStore,
@@ -25,7 +32,8 @@ import fs from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { parseInventory, MAX_UPLOAD } from "./inventory.mjs";
-import { publicModelConfig } from "./model-review.mjs";
+import { publicModelConfig, SYSTEM_PROMPT } from "./model-review.mjs";
+import { sha } from "./sources.mjs";
 import { compose, validateManifest } from "./engine.mjs";
 import { reportHtml, diagram } from "./report.mjs";
 import { reviewPlan, strideMatrix } from "./graph-review.mjs";
@@ -46,6 +54,7 @@ export async function serve({
   workspace,
   traceDirectory,
   persist = false,
+  graphStorage = "memory",
   port = 4173,
   githubToken,
   quiet = false,
@@ -63,7 +72,68 @@ export async function serve({
     timer;
   let reviewExcerpts = [],
     scanPriorManifest;
+  if (!["memory", "sqlite"].includes(graphStorage))
+    throw Error("Graph storage must be memory or sqlite");
   const store = persist ? await workspaceStore(root, workspace) : null;
+  if (graphStorage === "sqlite" && !store)
+    throw Error("Disk graph requires a persistent workspace");
+  const graphDatabase =
+    graphStorage === "sqlite"
+      ? path.join(store.dir, "graph.sqlite")
+      : undefined;
+  if (graphDatabase) {
+    try {
+      const check = new GraphStore(graphDatabase);
+      check.close();
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+  }
+  const withGraph = async (fn) => {
+    if (model?.sourceGraph?.storage !== "sqlite") return fn(null);
+    const reader = new GraphStore(path.join(store.dir, "graph.sqlite"), {
+      readOnly: true,
+    });
+    attachGraph(model.sourceGraph, reader);
+    try {
+      return await fn(reader);
+    } finally {
+      reader.close();
+    }
+  };
+  const queryWorkers = new Set();
+  const queryGraph = (data) =>
+    new Promise((resolve, reject) => {
+      if (queryWorkers.size >= 2) {
+        reject(Error("Graph query is busy; retry shortly"));
+        return;
+      }
+      const query = new Worker(
+        new URL("./graph-query-worker.mjs", import.meta.url),
+        {
+          workerData: { file: path.join(store.dir, "graph.sqlite"), ...data },
+          resourceLimits: { maxOldGenerationSizeMb: 768 },
+        },
+      );
+      queryWorkers.add(query);
+      const deadline = setTimeout(() => {
+        query.terminate();
+        reject(Error("Graph query time budget reached"));
+      }, 120000);
+      let completed = false;
+      query.once("message", (message) => {
+        completed = true;
+        clearTimeout(deadline);
+        message.error ? reject(Error(message.error)) : resolve(message.result);
+      });
+      query.once("error", reject);
+      query.once("exit", () => {
+        clearTimeout(deadline);
+        queryWorkers.delete(query);
+        if (!completed) reject(Error("Graph query interrupted"));
+      });
+    });
   let traces;
   try {
     traces = await traceStore({
@@ -100,6 +170,25 @@ export async function serve({
             "The workspace contains a different manifest; use a separate --workspace folder",
           );
         model = saved.model;
+        if (model.sourceGraph?.storage === "sqlite") {
+          const reader = new GraphStore(path.join(store.dir, "graph.sqlite"), {
+            readOnly: true,
+          });
+          try {
+            reader.validateGeneration(model.sourceGraph);
+          } finally {
+            reader.close();
+          }
+        }
+        if (
+          model.aiReview &&
+          (model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
+            model.aiReview.promptHash !== sha(SYSTEM_PROMPT))
+        ) {
+          model.aiReview.status = "stale";
+          model.aiReview.error =
+            "Analysis methodology changed; previous scenarios are retained for reference. Run review with the current guidance.";
+        }
         await traces.record("workspace.restored", {
           sourceRevision: model.modelRevision,
           priorStatus: model.aiReview?.status,
@@ -229,6 +318,18 @@ export async function serve({
             m.model.usageLedger,
             !model?.usageLedger && Boolean(model?.aiReview),
           );
+          if (model?.aiReview) {
+            m.model.aiReview = structuredClone(model.aiReview);
+            if (
+              model.modelRevision !== m.model.modelRevision ||
+              model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
+              model.aiReview.promptHash !== sha(SYSTEM_PROMPT)
+            ) {
+              m.model.aiReview.status = "stale";
+              m.model.aiReview.error =
+                "Source or analysis methodology changed; prior analysis retained for reference and requires a new review.";
+            }
+          }
           if (model?.architecture) {
             m.model.architecture = structuredClone(model.architecture);
             m.model.architecture.rebuildNotice =
@@ -385,6 +486,7 @@ export async function serve({
                 restored: Boolean(model),
               }
             : { enabled: false },
+          graphStorage,
           sourceRoot: root,
           githubConfigured: Boolean(githubToken),
           inference: publicModelConfig(modelConfig),
@@ -420,6 +522,7 @@ export async function serve({
           manifest,
           options: {
             sourceRoot: root,
+            graphDatabase,
             githubToken,
             modelConfig:
               manifest.analysis?.useModel === true ? modelConfig : null,
@@ -431,6 +534,8 @@ export async function serve({
       }
       if (req.method === "GET" && url.pathname === "/api/review-plan") {
         if (!model) return send(409, { error: "Build the source graph first" });
+        if (model.sourceGraph?.storage === "sqlite")
+          return send(200, await queryGraph({ operation: "plan", model }));
         const plan = reviewPlan(model);
         return send(200, {
           modelRevision: model.modelRevision,
@@ -469,7 +574,14 @@ export async function serve({
         await startJob("review", {
           model,
           excerpts: input.includeSourceExcerpts ? reviewExcerpts : [],
-          options: { modelConfig, reviewBatches: input.maxBatches },
+          options: {
+            modelConfig,
+            reviewBatches: input.maxBatches,
+            graphDatabase:
+              model.sourceGraph?.storage === "sqlite"
+                ? path.join(store.dir, "graph.sqlite")
+                : undefined,
+          },
         });
         return send(202, job);
       }
@@ -499,6 +611,25 @@ export async function serve({
         if (!preserve) model = null;
         await checkpoint();
         return send(200, job);
+      }
+      if (req.method === "GET" && url.pathname === "/api/graph") {
+        if (model?.sourceGraph?.storage !== "sqlite")
+          return send(409, {
+            error: "This workspace uses the in-memory graph",
+          });
+        return send(
+          200,
+          await queryGraph({
+            operation: "page",
+            generation: model.sourceGraph.generation,
+            options: {
+              kind: url.searchParams.get("kind") || undefined,
+              search: url.searchParams.get("search") || "",
+              after: url.searchParams.get("after") || "",
+              limit: Number(url.searchParams.get("limit") || 100),
+            },
+          }),
+        );
       }
       if (req.method === "GET" && url.pathname === "/api/model")
         return model
@@ -551,13 +682,32 @@ export async function serve({
       }
       if (req.method === "GET" && url.pathname === "/api/export") {
         if (url.searchParams.get("format") === "diagnostics") {
-          await traces.record("diagnostics.exported", {
+          await traces.record("diagnostics.export-started", {
             sourceRevision: model?.modelRevision,
           });
           res.setHeader(
             "Content-Disposition",
             'attachment; filename="synthesis-diagnostics.zip"',
           );
+          if (model?.sourceGraph?.storage === "sqlite") {
+            res.writeHead(200, { "Content-Type": "application/zip" });
+            await withGraph(async (reader) =>
+              streamDiagnosticBundle(res, reader, {
+                model,
+                plan: model.aiReview?.plan ? undefined : reviewPlan(model),
+                traces: await traces.export(),
+                job,
+                config: modelConfig,
+                secrets: [githubToken, modelConfig?.apiKey, token],
+                roots: [root],
+              }),
+            );
+            await traces.record("diagnostics.export-completed", {
+              sourceRevision: model.modelRevision,
+              generation: model.sourceGraph.generation,
+            });
+            return res.end();
+          }
           return send(
             200,
             Buffer.from(
@@ -616,7 +766,21 @@ export async function serve({
         if (format === "mermaid")
           return send(200, systemMermaid(model), "text/plain");
         if (format === "graph-mermaid")
-          return send(200, sourceGraphMermaid(model), "text/plain");
+          return withGraph(() =>
+            send(200, sourceGraphMermaid(model), "text/plain"),
+          );
+        if (
+          ["graph", "json"].includes(format) &&
+          model.sourceGraph?.storage === "sqlite"
+        ) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          await withGraph((reader) =>
+            format === "graph"
+              ? streamGraph(res, model.sourceGraph, reader)
+              : streamModel(res, outputModel(), reader),
+          );
+          return res.end();
+        }
         if (format === "graph") return send(200, model.sourceGraph);
         if (format === "stride")
           return send(
@@ -646,6 +810,14 @@ export async function serve({
       }
       return send(404, { error: "Not found" });
     } catch (error) {
+      if (req.url?.startsWith("/api/export"))
+        await traces
+          .record("export.failed", { failure: failureDetail(error.message) })
+          .catch(() => {});
+      if (res.headersSent) {
+        res.destroy(error);
+        return;
+      }
       return send(400, { error: error.message });
     }
   });
@@ -672,6 +844,7 @@ export async function serve({
     job.status = "closed";
     closing = (async () => {
       await worker?.terminate();
+      await Promise.all([...queryWorkers].map((w) => w.terminate()));
       if (model?.aiReview?.status === "pending") {
         model.aiReview.status = "partial";
         model.aiReview.error =

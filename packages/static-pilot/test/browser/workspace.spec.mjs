@@ -1,3 +1,4 @@
+import { sqliteSupported } from "../../src/graph-store.mjs";
 import { unzipSync, strFromU8 } from "fflate";
 import { usageSummary } from "../../src/token-usage.mjs";
 import { test, expect } from "@playwright/test";
@@ -31,6 +32,7 @@ test.beforeEach(async ({ page }) => {
     sourceRoot: root,
     workspace: dir,
     persist: true,
+    graphStorage: sqliteSupported() ? "sqlite" : "memory",
     port: 0,
     quiet: true,
     initialManifest: manifest,
@@ -162,6 +164,7 @@ test("actor, boundary and domain declarations save, edit and survive restart", a
     sourceRoot: root,
     workspace: dir,
     persist: true,
+    graphStorage: sqliteSupported() ? "sqlite" : "memory",
     port: restartPort,
     quiet: true,
   });
@@ -585,4 +588,61 @@ test("pending saves finish before another editor can replace the form", async ({
     label: "Saved before navigation",
   });
   await expect(field(page, "Operation")).toHaveValue("Next draft retained");
+});
+
+test("stored source graph supports server-side search and complete graph export", async ({
+  page,
+}) => {
+  test.skip(
+    !sqliteSupported(),
+    "Runtime does not contain the qualified SQLite engine",
+  );
+  await page.locator('[data-tab="graph"]').click();
+  await expect(page.locator("#graph-coverage")).toContainText("Stored graph:");
+  await page.locator("#graph-kind").selectOption("function");
+  await expect(page.locator("#graph-nodes")).toContainText(
+    "full graph retained on disk",
+  );
+  await page.locator("#graph-search").fill("no-such-symbol-qualification");
+  await expect(page.locator("#graph-nodes")).toContainText(
+    "0 records on this page",
+  );
+  await page.locator("#graph-search").fill("");
+  await expect(page.locator("#graph-nodes tbody tr").first()).toBeVisible();
+  const headers = { "x-synthesis-token": app.token };
+  const model = await (
+    await page.request.get(new URL("/api/model", app.url).href, { headers })
+  ).json();
+  const graph = await (
+    await page.request.get(new URL("/api/export?format=graph", app.url).href, {
+      headers,
+    })
+  ).json();
+  expect(graph.nodes.length).toBe(model.sourceGraph.counts.nodes);
+  expect(graph.edges.length).toBe(model.sourceGraph.counts.edges);
+});
+test("optional OWASP risk assessment leaves missing factors unknown", async ({
+  page,
+}) => {
+  await tab(page, "Threat register");
+  await page.locator(".ws-record").first().click();
+  await page
+    .locator("#ws-inspector summary")
+    .filter({ hasText: "Record review decision" })
+    .click();
+  const form = page.locator("#ws-decision");
+  await form.getByLabel("Reviewer", { exact: true }).fill("Security champion");
+  await form
+    .getByLabel("Rationale", { exact: true })
+    .fill("Initial factor estimate; deployment assumptions remain unresolved.");
+  await form
+    .getByText("OWASP technical risk factors (optional)", { exact: true })
+    .click();
+  await form.getByLabel("Calculate from these factors").check();
+  await form.locator('[name="risk.likelihood.skillLevel"]').fill("7");
+  await form.getByRole("button", { name: "Save review decision" }).click();
+  await expect(page.locator("#ws-inspector")).toContainText(
+    "11 unknown factors",
+  );
+  await expect(page.locator("#ws-inspector")).toContainText("unassessed");
 });

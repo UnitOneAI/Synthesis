@@ -1,8 +1,8 @@
 # Windows: static system threat modeling
 
-Requires Node.js 22 or 24, Git, a current Edge/Chrome browser, and readable local clones. No target application, build, installer, database, container or runtime service is started. Keep the source root, Synthesis checkout, workspace and exports in separate folders.
+Requires a current Node.js 24 release, Git, a current Edge/Chrome browser, and readable local clones. No target application, build, installer, database, container or runtime service is started. Keep the source root, Synthesis checkout, workspace and exports in separate folders.
 
-This can run inside a Windows VM. Open the browser inside that VM (including through Remote Desktop) using the printed local access link. Model review requires outbound access to the configured provider; static collection and manual review do not. The proposed [disk-backed graph and VM architecture](../design/disk-backed-static-graph.md) is not yet implemented; these commands still run the current pilot with its documented graph and process limits.
+This can run inside a Windows VM. Open the browser inside that VM (including through Remote Desktop) using the printed local access link. Model review requires outbound access to the configured provider; static collection and manual review do not. The [disk-backed graph and VM architecture](../design/disk-backed-static-graph.md) documents the 0.6.0 implementation and remaining metadata/parser/planner limits. Local SSD storage is required; keep the workspace off network shares and synchronized folders.
 
 ## Install or update
 
@@ -21,6 +21,7 @@ git switch main
 git pull --ff-only origin main
 Set-Location packages/static-pilot
 node --version
+node -p "process.versions.sqlite"
 npm ci --ignore-scripts
 npm run check
 npm test
@@ -34,6 +35,14 @@ npm run test:ui
 ```
 
 Run each command only after the preceding command succeeds. The test suite uses synthetic source; it does not execute any customer repository.
+
+## Disk graph requirements and backup
+
+Disk mode is the CLI default and requires SQLite 3.51.3 or newer embedded in Node. Qualification used Node 24.22.1 / SQLite 3.54.1. The application checks the actual engine at startup. If it rejects the installed runtime, update Node 24. To deliberately use the prior capped backend, append `--graph-storage memory`; there is no automatic fallback.
+
+The workspace contains `graph.sqlite`, its active journal files, `snapshot.json` and `traces`. Back up the **whole workspace after stopping Synthesis** with Ctrl+C. Do not copy only a live database file. Retain both the database and snapshot together; losing the database loses the graph referenced by the snapshot. A rebuild of unchanged clones reuses parsed files after hashing them. Review continuation does not rescan sources.
+
+Start VM qualification around 4–8 vCPU, 16 GiB RAM and SSD space sufficient for clones, graph, journals, traces and exports; these are planning estimates, not capacity guarantees. The storage guard pauses before disk exhaustion. Existing metadata, parser, traversal and review budgets still apply; inspect coverage and the diagnostic bundle.
 
 ## Supply existing clones without a workbook
 
@@ -149,3 +158,5 @@ If you selected a custom trace directory, also pass `--trace-dir "C:/SynthesisSt
 For collection troubleshooting, bring the ZIP and the approximate failure time/timezone. `summary.json` identifies the application build and model. `trace.ndjson` correlates session/job/batch/attempt IDs, file parsing, HTTP status, provider request IDs and stop reason. `attempts.json` separates response-format, evidence, output-limit, transport, quota/policy and persistence failures. `token-usage.csv` includes failed/retried requests where usage was returned.
 
 Traces rotate at 8 MiB without automatic deletion. A ZIP includes the newest trace segments up to 64 MiB and lists any omissions in `trace-index.json`; preserve the workspace if older segments are needed. Unknown token usage after interrupted requests is not zero. Source graph limits, unrecognized formats and unresolved dynamic relationships remain coverage gaps, even when every planned request succeeds.
+
+Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.

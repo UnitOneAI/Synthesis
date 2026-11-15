@@ -40,10 +40,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: packages/static-pilot/package-lock.json
       - run: npm ci --ignore-scripts
+      - run: node --input-type=module -e "import { sqliteSupported } from './src/graph-store.mjs'; if (!sqliteSupported()) throw Error('Qualified SQLite runtime required for disk browser tests');"
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
       - uses: actions/upload-artifact@v4

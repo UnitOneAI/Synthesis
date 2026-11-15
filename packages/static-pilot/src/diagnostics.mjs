@@ -357,6 +357,8 @@ export async function diagnosticBundle({
     modelBasis:
       "Last completed model; may precede the latest failed or interrupted scan. Correlate job IDs and source revisions in traces.",
     graphFingerprint: model?.sourceGraph?.fingerprint,
+    analysisGuidance:
+      model?.aiReview?.guidance || model?.analysisMethod || null,
     job: { status: job?.status, mode: job?.mode },
     reviewStatus: model?.aiReview?.status || "not-started",
     provider: config?.provider || model?.aiReview?.provider || "none",

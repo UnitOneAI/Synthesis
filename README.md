@@ -14,7 +14,7 @@ node src/cli.mjs serve --source-root "/absolute/path/to/clones"
 
 Requires Node.js 22+. Open the local access link printed by the server. No AI key or target execution is required. The features below describe the existing main application.
 
-The proposed [disk-backed static graph architecture](docs/design/disk-backed-static-graph.md) covers incremental collection, persistent graph traversal, streaming exports and local VM deployment. It is an implementation specification; the current pilot retains its documented resource limits.
+The [disk-backed static graph architecture](docs/design/disk-backed-static-graph.md) documents the 0.6.0 implementation and remaining limits. The [analysis methodology](docs/design/static-analysis-methodology.md) carries forward skill-based STRIDE, OWASP guidance and evidence review. Use a current Node 24 runtime for disk storage.
 
 ## Features
 
