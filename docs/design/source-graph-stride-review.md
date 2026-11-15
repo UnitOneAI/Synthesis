@@ -2,6 +2,8 @@
 
 This records the v0.3 baseline. The [system workspace specification](system-threat-model-workspace.md) and [functional tests](../testing/system-threat-workspace.md) describe the v0.4 extension.
 
+For current v0.5.0 collection, recursive review and persistence behavior, see [recursive review and diagnostics](recursive-coverage-observability.md), which supersedes the historical limits below. The proposed [disk-backed architecture](disk-backed-static-graph.md) defines the next storage and scaling implementation; it is not shipped functionality.
+
 ## Product behavior
 
 An analyst supplies existing local clones or GitHub sources, chooses one product profile, and builds a static source graph. Graph construction does not call a model. The analyst reviews the DFD, declares justified connections and authority transitions, then starts bounded model review from a STRIDE matrix. No customer code, build, installer, test, hook or runtime endpoint is executed.
