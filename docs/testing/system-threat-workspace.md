@@ -74,5 +74,8 @@ Collectors are bounded and framework-specific. They do not perform compiler-wide
 | OBS-04 | Require local access token for ZIP; retain disk traces after restart/close | Diagnostic server test |
 | OBS-05 | Show separate coverage counts and download a valid ZIP through the UI | Browser diagnostic test |
 | OBS-06 | Invalidate successful obligation counts after model revision becomes stale | Durable trace test |
+| OBS-07 | Save the static graph before combined inference; checkpoint usage before rejecting output; do not dispatch when required tracing fails | Combined scan test |
+| OBS-08 | Retain every inspected file in the graph ledger when graph resource limits are reached | Graph resource test |
+| UX-05 | Wait for a pending save before opening another editor; delayed responses cannot replace a new draft | Delayed-save browser test |
 
 Real qualification remains source-only against the operator-selected repository. Record source revision, inspected files/bytes, graph nodes/edges, parser statuses, worklist size, gap categories, token totals and observed provider errors. Synthetic scale tests establish collector/scheduler behavior, not complete language/framework semantics or live gateway qualification.

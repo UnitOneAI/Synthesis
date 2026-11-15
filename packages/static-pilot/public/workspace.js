@@ -35,6 +35,7 @@
     categoryFilter = "",
     dispositionFilter = "",
     page = 0,
+    saving = false,
     diagramSequence = 0;
   const root = document.getElementById("workspace");
   const kinds = [
@@ -495,6 +496,11 @@
     panel.scrollIntoView({ block: "nearest" });
   }
   async function save(payload) {
+    if (saving) return;
+    saving = true;
+    root.inert = true;
+    root.setAttribute("aria-busy", "true");
+    notify("Saving system model…");
     try {
       const result = await api("system", { revision: s.revision, ...payload });
       update(result);
@@ -503,6 +509,10 @@
       );
     } catch (error) {
       notify(error.message, true);
+    } finally {
+      saving = false;
+      root.inert = false;
+      root.removeAttribute("aria-busy");
     }
   }
   root.addEventListener("click", async (event) => {
