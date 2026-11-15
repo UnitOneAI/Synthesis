@@ -98,6 +98,22 @@ export async function localSource(source, root, options = {}) {
     await projects(real);
     projectPaths.sort();
   }
+  const inventoryHash = createHash("sha256").update("[");
+  let entryCount = 0,
+    ledgerFailed = false;
+  async function recordEntry(entry) {
+    if (!options.onEntry) {
+      coverage.entries.push(entry);
+      return;
+    }
+    inventoryHash.update((entryCount++ ? "," : "") + JSON.stringify(entry));
+    try {
+      await options.onEntry(entry);
+    } catch (error) {
+      ledgerFailed = true;
+      throw error;
+    }
+  }
   async function walk(dir) {
     for (const entry of (await fs.readdir(dir, { withFileTypes: true })).sort(
       (a, b) => a.name.localeCompare(b.name, "en"),
@@ -110,7 +126,7 @@ export async function localSource(source, root, options = {}) {
         name = path.relative(real, file).split(path.sep).join("/");
       if (entry.isDirectory() && excludedPath(name)) {
         coverage.excluded++;
-        coverage.entries.push({
+        await recordEntry({
           path: name + "/",
           status: "excluded-directory",
           descendants: "not enumerated",
@@ -124,7 +140,7 @@ export async function localSource(source, root, options = {}) {
       coverage.discovered++;
       if (entry.isSymbolicLink() || !entry.isFile()) {
         coverage.rejected++;
-        coverage.entries.push({ path: name, status: "rejected-nonregular" });
+        await recordEntry({ path: name, status: "rejected-nonregular" });
         continue;
       }
       let processing = false;
@@ -133,7 +149,7 @@ export async function localSource(source, root, options = {}) {
           status = accept(name, s.size, coverage, Boolean(options.onFile));
         if (status !== "inspect") {
           if (status in coverage) coverage[status]++;
-          coverage.entries.push({ path: name, status });
+          await recordEntry({ path: name, status });
           continue;
         }
         // Recheck containment immediately before opening; never follow a final symlink.
@@ -157,13 +173,20 @@ export async function localSource(source, root, options = {}) {
           const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
           if (bytesRead !== opened.size)
             throw new Error("Source changed during read");
+          const after = await handle.stat();
+          if (
+            after.size !== opened.size ||
+            after.mtimeMs !== opened.mtimeMs ||
+            after.ctimeMs !== opened.ctimeMs
+          )
+            throw new Error("Source changed during read");
           bytes = bytes.subarray(0, bytesRead);
         } finally {
           await handle.close();
         }
         if (bytes.includes(0)) {
           coverage.unsupported++;
-          coverage.entries.push({ path: name, status: "binary" });
+          await recordEntry({ path: name, status: "binary" });
           continue;
         }
         coverage.inspected++;
@@ -178,15 +201,15 @@ export async function localSource(source, root, options = {}) {
           await options.onFile(record, projectPaths);
           processing = false;
         } else files.push(record);
-        coverage.entries.push({
+        await recordEntry({
           path: name,
           status: "inspected",
           hash: sha(bytes),
         });
       } catch (error) {
-        if (processing) throw error;
+        if (processing || ledgerFailed) throw error;
         coverage.failed++;
-        coverage.entries.push({ path: name, status: "read-failed" });
+        await recordEntry({ path: name, status: "read-failed" });
       }
     }
   }
@@ -195,7 +218,9 @@ export async function localSource(source, root, options = {}) {
     files,
     coverage,
     revision: null,
-    snapshot: sha(JSON.stringify(coverage.entries)),
+    snapshot: options.onEntry
+      ? inventoryHash.update("]").digest("hex")
+      : sha(JSON.stringify(coverage.entries)),
     revisionBasis:
       "digest of inspected working-tree files and coverage ledger; not a Git commit or an atomic filesystem snapshot",
   };

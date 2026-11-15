@@ -1,3 +1,4 @@
+import { graphReader } from "./graph-store.mjs";
 import { sha } from "./sources.mjs";
 import { strideMatrix, STRIDE } from "./graph-review.mjs";
 
@@ -51,7 +52,16 @@ export function dfdMermaid(model) {
 export function sourceGraphMermaid(model) {
   const graph = model.sourceGraph;
   if (!graph) return 'flowchart LR\n  missing["No source graph"]\n';
-  const nodes = graph.nodes
+  const disk = graphReader(graph);
+  if (graph.storage === "sqlite" && !disk)
+    throw Error("Disk graph reader is required for export");
+  const preview = disk
+    ? [
+        ...disk.nodes(graph.generation, { kind: "function", limit: 150 }),
+        ...disk.nodes(graph.generation, { kind: "interface", limit: 50 }),
+      ]
+    : graph.nodes;
+  const nodes = preview
     .filter((n) =>
       ["repository", "function", "call", "interface"].includes(n.kind),
     )
@@ -59,13 +69,14 @@ export function sourceGraphMermaid(model) {
   const ids = new Set(nodes.map((n) => n.id));
   const lines = [
     "flowchart LR",
-    `%% Preview: ${nodes.length} of ${graph.nodes.length} nodes. Full graph is in source-graph.json.`,
+    `%% Preview: ${nodes.length} of ${graph.counts?.nodes ?? graph.nodes.length} nodes. Full graph is in source-graph.json.`,
     "%% Candidate call targets are not resolved calls or DFD edges.",
   ];
   for (const n of nodes)
     lines.push(`  ${nid(n.id)}["${label(n.kind + ": " + n.name)}"]`);
-  for (const e of graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to)))
-    lines.push(`  ${nid(e.from)} -.->|"${label(e.kind)}"| ${nid(e.to)}`);
+  for (const e of disk ? disk.edges(graph.generation) : graph.edges)
+    if (ids.has(e.from) && ids.has(e.to))
+      lines.push(`  ${nid(e.from)} -.->|"${label(e.kind)}"| ${nid(e.to)}`);
   return lines.join("\n") + "\n";
 }
 const csv = (value) => {

@@ -1,3 +1,10 @@
+import {
+  GUIDANCE_VERSION,
+  GUIDANCE_HASH,
+  GUIDANCE_SOURCES,
+} from "./analysis-guidance.mjs";
+import { diskPackets } from "./graph-plan-store.mjs";
+import { graphReader } from "./graph-store.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import {
   coverageObligations,
@@ -24,7 +31,7 @@ export const STRIDE = [
   "Denial of Service",
   "Elevation of Privilege",
 ];
-export const GRAPH_REVIEW_VERSION = "graph-stride-3";
+export const GRAPH_REVIEW_VERSION = "graph-stride-4";
 
 export function reviewPlan(model, excerpts = new Map()) {
   // Analysis proposals are outputs, not new inputs on each continuation.
@@ -33,9 +40,15 @@ export function reviewPlan(model, excerpts = new Map()) {
     { ...model, aiReview: undefined },
     { matrix: false },
   );
-  const contexts = graphContexts(model.sourceGraph);
+  const disk = graphReader(model.sourceGraph),
+    generation = model.sourceGraph?.generation;
+  if (model.sourceGraph?.storage === "sqlite" && !disk)
+    throw Error("Disk graph reader is required; refusing incomplete review");
+  const contexts = disk
+    ? disk.contexts(generation)
+    : graphContexts(model.sourceGraph);
   // All names are untrusted source metadata, not instructions or established facts.
-  for (const [key, value] of contexts) {
+  for (const [key, value] of disk ? [] : contexts) {
     const clean = (v) =>
       typeof v === "string"
         ? redact(v)
@@ -48,12 +61,16 @@ export function reviewPlan(model, excerpts = new Map()) {
             : v;
     contexts.set(key, clean(value));
   }
-  const batches = [],
+  const batches = disk ? diskPackets(disk, generation, [], true, excerpts) : [],
     omitted = [];
-  const graphNodes = new Map(
-    (model.sourceGraph?.nodes || []).map((n) => [n.id, n]),
-  );
-  const projectReferences = (model.sourceGraph?.edges || [])
+  const graphNodes = disk
+    ? { get: (key) => disk.node(generation, key) }
+    : new Map((model.sourceGraph?.nodes || []).map((n) => [n.id, n]));
+  const projectReferences = (
+    disk
+      ? [...disk.edges(generation, { kind: "project-reference" })]
+      : model.sourceGraph?.edges || []
+  )
     .filter((e) => e.kind === "project-reference")
     .map((e) => ({
       from: graphNodes.get(e.from),
@@ -263,13 +280,11 @@ export function reviewPlan(model, excerpts = new Map()) {
       const start = batches.length;
       partition(half, batch.phase, batch.label, relevant);
       children.push(
-        ...batches
-          .splice(start)
-          .map((b) => ({
-            ...b,
-            parentId: batch.id,
-            refinementDepth: (batch.refinementDepth || 0) + 1,
-          })),
+        ...batches.splice(start).map((b) => ({
+          ...b,
+          parentId: batch.id,
+          refinementDepth: (batch.refinementDepth || 0) + 1,
+        })),
       );
     }
     refinements.push({
@@ -291,10 +306,12 @@ export function reviewPlan(model, excerpts = new Map()) {
       const b = batches[indexed++];
       for (const r of b.packet.records) {
         if (!byInterface.has(r.id)) byInterface.set(r.id, []);
-        byInterface.get(r.id).push(b);
+        byInterface.get(r.id).push(indexed - 1);
       }
     }
-    return byInterface.get(obligation.interfaceIds[0]) || [];
+    return (byInterface.get(obligation.interfaceIds[0]) || []).map(
+      (index) => batches[index],
+    );
   };
   for (const obligation of structure.obligations.filter(
     (o) => o.kind !== "interface",
@@ -313,6 +330,8 @@ export function reviewPlan(model, excerpts = new Map()) {
     if (uniqueBatches.has(batches[index].id)) batches.splice(index, 1);
     else uniqueBatches.add(batches[index].id);
   }
+  byInterface.clear();
+  indexed = 0;
   for (const obligation of structure.obligations) {
     obligation.batchIds = candidates(obligation)
       .filter((b) => obligationFits(obligation, b))
@@ -417,6 +436,11 @@ export async function enrichGraphModel(
     ...publicModelConfig(config),
     promptVersion: GRAPH_REVIEW_VERSION,
     promptHash: sha(SYSTEM_PROMPT),
+    guidance: {
+      version: GUIDANCE_VERSION,
+      hash: GUIDANCE_HASH,
+      sources: GUIDANCE_SOURCES,
+    },
     basedOnRevision: model.modelRevision,
   };
   const runKey = sha(JSON.stringify(provenance));
@@ -424,6 +448,8 @@ export async function enrichGraphModel(
     runKey,
     sourceRevision: model.modelRevision,
     graphFingerprint: model.sourceGraph?.fingerprint,
+    guidanceVersion: GUIDANCE_VERSION,
+    guidanceHash: GUIDANCE_HASH,
     counts: {
       batches: plan.batches.length,
       obligations: plan.obligations.length,
@@ -544,9 +570,15 @@ export async function enrichGraphModel(
       callsThisRun: calls,
       batchBudget: maxBatches,
       oversizedRecords: plan.omitted,
-      excerptCount: plan.batches
-        .flatMap((b) => b.packet.records)
-        .reduce((n, r) => n + r.evidence.filter((e) => e.excerpt).length, 0),
+      excerptCount: plan.batches.reduce(
+        (n, b) =>
+          n +
+          b.packet.records.reduce(
+            (n, r) => n + r.evidence.filter((e) => e.excerpt).length,
+            0,
+          ),
+        0,
+      ),
       packetBytes: plan.batches.reduce(
         (n, b) => n + Buffer.byteLength(JSON.stringify(b.packet)),
         0,

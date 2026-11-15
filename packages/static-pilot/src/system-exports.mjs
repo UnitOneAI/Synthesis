@@ -299,6 +299,8 @@ export function registerCsv(model, kind) {
         "boundaryIds",
         "controls",
         "mitigation",
+        "analysis",
+        "analysisQuality",
       ],
       flows: [
         "id",
@@ -327,9 +329,10 @@ export function registerCsv(model, kind) {
         "Rationale",
         "Mitigation owner",
         "Severity assessment",
+        "OWASP technical risk",
       ],
       ...s[kind].map((r) => [
-        ...fields.map((k) => (Array.isArray(r[k]) ? r[k].join("; ") : r[k])),
+        ...fields.map((k) => display(r[k])),
         (r.controlIds || []).join("; "),
         (r.counterEvidenceIds || []).join("; "),
         r.assumptions,
@@ -340,6 +343,7 @@ export function registerCsv(model, kind) {
         r.decision?.rationale,
         r.decision?.owner,
         r.decision?.severity,
+        display(r.decision?.riskAssessment),
       ]),
     ];
   }
@@ -374,7 +378,7 @@ const fieldName = (k) =>
   k.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 const display = (v) =>
   Array.isArray(v)
-    ? v.join("; ")
+    ? v.map(display).join("; ")
     : v && typeof v === "object"
       ? Object.entries(v)
           .filter(([k]) => k !== "fingerprint")
@@ -462,6 +466,8 @@ export function systemReport(model) {
             "boundaryIds",
             "controls",
             "mitigation",
+            "analysis",
+            "analysisQuality",
             "evidenceIds",
             "decision",
             "counterEvidenceIds",

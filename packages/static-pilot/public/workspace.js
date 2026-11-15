@@ -357,7 +357,7 @@
       review = c?.review;
     const source = c?.source?.sources || m.sources || [];
     const graph = m.sourceGraph?.coverage || {};
-    return `<h3>Analysis coverage</h3><p>${source.filter((s) => s.status === "read").length} / ${source.length} repositories read · ${source.reduce((n, s) => n + (s.coverage?.inspected || 0), 0)} files inspected · ${graph.parsed || 0} files parsed · ${(graph.failed || 0) + (graph.syntaxErrors || 0) + (graph.limited || 0)} syntax errors, parser failures or limits.</p>${
+    return `<h3>Analysis coverage</h3>${m.analysisMethod ? `<p>Method: ${e(m.analysisMethod.version)} · STRIDE, actor access, control evidence and pinned OWASP guidance. Framework mappings require review.</p>` : ""}<p>${source.filter((s) => s.status === "read").length} / ${source.length} repositories read · ${source.reduce((n, s) => n + (s.coverage?.inspected || 0), 0)} files inspected · ${graph.parsed || 0} files parsed · ${graph.unsupported || 0} unsupported files · ${(graph.failed || 0) + (graph.syntaxErrors || 0) + (graph.limited || 0)} syntax errors, parser failures or limits.</p>${
       review
         ? `<p><strong>${review.reviewed} / ${review.total} review obligations submitted successfully</strong> · ${review.pending} pending · ${review.blocked} blocked</p><div class="table-wrap"><table><thead><tr><th>Review subject</th><th>Reviewed</th><th>Pending</th><th>Blocked</th></tr></thead><tbody>${Object.entries(
             review.byKind,
@@ -368,9 +368,13 @@
             )
             .join(
               "",
-            )}</tbody></table></div><p>${review.gaps.length} recorded gaps. ${Object.entries(
+            )}</tbody></table></div><p>${review.gaps.length} gap records (some group multiple occurrences). ${Object.entries(
             review.gaps.reduce((counts, gap) => {
-              counts[gap.kind] = (counts[gap.kind] || 0) + 1;
+              counts[gap.kind] =
+                (counts[gap.kind] || 0) +
+                (gap.kind === "additional-unresolved-call-targets"
+                  ? gap.count
+                  : 1);
               return counts;
             }, {}),
           )
@@ -412,12 +416,42 @@
         : "";
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
-    out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
+    out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Attack steps", r.analysis?.attackSteps?.join(" → "))}${field("Conditional impact", r.analysis?.impact)}${field("Analysis assumptions", r.analysis?.assumptions?.join("; "))}${field("Framework mappings", r.analysis?.mappings?.map((m) => `${m.framework} ${m.id}: ${m.name} — ${m.rationale} (proposed)`).join("; "))}${field("Analysis quality", r.analysisQuality?.gaps?.join("; ") || r.analysisQuality?.semantics)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
       refs(r.evidenceIds)
         .map((v) => `<p class="evidence">${e(v)}</p>`)
         .join("") ||
       "<p>No source evidence attached; this claim requires review.</p>"
-    }</section>${r.decision ? field("Review decision", `${r.decision.state}${r.decision.stale ? " (stale)" : ""} · ${r.decision.reviewer}: ${r.decision.rationale}`) : ""}<div class="toolbar"><button data-trace="${e(r.id)}">Show on DFD</button>${r.kind !== "cell" ? `<button data-edit="${e(r.id)}">Edit record</button><button data-delete="${e(r.id)}">Remove record</button>` : ""}</div><details><summary>Record review decision</summary><form id="ws-decision"><label>Disposition<select aria-label="Disposition" name="state">${["needs-investigation", "accepted", "rejected", "mitigation-planned", "implemented-in-source", "risk-accepted", "not-applicable", ...(r.kind === "cell" ? ["reviewed-no-scenario"] : [])].map((k) => option(k, k.replaceAll("-", " "), false)).join("")}</select></label><label>Reviewer<input name="reviewer" required maxlength="200"></label><label>Rationale<textarea name="rationale" required maxlength="2000"></textarea></label><label>Mitigation owner<input name="owner" maxlength="200"></label><label>Severity assessment<select aria-label="Severity assessment" name="severity">${["unassessed", "low", "medium", "high", "critical"].map((k) => option(k, k, false)).join("")}</select></label><button type="submit">Save review decision</button></form><p class="hint">Local reviewer annotation. Implementation evidence does not establish runtime effectiveness.</p></details>`;
+    }</section>${r.decision?.riskAssessment ? field("OWASP technical risk", `${r.decision.riskAssessment.status} · ${r.decision.riskAssessment.severity || "unassessed"} · ${r.decision.riskAssessment.missing?.length || 0} unknown factors · reviewer estimate`) : ""}${r.decision ? field("Review decision", `${r.decision.state}${r.decision.stale ? " (stale)" : ""} · ${r.decision.reviewer}: ${r.decision.rationale}`) : ""}<div class="toolbar"><button data-trace="${e(r.id)}">Show on DFD</button>${r.kind !== "cell" ? `<button data-edit="${e(r.id)}">Edit record</button><button data-delete="${e(r.id)}">Remove record</button>` : ""}</div><details><summary>Record review decision</summary><form id="ws-decision"><label>Disposition<select aria-label="Disposition" name="state">${["needs-investigation", "accepted", "rejected", "mitigation-planned", "implemented-in-source", "risk-accepted", "not-applicable", ...(r.kind === "cell" ? ["reviewed-no-scenario"] : [])].map((k) => option(k, k.replaceAll("-", " "), false)).join("")}</select></label><label>Reviewer<input name="reviewer" required maxlength="200"></label><label>Rationale<textarea name="rationale" required maxlength="2000"></textarea></label><label>Mitigation owner<input name="owner" maxlength="200"></label><label>Severity assessment<select aria-label="Severity assessment" name="severity">${["unassessed", "low", "medium", "high", "critical"].map((k) => option(k, k, false)).join("")}</select></label><details><summary>OWASP technical risk factors (optional)</summary><label><input type="checkbox" name="useRiskFactors">Calculate from these factors</label><p>Leave unknown values blank. A partial assessment remains unassessed; estimates do not establish exploitability.</p>${Object.entries(
+      {
+        likelihood: [
+          "skillLevel",
+          "motive",
+          "opportunity",
+          "size",
+          "easeOfDiscovery",
+          "easeOfExploit",
+          "awareness",
+          "intrusionDetection",
+        ],
+        impact: [
+          "confidentiality",
+          "integrity",
+          "availability",
+          "accountability",
+        ],
+      },
+    )
+      .map(([group, keys]) =>
+        keys
+          .map(
+            (key) =>
+              `<label>${e(group + " · " + key.replace(/([A-Z])/g, " $1").toLowerCase())}<input type="number" min="0" max="9" step="any" name="risk.${group}.${key}" placeholder="Unknown"></label>`,
+          )
+          .join(""),
+      )
+      .join(
+        "",
+      )}</details><button type="submit">Save review decision</button></form><p class="hint">Local reviewer annotation. Implementation evidence does not establish runtime effectiveness.</p></details>`;
   }
   function choices(type) {
     switch (type) {
@@ -652,12 +686,27 @@
     event.preventDefault();
     const form = event.target,
       fd = new FormData(form);
-    if (form.id === "ws-decision")
+    if (form.id === "ws-decision") {
+      const riskFactors = {};
+      if (fd.has("useRiskFactors"))
+        for (const [key, value] of fd)
+          if (key.startsWith("risk.")) {
+            const [, group, factor] = key.split(".");
+            (riskFactors[group] ||= {})[factor] =
+              value === "" ? null : Number(value);
+          }
+      const decision = Object.fromEntries(
+        [...fd].filter(
+          ([key]) => !key.startsWith("risk.") && key !== "useRiskFactors",
+        ),
+      );
       await save({
         action: "decision",
         subjectId: selected,
-        ...Object.fromEntries(fd),
+        ...decision,
+        ...(fd.has("useRiskFactors") ? { riskFactors } : {}),
       });
+    }
     if (form.id === "ws-record-form") {
       const record = {};
       if (form.dataset.id) record.id = form.dataset.id;

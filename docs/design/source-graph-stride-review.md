@@ -2,7 +2,7 @@
 
 This records the v0.3 baseline. The [system workspace specification](system-threat-model-workspace.md) and [functional tests](../testing/system-threat-workspace.md) describe the v0.4 extension.
 
-For current v0.5.0 collection, recursive review and persistence behavior, see [recursive review and diagnostics](recursive-coverage-observability.md), which supersedes the historical limits below. The proposed [disk-backed architecture](disk-backed-static-graph.md) defines the next storage and scaling implementation; it is not shipped functionality.
+For current v0.5.0 collection, recursive review and persistence behavior, see [recursive review and diagnostics](recursive-coverage-observability.md), which supersedes the historical limits below. The [disk-backed architecture](disk-backed-static-graph.md) documents the 0.6.0 implementation and remaining target work.
 
 ## Product behavior
 

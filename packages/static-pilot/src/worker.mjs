@@ -1,7 +1,16 @@
+import { GraphStore, attachGraph } from "./graph-store.mjs";
 import { parentPort, workerData } from "node:worker_threads";
 import { analyze } from "./engine.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
+let graphStore;
 try {
+  if (
+    workerData.mode === "review" &&
+    workerData.model?.sourceGraph?.storage === "sqlite"
+  ) {
+    graphStore = new GraphStore(workerData.options.graphDatabase);
+    attachGraph(workerData.model.sourceGraph, graphStore);
+  }
   let excerpts = new Map(workerData.excerpts || []);
   const progress = (message) =>
     parentPort.postMessage({ type: "progress", message });
@@ -84,4 +93,8 @@ try {
   });
 } catch (error) {
   parentPort.postMessage({ type: "error", message: error.message });
+} finally {
+  graphStore?.checkpoint();
+  graphStore?.close();
+  parentPort.close();
 }

@@ -340,12 +340,18 @@ function renderGraph() {
   if (!graph) return;
   $("graph-summary").innerHTML = [
     [
-      graph.nodes.filter((n) => n.kind === "function").length,
+      graph.counts?.byKind?.function ??
+        graph.nodes.filter((n) => n.kind === "function").length,
       "Functions and methods",
     ],
-    [graph.nodes.filter((n) => n.kind === "call").length, "Call sites"],
     [
-      graph.edges.filter((e) => e.kind === "project-reference").length,
+      graph.counts?.byKind?.call ??
+        graph.nodes.filter((n) => n.kind === "call").length,
+      "Call sites",
+    ],
+    [
+      graph.counts?.edgeKinds?.["project-reference"] ??
+        graph.edges.filter((e) => e.kind === "project-reference").length,
       "Project references",
     ],
     [
@@ -362,6 +368,12 @@ function renderGraph() {
     .join("");
   $("graph-coverage").innerHTML =
     `<p>${graph.coverage.parsed} files parsed · ${graph.coverage.syntaxErrors} with syntax errors · ${graph.coverage.failed} failed or timed out · ${graph.coverage.unsupported} without a language parser · ${graph.coverage.limited} limited.</p><p class="hint">Syntax evidence does not resolve dependency injection, overloads, dynamic dispatch or deployed trust. Source collection limits still apply. Full file coverage is in the JSON export.</p>`;
+  if (graph.storage === "sqlite") {
+    $("graph-coverage").innerHTML +=
+      `<p>Stored graph: ${graph.counts.nodes} nodes · ${graph.counts.edges} relationships. ${graph.reuse?.reusedFiles || 0} unchanged files reused. Full graph export includes every stored record.</p>`;
+    renderDiskGraph().catch((e) => message(e.message, true));
+    return;
+  }
   const term = $("graph-search").value.toLowerCase();
   const nodes = graph.nodes.filter(
     (n) =>
@@ -376,6 +388,27 @@ function renderGraph() {
           `<tr><td>${esc(n.name)}</td><td>${esc(n.repository)}</td><td>${esc(n.path)}:${n.line}</td><td>${esc(n.basis || "Syntax declaration")}</td></tr>`,
       )
       .join("")}</tbody></table>`;
+}
+let graphRequest = 0;
+async function renderDiskGraph(after = "") {
+  const request = ++graphRequest;
+  const query = new URLSearchParams({
+    kind: $("graph-kind").value,
+    search: $("graph-search").value,
+    after,
+  });
+  const result = await api("graph?" + query);
+  if (
+    request !== graphRequest ||
+    result.generation !== model?.sourceGraph?.generation
+  )
+    return;
+  $("graph-nodes").innerHTML =
+    `<p>${result.items.length} records on this page · full graph retained on disk</p><button id="graph-first">First page</button> <button id="graph-next" ${result.next ? "" : "disabled"}>Next page</button><table><thead><tr><th>Symbol or reference</th><th>Repository</th><th>Evidence</th><th>Interpretation</th></tr></thead><tbody>${result.items.map((n) => `<tr><td>${esc(n.name)}</td><td>${esc(n.repository)}</td><td>${esc(n.path)}:${n.line}</td><td>${esc(n.basis || "Syntax declaration")}</td></tr>`).join("")}</tbody></table>`;
+  $("graph-first").onclick = () =>
+    renderDiskGraph().catch((e) => message(e.message, true));
+  $("graph-next").onclick = () =>
+    renderDiskGraph(result.next).catch((e) => message(e.message, true));
 }
 $("graph-kind").onchange = renderGraph;
 $("graph-search").oninput = renderGraph;

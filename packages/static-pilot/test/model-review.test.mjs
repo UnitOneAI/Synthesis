@@ -522,6 +522,7 @@ test("gateway policy errors and redirects fail visibly without fallback or crede
 });
 
 test("CLI supports gateway flags and environment configuration end to end", async (t) => {
+  const { sqliteSupported } = await import("../src/graph-store.mjs");
   const fs = await import("node:fs/promises");
   const os = await import("node:os");
   const path = await import("node:path");
@@ -550,7 +551,7 @@ test("CLI supports gateway flags and environment configuration end to end", asyn
       env.SYNTHESIS_LLM_MODEL = "unused-model";
       env.SYNTHESIS_LLM_API_VERSION = "2023-01-01";
     }
-    const output = execFileSync(process.execPath, ["--import", pathToFileURL(mockFile).href, fileURLToPath(new URL("../src/cli.mjs", import.meta.url)), "analyze", "--source-root", sourceRoot, "--manifest", manifestFile, "--out", out, ...flags], { env, encoding: "utf8", timeout: 30000 });
+    const output = execFileSync(process.execPath, ["--import", pathToFileURL(mockFile).href, fileURLToPath(new URL("../src/cli.mjs", import.meta.url)), "analyze", "--source-root", sourceRoot, "--manifest", manifestFile, "--out", out, ...(sqliteSupported() ? [] : ["--graph-storage", "memory"]), ...flags], { env, encoding: "utf8", timeout: 30000 });
     assert.ok(!output.includes(env.CLAUDE_API_KEY));
     const model = JSON.parse(await fs.readFile(path.join(out, "model.json"), "utf8"));
     assert.equal(model.aiReview.status, "completed-needs-review");

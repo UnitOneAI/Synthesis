@@ -1,6 +1,16 @@
 # Disk-backed static graph architecture
 
-Status: proposed implementation specification. The disk-backed backend described here is **not implemented in static-pilot 0.5.0**. Current behavior and safeguards remain documented in [recursive review and diagnostics](recursive-coverage-observability.md). This specification extends the [system workspace](system-threat-model-workspace.md); it does not replace its evidence, actor, boundary or review contracts.
+Status: target architecture with an initial implementation in static-pilot 0.6.0. The release implements persistent syntax graphs, per-file reuse, generation isolation, disk traversal/packet payloads, paged graph queries and streaming graph exports. The entire target architecture is not yet implemented; see the implementation boundary below. Current behavior and safeguards remain documented in [recursive review and diagnostics](recursive-coverage-observability.md). This specification extends the [system workspace](system-threat-model-workspace.md); it does not replace its evidence, actor, boundary or review contracts.
+
+## 0.6.0 implementation boundary
+
+CLI `serve` and `analyze` default to SQLite on a qualified runtime; `--graph-storage memory` explicitly selects the prior bounded path. Existing snapshots and reviewer records remain compatible and a source rebuild creates the disk graph. Parse results from interrupted builds are reused after rehashing; working generations are rebuilt rather than resumed from an inventory cursor. Graph facts are immutable once published. Current resolution supports unique same-file candidate calls and literal project references; it does not add compiler-level cross-file symbol binding.
+
+The aggregate 100,000-node/200,000-edge limits no longer apply to the SQLite graph. Per-file parser safeguards, 4,096-function traversal limits, 50,000-obligation planner limits, request budgets, worker limits and metadata snapshot limits still apply and remain reported. Interface records, obligations, review summaries and architecture projections remain bounded in memory; they are not fully normalized/paged in this release. This is not an unlimited out-of-core threat-model engine. The default disk guard is 64 GiB of database/WAL and at least 256 MiB free; historical generations are retained rather than automatically deleted.
+
+Graph records and packet payloads use SQLite; the existing atomic snapshot still stores the model metadata, review results and usage. This is a versioned graph-plus-snapshot deployment, not yet the single-database transaction model below. Source excerpts are removed before packet persistence and restored only from explicitly enabled transient context. Traces retain the existing acknowledged append/sync mechanism; the transactional outbox remains future work. Full graph JSON and the graph entry in diagnostics stream; other report metadata still uses bounded buffers.
+
+The [static analysis methodology](static-analysis-methodology.md) restores pinned skill-based guidance, OWASP mapping proposals, structured attack reasoning and optional reviewer risk factors. [Acceptance tests](../testing/disk-graph-and-analysis-quality.md) separate storage scale from analysis quality. The delivery phases below remain the target for retiring the remaining metadata, traversal and resolver constraints.
 
 ## Outcome and scope
 
@@ -125,7 +135,7 @@ Keep immutable generation records alive for active exports/reviews without holdi
 
 ## Local VM deployment
 
-The current pilot already runs locally using the [Windows runbook](../runbooks/windows-static-workspace.md). The proposed backend keeps the same deployment shape: a Node process, local browser, readable clones and writable workspace. There is no shipped disk-graph switch or installation command yet.
+The current pilot already runs locally using the [Windows runbook](../runbooks/windows-static-workspace.md). The proposed backend keeps the same deployment shape: a Node process, local browser, readable clones and writable workspace. The SQLite backend ships in 0.6.0; the Windows runbook documents its runtime check and explicit compatibility switch.
 
 | VM item | Proposed arrangement |
 | --- | --- |
@@ -168,4 +178,6 @@ Do not remove current graph caps merely after adding SQLite. Replace each memory
 - Browser tests cover source selection, progress/resume, coverage drill-down, overall DFD, actor and boundary evidence, STRIDE cells, usage and export. Verify that preview limits do not alter complete model counts.
 - Re-run static qualification against the authorized `open-autofix` checkout without executing its code. Record commit/working-tree state, all coverage denominators, performance and limitations separately from synthetic results. Customer source/gateway qualification remains an environment-specific acceptance activity; direct-provider tests do not qualify that gateway.
 
-The release report must identify implemented phases, tested platforms, measured limits and remaining semantic gaps. Until these gates pass, the current 0.5.0 limits still govern production use of the static pilot.
+The release report must identify implemented phases, tested platforms, measured limits and remaining semantic gaps. Only limits explicitly retired by the 0.6.0 implementation boundary are removed. The remaining gates and constraints must not be described as completed.
+
+Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.

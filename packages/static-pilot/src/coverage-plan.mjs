@@ -1,3 +1,4 @@
+import { graphReader } from "./graph-store.mjs";
 import { id } from "./sources.mjs";
 
 export const PLANNER_LIMITS = Object.freeze({
@@ -10,7 +11,16 @@ export const PLANNER_LIMITS = Object.freeze({
 export function coverageObligations(model, system) {
   const obligations = [],
     gaps = [];
-  const nodes = new Map((model.sourceGraph?.nodes || []).map((n) => [n.id, n]));
+  const disk = graphReader(model.sourceGraph),
+    generation = model.sourceGraph?.generation;
+  if (model.sourceGraph?.storage === "sqlite" && !disk)
+    throw Error("Disk graph reader is required; refusing incomplete review");
+  const nodes = disk
+    ? {
+        get: (key) => disk.node(generation, key),
+        values: () => disk.nodes(generation),
+      }
+    : new Map((model.sourceGraph?.nodes || []).map((n) => [n.id, n]));
   const interfaces = new Map(model.interfaces.map((i) => [i.id, i]));
   const owned = new Map(),
     next = new Map(),
@@ -39,7 +49,7 @@ export function coverageObligations(model, system) {
     if (!owned.has(n.parent)) owned.set(n.parent, []);
     owned.get(n.parent).push(i.id);
   }
-  for (const e of model.sourceGraph?.edges || []) {
+  for (const e of disk ? [] : model.sourceGraph?.edges || []) {
     if (e.kind !== "candidate-call-target") continue;
     targets.set(e.from, e.to);
     const call = nodes.get(e.from);
@@ -54,43 +64,79 @@ export function coverageObligations(model, system) {
         graphNodeIds: [root],
         basis: "same callable; enforcement unverified",
       });
-    const queue = [root],
-      previous = new Map([[root, null]]);
-    let limited = false;
-    for (let cursor = 0; cursor < queue.length; cursor++) {
-      const current = queue[cursor];
-      for (const edge of next.get(current) || []) {
-        if (previous.has(edge.to)) continue;
-        if (previous.size >= PLANNER_LIMITS.reachableFunctionsPerRoot) {
-          limited = true;
+    if (disk) {
+      for (const step of disk.walk(
+        generation,
+        root,
+        PLANNER_LIMITS.reachableFunctionsPerRoot,
+      )) {
+        if (step.done) {
+          if (step.limited)
+            gaps.push({
+              kind: "traversal-limit",
+              subject: root,
+              visitedFunctions: step.count,
+            });
           continue;
         }
-        previous.set(edge.to, { from: current, call: edge.call });
-        queue.push(edge.to);
+        for (const from of rootIds)
+          for (const to of owned.get(step.target) || [])
+            add(
+              "candidate-call-path",
+              id(root, step.target, from, to),
+              [from, to],
+              {
+                graphNodeIds: step.path,
+                basis:
+                  "transitive candidate call targets; dispatch, reachability and enforcement unverified",
+              },
+            );
       }
-      if (current === root || !owned.has(current)) continue;
-      const path = [current];
-      for (let at = current; previous.get(at); ) {
-        const step = previous.get(at);
-        path.push(step.call, step.from);
-        at = step.from;
+    } else {
+      const queue = [root],
+        previous = new Map([[root, null]]);
+      let limited = false;
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const current = queue[cursor];
+        for (const edge of next.get(current) || []) {
+          if (previous.has(edge.to)) continue;
+          if (previous.size >= PLANNER_LIMITS.reachableFunctionsPerRoot) {
+            limited = true;
+            continue;
+          }
+          previous.set(edge.to, { from: current, call: edge.call });
+          queue.push(edge.to);
+        }
+        if (current === root || !owned.has(current)) continue;
+        const path = [current];
+        for (let at = current; previous.get(at); ) {
+          const step = previous.get(at);
+          path.push(step.call, step.from);
+          at = step.from;
+        }
+        path.reverse();
+        for (const from of rootIds)
+          for (const to of owned.get(current))
+            add(
+              "candidate-call-path",
+              id(root, current, from, to),
+              [from, to],
+              {
+                graphNodeIds: path,
+                basis:
+                  "transitive candidate call targets; dispatch, reachability and control enforcement unverified",
+              },
+            );
       }
-      path.reverse();
-      for (const from of rootIds)
-        for (const to of owned.get(current))
-          add("candidate-call-path", id(root, current, from, to), [from, to], {
-            graphNodeIds: path,
-            basis:
-              "transitive candidate call targets; dispatch, reachability and control enforcement unverified",
-          });
+      if (limited)
+        gaps.push({
+          kind: "traversal-limit",
+          subject: root,
+          visitedFunctions: previous.size,
+        });
     }
-    if (limited)
-      gaps.push({
-        kind: "traversal-limit",
-        subject: root,
-        visitedFunctions: previous.size,
-      });
   }
+
   for (const f of model.flows || [])
     add(
       "declared-flow",
@@ -138,17 +184,37 @@ export function coverageObligations(model, system) {
     gaps.push({ kind: "actor-assumptions-not-declared" });
   if (!system.boundaries.length)
     gaps.push({ kind: "trust-boundaries-not-declared" });
-  const unresolvedCalls = [...nodes.values()].filter(
-    (n) => n.kind === "call" && !targets.has(n.id),
-  );
+  const unresolvedCalls = disk
+    ? disk.unresolved(generation)
+    : [...nodes.values()].filter(
+        (n) => n.kind === "call" && !targets.has(n.id),
+      );
   // Retain identifiers; names/expressions are unnecessary for diagnosing resolution coverage.
-  for (const n of unresolvedCalls)
+  const unresolvedCounts = new Map();
+  let retainedUnresolved = 0;
+  for (const n of unresolvedCalls) {
+    if (disk && retainedUnresolved++ >= 1000) {
+      unresolvedCounts.set(
+        n.repository,
+        (unresolvedCounts.get(n.repository) || 0) + 1,
+      );
+      continue;
+    }
     gaps.push({
       kind: "unresolved-call-target",
       subject: n.id,
       repository: n.repository,
       path: n.path,
       line: n.line,
+    });
+  }
+  for (const [repository, count] of unresolvedCounts)
+    gaps.push({
+      kind: "additional-unresolved-call-targets",
+      repository,
+      count,
+      detail:
+        "Full identifiers are in reference-resolution.ndjson and the stored graph",
     });
   if (omitted)
     gaps.push({

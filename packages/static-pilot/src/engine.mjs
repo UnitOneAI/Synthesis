@@ -1,3 +1,9 @@
+import {
+  GUIDANCE_VERSION,
+  GUIDANCE_HASH,
+  GUIDANCE_SOURCES,
+} from "./analysis-guidance.mjs";
+import { GraphStore, attachGraph } from "./graph-store.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import path from "node:path";
 import { id, sha, localSource, githubSource } from "./sources.mjs";
@@ -11,7 +17,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.5.0";
+export const ENGINE_VERSION = "static-pilot-0.6.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -819,190 +825,295 @@ export async function analyze(manifest, options = {}) {
   await options.trace?.("scan.started", {
     counts: { selectedRepositories: selected.length },
   });
-  const excerpts = new Map();
-  const model = {
-    schemaVersion: 1,
-    engine: ENGINE_VERSION,
-    title: short(manifest.title || "Static system threat model"),
-    profile: manifest.profile.trim(),
-    createdAt: new Date().toISOString(),
-    status: "draft-with-gaps",
-    staticOnly: true,
-    provider: "none",
-    sources: [],
-    components: [],
-    interfaces: [],
-    evidence: [],
-    dependencies: [],
-    diagnostics: [],
-    sourceGraph: createSourceGraph(),
-    inventoryCount: manifest.repositories.length,
-    limitations: [
-      "Lexical collectors propose interfaces; they do not establish complete call graphs, effective controls, or deployed reachability.",
-      "Source grouping does not establish executable processes. No trust boundary is inferred from a repository boundary.",
-      "Only explicit reviewer bindings form cross-component flows. Missing bindings remain unresolved.",
-      "Conditional threat scenarios are review prompts, not verified vulnerabilities. Severity is unassessed.",
-      "No target code, builds, installers, tests, hooks or runtime APIs are executed or contacted. Optional inference sends a bounded evidence packet only to the configured provider.",
-      "Installation variants and runtime permissions require separate review within the selected profile.",
-    ],
-  };
-  for (const source of selected) {
-    options.progress?.(`Reading ${source.name}`);
-    await options.trace?.("source.started", { repository: source.name });
-    try {
-      const collected = {
-        components: [],
-        interfaces: [],
-        evidence: [],
-        dependencies: [],
-        diagnostics: [],
-      };
-      const componentIds = new Set();
-      const processFiles = async (files, projectPaths) => {
-        const result = extract(source, files, { projectPaths });
-        await addSourceGraph(
-          model.sourceGraph,
-          source,
-          files,
-          result,
-          options.sourceRoot,
-          options.trace,
-        );
-        if (options.includeSourceExcerpts)
-          collectExcerpts(result, files, excerpts);
-        for (const component of result.components)
-          if (!componentIds.has(component.id)) {
-            componentIds.add(component.id);
-            collected.components.push(component);
+  const disk = options.graphDatabase
+    ? new GraphStore(options.graphDatabase)
+    : null;
+  const reuse = { parsedFiles: 0, reusedFiles: 0 };
+  try {
+    const generation = disk?.begin(
+      manifest,
+      sha(options.sourceRoot || process.cwd()),
+    );
+    const excerpts = new Map();
+    const model = {
+      schemaVersion: 1,
+      engine: ENGINE_VERSION,
+      title: short(manifest.title || "Static system threat model"),
+      profile: manifest.profile.trim(),
+      createdAt: new Date().toISOString(),
+      status: "draft-with-gaps",
+      staticOnly: true,
+      analysisMethod: {
+        version: GUIDANCE_VERSION,
+        hash: GUIDANCE_HASH,
+        sources: GUIDANCE_SOURCES,
+      },
+      provider: "none",
+      sources: [],
+      components: [],
+      interfaces: [],
+      evidence: [],
+      dependencies: [],
+      diagnostics: [],
+      sourceGraph: createSourceGraph(),
+      inventoryCount: manifest.repositories.length,
+      limitations: [
+        "Lexical collectors propose interfaces; they do not establish complete call graphs, effective controls, or deployed reachability.",
+        "Source grouping does not establish executable processes. No trust boundary is inferred from a repository boundary.",
+        "Only explicit reviewer bindings form cross-component flows. Missing bindings remain unresolved.",
+        "Conditional threat scenarios are review prompts, not verified vulnerabilities. Severity is unassessed.",
+        "No target code, builds, installers, tests, hooks or runtime APIs are executed or contacted. Optional inference sends a bounded evidence packet only to the configured provider.",
+        "Installation variants and runtime permissions require separate review within the selected profile.",
+      ],
+    };
+    for (const source of selected) {
+      options.progress?.(`Reading ${source.name}`);
+      await options.trace?.("source.started", { repository: source.name });
+      try {
+        const collected = {
+          components: [],
+          interfaces: [],
+          evidence: [],
+          dependencies: [],
+          diagnostics: [],
+        };
+        const componentIds = new Set();
+        const processFiles = async (files, projectPaths) => {
+          let result;
+          if (disk) {
+            result = {
+              components: [],
+              interfaces: [],
+              evidence: [],
+              dependencies: [],
+              diagnostics: [],
+            };
+            for (const file of files) {
+              const key = disk.cacheKey(source, file, projectPaths);
+              let one = disk.reuse(generation, source, file, key);
+              if (one) {
+                reuse.reusedFiles++;
+                await options.trace?.("graph.file-reused", {
+                  repository: source.name,
+                  path: file.path,
+                  blobSha256: file.hash,
+                });
+              } else {
+                one = extract(source, [file], { projectPaths });
+                const graph = createSourceGraph();
+                await addSourceGraph(
+                  graph,
+                  source,
+                  [file],
+                  one,
+                  options.sourceRoot,
+                  options.trace,
+                );
+                // Cross-file references are resolved against the complete generation below.
+                finishSourceGraph(graph);
+                disk.commitFile(generation, source, file, key, graph, one);
+                reuse.parsedFiles++;
+              }
+              for (const key of Object.keys(result))
+                result[key].push(...one[key]);
+            }
+          } else {
+            result = extract(source, files, { projectPaths });
+            await addSourceGraph(
+              model.sourceGraph,
+              source,
+              files,
+              result,
+              options.sourceRoot,
+              options.trace,
+            );
           }
+          if (options.includeSourceExcerpts)
+            collectExcerpts(result, files, excerpts);
+          for (const component of result.components)
+            if (!componentIds.has(component.id)) {
+              componentIds.add(component.id);
+              collected.components.push(component);
+            }
+          for (const key of [
+            "interfaces",
+            "evidence",
+            "dependencies",
+            "diagnostics",
+          ])
+            collected[key].push(...result[key]);
+        };
+        const snapshot =
+          source.source === "github"
+            ? await githubSource(source, options.githubToken)
+            : await localSource(source, options.sourceRoot || process.cwd(), {
+                onFile: (file, projects) => processFiles([file], projects),
+                ...(disk
+                  ? {
+                      onEntry: (entry) =>
+                        disk.inventory(generation, source.name, entry),
+                    }
+                  : {}),
+              });
+        if (source.source === "github") {
+          await processFiles(
+            snapshot.files,
+            snapshot.files
+              .map((f) => f.path)
+              .filter((p) =>
+                /\.(csproj|vbproj|vcxproj|wixproj)$|(^|\/)package\.json$/i.test(
+                  p,
+                ),
+              ),
+          );
+          if (disk)
+            for (const entry of snapshot.coverage.entries)
+              disk.inventory(generation, source.name, entry);
+        }
+        if (disk) {
+          snapshot.coverage.entries = [];
+          snapshot.coverage.ledgerStorage = "sqlite";
+        }
+        await options.trace?.("source.collected", {
+          repository: source.name,
+          snapshot: snapshot.snapshot,
+          counts: {
+            inspected: snapshot.coverage.inspected,
+            bytes: snapshot.coverage.bytes,
+            failed: snapshot.coverage.failed,
+            oversized: snapshot.coverage.oversized,
+          },
+          truncated: snapshot.coverage.truncated,
+        });
+        model.sources.push({
+          name: source.name,
+          source: source.source || "local",
+          scope: source.scope || "primary",
+          revision: snapshot.revision,
+          snapshot: snapshot.snapshot,
+          revisionBasis: snapshot.revisionBasis,
+          coverage: snapshot.coverage,
+          status: "read",
+        });
+        await options.trace?.("graph.repository-completed", {
+          repository: source.name,
+          counts: {
+            nodes: model.sourceGraph.nodes.length,
+            edges: model.sourceGraph.edges.length,
+            interfaces: collected.interfaces.length,
+          },
+          coverage: model.sourceGraph.coverage,
+        });
         for (const key of [
+          "components",
           "interfaces",
           "evidence",
           "dependencies",
           "diagnostics",
         ])
-          collected[key].push(...result[key]);
-      };
-      const snapshot =
-        source.source === "github"
-          ? await githubSource(source, options.githubToken)
-          : await localSource(source, options.sourceRoot || process.cwd(), {
-              onFile: (file, projects) => processFiles([file], projects),
-            });
-      if (source.source === "github") await processFiles(snapshot.files);
-      await options.trace?.("source.collected", {
-        repository: source.name,
-        snapshot: snapshot.snapshot,
-        counts: {
-          inspected: snapshot.coverage.inspected,
-          bytes: snapshot.coverage.bytes,
-          failed: snapshot.coverage.failed,
-          oversized: snapshot.coverage.oversized,
-        },
-        truncated: snapshot.coverage.truncated,
-      });
-      model.sources.push({
-        name: source.name,
-        source: source.source || "local",
-        scope: source.scope || "primary",
-        revision: snapshot.revision,
-        snapshot: snapshot.snapshot,
-        revisionBasis: snapshot.revisionBasis,
-        coverage: snapshot.coverage,
-        status: "read",
-      });
-      await options.trace?.("graph.repository-completed", {
-        repository: source.name,
-        counts: {
-          nodes: model.sourceGraph.nodes.length,
-          edges: model.sourceGraph.edges.length,
-          interfaces: collected.interfaces.length,
-        },
-        coverage: model.sourceGraph.coverage,
-      });
-      for (const key of [
-        "components",
-        "interfaces",
-        "evidence",
-        "dependencies",
-        "diagnostics",
-      ])
-        model[key].push(...collected[key]);
-    } catch (error) {
-      await options.trace?.("source.failed", {
-        repository: source.name,
-        failure: failureDetail(error.message),
-      });
-      model.sources.push({
-        name: source.name,
-        source: source.source || "local",
-        scope: source.scope || "primary",
-        status: "unavailable",
-      });
-      model.diagnostics.push({
-        repository: source.name,
-        kind: "source-unavailable",
-        message:
-          error.code === "ENOENT"
-            ? "Local source folder not found"
-            : error.code === "EACCES"
-              ? "Local source folder is not readable"
-              : short(error.message).replace(
-                  options.sourceRoot || "\0",
-                  "[source-root]",
-                ),
-      });
+          model[key].push(...collected[key]);
+      } catch (error) {
+        if (
+          disk &&
+          /SQLite|sqlite|storage budget|Trace output|database|disk/i.test(
+            error.message,
+          )
+        )
+          throw error;
+        disk?.discardSource(generation, source.name);
+        await options.trace?.("source.failed", {
+          repository: source.name,
+          failure: failureDetail(error.message),
+        });
+        model.sources.push({
+          name: source.name,
+          source: source.source || "local",
+          scope: source.scope || "primary",
+          status: "unavailable",
+        });
+        model.diagnostics.push({
+          repository: source.name,
+          kind: "source-unavailable",
+          message:
+            error.code === "ENOENT"
+              ? "Local source folder not found"
+              : error.code === "EACCES"
+                ? "Local source folder is not readable"
+                : short(error.message).replace(
+                    options.sourceRoot || "\0",
+                    "[source-root]",
+                  ),
+        });
+      }
     }
-  }
-  // Dependency suggestions are exact inventory-name matches only; they never add source scope or flows.
-  model.dependencySuggestions = model.dependencies.flatMap((d) =>
-    manifest.repositories
-      .filter(
-        (r) =>
-          !selected.some((s) => s.name === r.name) &&
-          (d.name === r.name || d.name.endsWith("/" + r.name + ".csproj")),
-      )
-      .map((r) => ({
-        repository: r.name,
-        requestedBy: d.repository,
-        evidencePath: d.path,
-        reason:
-          "Dependency declaration resembles an inventory name; confirm package ownership before adding supporting scope",
-      })),
-  );
-  finishSourceGraph(model.sourceGraph);
-  compose(model, manifest.declarations || {});
-  await options.trace?.("scan.completed", {
-    sourceRevision: model.modelRevision,
-    graphFingerprint: model.sourceGraph.fingerprint,
-    counts: {
-      sources: model.sources.length,
-      interfaces: model.interfaces.length,
-      nodes: model.sourceGraph.nodes.length,
-      edges: model.sourceGraph.edges.length,
-      diagnostics: model.diagnostics.length,
-    },
-  });
-  options.onExcerpts?.(excerpts);
-  const checkpointModel = await options.onStaticModel?.(model);
-  if (checkpointModel) Object.assign(model, checkpointModel);
-  if (options.modelConfig) {
-    options.progress?.(
-      "Requesting bounded model review; source collection remains static-only",
+    // Dependency suggestions are exact inventory-name matches only; they never add source scope or flows.
+    model.dependencySuggestions = model.dependencies.flatMap((d) =>
+      manifest.repositories
+        .filter(
+          (r) =>
+            !selected.some((s) => s.name === r.name) &&
+            (d.name === r.name || d.name.endsWith("/" + r.name + ".csproj")),
+        )
+        .map((r) => ({
+          repository: r.name,
+          requestedBy: d.repository,
+          evidencePath: d.path,
+          reason:
+            "Dependency declaration resembles an inventory name; confirm package ownership before adding supporting scope",
+        })),
     );
-    await enrichGraphModel(
-      model,
-      options.modelConfig,
-      excerpts,
-      options.modelFetch,
-      {
-        maxBatches:
-          options.reviewBatches || manifest.analysis?.reviewBatches || 12,
-        progress: options.progress,
-        checkpoint: options.checkpoint,
-        trace: options.trace,
+    if (disk) {
+      disk.resolveProjects(
+        generation,
+        selected,
+        options.sourceRoot || process.cwd(),
+      );
+      model.sourceGraph = disk.publish(generation, model.sourceGraph);
+      model.sourceGraph.reuse = reuse;
+      await options.trace?.("graph.published", {
+        generation,
+        counts: model.sourceGraph.counts,
+        reuse,
+        storage: disk.capacity(),
+      });
+    } else finishSourceGraph(model.sourceGraph);
+    compose(model, manifest.declarations || {});
+    await options.trace?.("scan.completed", {
+      sourceRevision: model.modelRevision,
+      graphFingerprint: model.sourceGraph.fingerprint,
+      counts: {
+        sources: model.sources.length,
+        interfaces: model.interfaces.length,
+        nodes: model.sourceGraph.nodes.length,
+        edges: model.sourceGraph.edges.length,
+        diagnostics: model.diagnostics.length,
       },
-    );
+    });
+    options.onExcerpts?.(excerpts);
+    const checkpointModel = await options.onStaticModel?.(model);
+    if (checkpointModel) Object.assign(model, checkpointModel);
+    if (disk) attachGraph(model.sourceGraph, disk);
+    if (options.modelConfig) {
+      options.progress?.(
+        "Requesting bounded model review; source collection remains static-only",
+      );
+      await enrichGraphModel(
+        model,
+        options.modelConfig,
+        excerpts,
+        options.modelFetch,
+        {
+          maxBatches:
+            options.reviewBatches || manifest.analysis?.reviewBatches || 12,
+          progress: options.progress,
+          checkpoint: options.checkpoint,
+          trace: options.trace,
+        },
+      );
+    }
+    return model;
+  } finally {
+    disk?.checkpoint();
+    disk?.close();
   }
-  return model;
 }
