@@ -154,7 +154,7 @@ export async function scanCwe(
     },
     tokens: 0,
     requestedRepositories: manifest.repositories
-      .filter((r) => r.selected)
+      .filter((r) => r.selected !== false)
       .map((r) => r.name),
     limits: {
       stagedBytesPerRepository: MAX_STAGE,
@@ -191,12 +191,15 @@ export async function scanCwe(
     report.engine.version = SCANNER_VERSION;
     await trace?.("cwe.started", {
       counts: {
-        repositories: manifest.repositories.filter((r) => r.selected).length,
+        repositories: manifest.repositories.filter((r) => r.selected !== false)
+          .length,
         rules: rules.length,
       },
     });
     await save();
-    for (const source of manifest.repositories.filter((r) => r.selected)) {
+    for (const source of manifest.repositories.filter(
+      (r) => r.selected !== false,
+    )) {
       abortCheck(signal);
       const repo = {
         name: source.name,

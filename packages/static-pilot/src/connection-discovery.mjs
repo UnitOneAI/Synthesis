@@ -60,6 +60,12 @@ export function interfaceConnection(item, file, offset) {
       channel = call.match(/^\s*["']["']\s*,\s*["']([^"'\n]+)["']/)?.[1];
     const exchange = call.match(/exchange\s*[:=]\s*["']([^"'\n]*)["']/)?.[1];
     if (exchange) return undefined; // Non-default exchanges require binding/routing semantics.
+    if (
+      /^BasicPublish(?:Async)?\b/.test(tail) &&
+      !(exchange === "" || literal(call) === "")
+    )
+      return undefined;
+    if (/^basic_publish\b/.test(tail) && exchange !== "") return undefined;
     if (channel && !/[${}?#]/.test(channel))
       return {
         kind: "message",

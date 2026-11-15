@@ -147,7 +147,7 @@ export async function reviewCweCode(
     batches: structuredClone(previous?.batches || []),
     findings: structuredClone(previous?.findings || []),
     requestedRepositories: manifest.repositories
-      .filter((r) => r.selected)
+      .filter((r) => r.selected !== false)
       .map((r) => r.name),
     repositories: [],
     gaps: [],
@@ -173,7 +173,9 @@ export async function reviewCweCode(
   beginUsageRun(model);
   try {
     // First pass builds metadata only. No code excerpts are saved in the workspace.
-    for (const source of manifest.repositories.filter((r) => r.selected)) {
+    for (const source of manifest.repositories.filter(
+      (r) => r.selected !== false,
+    )) {
       check();
       const repo = {
         name: source.name,
@@ -319,7 +321,7 @@ export async function reviewCweCode(
     );
     const payload = new Map();
     for (const source of manifest.repositories.filter(
-      (r) => r.selected && r.source !== "github",
+      (r) => r.selected !== false && r.source !== "github",
     )) {
       if (![...needed.values()].some((r) => r.repository === source.name))
         continue;

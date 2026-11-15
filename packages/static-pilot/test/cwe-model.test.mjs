@@ -191,3 +191,17 @@ test("CWE code review plans every segment of a large file and reports a long-lin
   assert.equal(r.status, "partial");
   assert.ok(r.gaps.some((g) => g.reason === "line-exceeds-packet-limit"));
 });
+
+test("CWE scope follows implicit manifest selections and preserves explicit exclusions", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  delete manifest.repositories[0].selected;
+  manifest.repositories[1].selected = false;
+  const r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 10,
+    fetchImpl: async () => response({ findings: [], limitations: [] }),
+  });
+  assert.deepEqual(r.requestedRepositories, ["one", "three"]);
+  assert.equal(r.completedBatches, 2);
+});

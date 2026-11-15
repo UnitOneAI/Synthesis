@@ -6,7 +6,7 @@ import { id, sha } from "./sources.mjs";
 import { redact } from "./model-review.mjs";
 
 export const GRAPH_SCHEMA = 1;
-export const EXTRACTOR_KEY = "disk-graph-3-connections";
+export const EXTRACTOR_KEY = "disk-graph-4-connections";
 const bindings = new WeakMap();
 const json = JSON.stringify;
 const parse = (row) => (row ? JSON.parse(row.data) : undefined);

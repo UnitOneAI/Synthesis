@@ -217,3 +217,20 @@ test(
     );
   },
 );
+
+test("non-default broker exchanges do not masquerade as direct queue connections", async (t) => {
+  const root = await fixture(t, {
+    producer: {
+      "Service.cs":
+        'channel.BasicPublish("custom", routingKey: "orders", body: payload);',
+      "settings.json": '{"BrokerUri":"amqp://rabbit/vhost"}',
+    },
+  });
+  const m = await analyze(manifest(["producer"]), { sourceRoot: root });
+  assert.equal(
+    m.connectionDiscovery.flows.filter(
+      (f) => f.basis === "static queue candidate",
+    ).length,
+    0,
+  );
+});
