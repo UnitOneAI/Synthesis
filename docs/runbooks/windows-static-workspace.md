@@ -115,3 +115,35 @@ Open **STRIDE matrix** and scroll to **Token usage**. The meter shows reported w
 Rejected responses and retries count when the provider returns usage. Unknown usage is shown explicitly for missing fields, timeouts and interrupted requests. Input already includes cache reads/writes; do not add those columns again. Reusing completed local batches adds zero requests/tokens. The meter updates when the provider returns usage, not for every generated token.
 
 Old reviews cannot be backfilled: an unmetered-history notice means totals cover only newly recorded requests. Keep the same workspace to retain the history through restart and source rebuilds. Customer gateway usage/billing logs are the reconciliation source for requests whose usage was not returned. No change to the configured model deployment or key is needed for this feature.
+
+
+## Collect portable diagnostics (0.5.0)
+
+Update Synthesis, then restart using the same source root, workspace and configured provider/deployment. Rebuild the source graph once to use streamed local extraction. This version changes the planner and source identities: previous request results may need review again, while their token history remains in the workspace.
+
+Traces are enabled automatically under `<workspace>/traces`. To put them elsewhere, append `--trace-dir "C:/SynthesisState/ProductTraces"` to the existing `serve` command. Keep that directory outside the analyzed clones. No additional model key or model is required. The original provider, exact deployment name and gateway version header remain unchanged.
+
+1. Build the source graph. In **Sources** and **Source graph**, inspect unavailable, oversized, unsupported, malformed and limited files.
+2. Run or continue STRIDE analysis. In **Analysis coverage**, inspect each obligation kind separately. A completed interface request does not cover a relationship split between requests.
+3. If a provider response fails, continue pending work. After two format/evidence/output-limit failures on the same packet, eligible requests are subdivided automatically on the next continuation. Authentication, policy, quota and transport failures stop the action; resolve those before continuing. Successful compatible requests are reused.
+4. Select **Download diagnostic bundle** (also available in **Export review package**). Save `synthesis-diagnostics.zip` outside the source root. This works even when the first scan failed.
+5. Inspect `summary.json`, `coverage.json`, `trace-index.json` and the ZIP contents before transfer. They contain confidential repository paths, symbol names, graph relationships and deployment metadata. Raw source excerpts, prompts, response prose and keys are intentionally excluded. Transfer only through the approved channel; no diagnostic upload is automatic.
+
+If the browser or server is unavailable, export from disk in PowerShell. This command does not require an API key:
+
+```powershell
+Set-Location C:/Tools/Synthesis/packages/static-pilot
+$workspace = "C:/SynthesisState/Product"
+$exportFolder = "C:/SynthesisState/Exports"
+New-Item -ItemType Directory -Force $exportFolder | Out-Null
+$bundle = Join-Path $exportFolder ("synthesis-diagnostics-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
+node src/cli.mjs diagnostics --workspace $workspace --out $bundle
+if ($LASTEXITCODE -ne 0) { throw 'Diagnostic export failed; preserve the workspace and traces.' }
+Get-FileHash -Algorithm SHA256 -LiteralPath $bundle
+```
+
+If you selected a custom trace directory, also pass `--trace-dir "C:/SynthesisState/ProductTraces"` to `diagnostics`. The command reads the latest atomic snapshot and traces; stopping the server first gives a stable cutoff. If no snapshot was completed, it still exports the traces and explicitly marks the graph/model unavailable. It refuses to overwrite an existing bundle.
+
+For collection troubleshooting, bring the ZIP and the approximate failure time/timezone. `summary.json` identifies the application build and model. `trace.ndjson` correlates session/job/batch/attempt IDs, file parsing, HTTP status, provider request IDs and stop reason. `attempts.json` separates response-format, evidence, output-limit, transport, quota/policy and persistence failures. `token-usage.csv` includes failed/retried requests where usage was returned.
+
+Traces rotate at 8 MiB without automatic deletion. A ZIP includes the newest trace segments up to 64 MiB and lists any omissions in `trace-index.json`; preserve the workspace if older segments are needed. Unknown token usage after interrupted requests is not zero. Source graph limits, unrecognized formats and unresolved dynamic relationships remain coverage gaps, even when every planned request succeeds.

@@ -1,3 +1,4 @@
+import { failureDetail } from "./diagnostics.mjs";
 import path from "node:path";
 import { id, sha, localSource, githubSource } from "./sources.mjs";
 import { parseXml } from "./inventory.mjs";
@@ -10,7 +11,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.4.0";
+export const ENGINE_VERSION = "static-pilot-0.5.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -234,13 +235,40 @@ function stripComments(text, extension) {
   }
   return text;
 }
-export function extract(source, files) {
+export function extract(source, files, options = {}) {
+  const interfaceIds = new Set(),
+    lineIndexes = new Map();
+  const lineAt = (file, offset) => {
+    let index = lineIndexes.get(file);
+    if (!index) {
+      index = [];
+      for (
+        let at = file.text.indexOf("\n");
+        at !== -1;
+        at = file.text.indexOf("\n", at + 1)
+      )
+        index.push(at);
+      lineIndexes.set(file, index);
+    }
+    let low = 0,
+      high = index.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (index[middle] < offset) low = middle + 1;
+      else high = middle;
+    }
+    return low + 1;
+  };
   const components = [],
     interfaces = [],
     evidence = [],
     dependencies = [],
     diagnostics = [];
-  const projects = files
+  const projects = (
+    options.projectPaths
+      ? options.projectPaths.map((path) => ({ path }))
+      : files
+  )
     .filter((f) =>
       /\.(csproj|vbproj|vcxproj|wixproj)$|(^|\/)package\.json$/i.test(f.path),
     )
@@ -277,8 +305,7 @@ export function extract(source, files) {
     operation,
     basis,
   ) => {
-    if (interfaces.length >= 2000) return;
-    const line = file.text.slice(0, offset).split("\n").length,
+    const line = lineAt(file, offset),
       c = componentFor(file.path);
     const e = {
       id: id(
@@ -305,7 +332,7 @@ export function extract(source, files) {
         source.name,
         file.path,
         kind,
-        pointer || `${line}:${operation}`,
+        pointer || `${offset}:${operation}`,
       ),
       component: c.id,
       repository: source.name,
@@ -320,7 +347,8 @@ export function extract(source, files) {
       effectiveExposure: "unknown",
       effectiveIdentity: "unknown",
     };
-    if (!interfaces.some((x) => x.id === item.id)) {
+    if (!interfaceIds.has(item.id)) {
+      interfaceIds.add(item.id);
       evidence.push(e);
       interfaces.push(item);
     }
@@ -485,7 +513,7 @@ export function extract(source, files) {
       for (const rule of RULES) {
         rule.regex.lastIndex = 0;
         for (const match of text.matchAll(rule.regex)) {
-          if (++count > 100) break;
+          count++;
           add(
             file,
             null,
@@ -497,15 +525,7 @@ export function extract(source, files) {
             "inferred lexical candidate; source and call context need review",
           );
         }
-        if (count > 100) break;
       }
-      if (count > 100)
-        diagnostics.push({
-          repository: source.name,
-          path: file.path,
-          kind: "candidate-limit",
-          message: "Only the first 100 candidates in this file were collected",
-        });
     } else if (!tree)
       diagnostics.push({
         repository: source.name,
@@ -515,13 +535,6 @@ export function extract(source, files) {
           "File hashed and inventoried; no semantic adapter for this format",
       });
   }
-  if (interfaces.length >= 2000)
-    diagnostics.push({
-      repository: source.name,
-      kind: "candidate-limit",
-      message:
-        "Repository interface budget of 2000 reached; additional candidates not recorded",
-    });
   return { components, interfaces, evidence, dependencies, diagnostics };
 }
 
@@ -803,6 +816,9 @@ export async function analyze(manifest, options = {}) {
       options.reviewBatches > 100)
   )
     throw new Error("Model batch budget must be 1–100 requests");
+  await options.trace?.("scan.started", {
+    counts: { selectedRepositories: selected.length },
+  });
   const excerpts = new Map();
   const model = {
     schemaVersion: 1,
@@ -832,11 +848,59 @@ export async function analyze(manifest, options = {}) {
   };
   for (const source of selected) {
     options.progress?.(`Reading ${source.name}`);
+    await options.trace?.("source.started", { repository: source.name });
     try {
+      const collected = {
+        components: [],
+        interfaces: [],
+        evidence: [],
+        dependencies: [],
+        diagnostics: [],
+      };
+      const componentIds = new Set();
+      const processFiles = async (files, projectPaths) => {
+        const result = extract(source, files, { projectPaths });
+        await addSourceGraph(
+          model.sourceGraph,
+          source,
+          files,
+          result,
+          options.sourceRoot,
+          options.trace,
+        );
+        if (options.includeSourceExcerpts)
+          collectExcerpts(result, files, excerpts);
+        for (const component of result.components)
+          if (!componentIds.has(component.id)) {
+            componentIds.add(component.id);
+            collected.components.push(component);
+          }
+        for (const key of [
+          "interfaces",
+          "evidence",
+          "dependencies",
+          "diagnostics",
+        ])
+          collected[key].push(...result[key]);
+      };
       const snapshot =
         source.source === "github"
           ? await githubSource(source, options.githubToken)
-          : await localSource(source, options.sourceRoot || process.cwd());
+          : await localSource(source, options.sourceRoot || process.cwd(), {
+              onFile: (file, projects) => processFiles([file], projects),
+            });
+      if (source.source === "github") await processFiles(snapshot.files);
+      await options.trace?.("source.collected", {
+        repository: source.name,
+        snapshot: snapshot.snapshot,
+        counts: {
+          inspected: snapshot.coverage.inspected,
+          bytes: snapshot.coverage.bytes,
+          failed: snapshot.coverage.failed,
+          oversized: snapshot.coverage.oversized,
+        },
+        truncated: snapshot.coverage.truncated,
+      });
       model.sources.push({
         name: source.name,
         source: source.source || "local",
@@ -847,34 +911,15 @@ export async function analyze(manifest, options = {}) {
         coverage: snapshot.coverage,
         status: "read",
       });
-      if (model.interfaces.length >= 10000) {
-        model.diagnostics.push({
-          repository: source.name,
-          kind: "candidate-limit",
-          message:
-            "System budget reached; files inventoried but interfaces not extracted",
-        });
-      }
-      const result =
-        model.interfaces.length >= 10000
-          ? {
-              components: [],
-              interfaces: [],
-              evidence: [],
-              dependencies: [],
-              diagnostics: [],
-            }
-          : extract(source, snapshot.files);
-      options.progress?.(`Building source graph for ${source.name}`);
-      await addSourceGraph(
-        model.sourceGraph,
-        source,
-        snapshot.files,
-        result,
-        options.sourceRoot,
-      );
-      if (options.includeSourceExcerpts)
-        collectExcerpts(result, snapshot.files, excerpts);
+      await options.trace?.("graph.repository-completed", {
+        repository: source.name,
+        counts: {
+          nodes: model.sourceGraph.nodes.length,
+          edges: model.sourceGraph.edges.length,
+          interfaces: collected.interfaces.length,
+        },
+        coverage: model.sourceGraph.coverage,
+      });
       for (const key of [
         "components",
         "interfaces",
@@ -882,8 +927,12 @@ export async function analyze(manifest, options = {}) {
         "dependencies",
         "diagnostics",
       ])
-        model[key].push(...result[key]);
+        model[key].push(...collected[key]);
     } catch (error) {
+      await options.trace?.("source.failed", {
+        repository: source.name,
+        failure: failureDetail(error.message),
+      });
       model.sources.push({
         name: source.name,
         source: source.source || "local",
@@ -923,30 +972,37 @@ export async function analyze(manifest, options = {}) {
   );
   finishSourceGraph(model.sourceGraph);
   compose(model, manifest.declarations || {});
+  await options.trace?.("scan.completed", {
+    sourceRevision: model.modelRevision,
+    graphFingerprint: model.sourceGraph.fingerprint,
+    counts: {
+      sources: model.sources.length,
+      interfaces: model.interfaces.length,
+      nodes: model.sourceGraph.nodes.length,
+      edges: model.sourceGraph.edges.length,
+      diagnostics: model.diagnostics.length,
+    },
+  });
   options.onExcerpts?.(excerpts);
+  const checkpointModel = await options.onStaticModel?.(model);
+  if (checkpointModel) Object.assign(model, checkpointModel);
   if (options.modelConfig) {
     options.progress?.(
       "Requesting bounded model review; source collection remains static-only",
     );
-    if (options.reviewBatches || manifest.analysis?.reviewBatches)
-      await enrichGraphModel(
-        model,
-        options.modelConfig,
-        excerpts,
-        options.modelFetch,
-        {
-          maxBatches: options.reviewBatches || manifest.analysis.reviewBatches,
-          progress: options.progress,
-          checkpoint: options.checkpoint,
-        },
-      );
-    else
-      await enrichModel(
-        model,
-        options.modelConfig,
-        excerpts,
-        options.modelFetch,
-      );
+    await enrichGraphModel(
+      model,
+      options.modelConfig,
+      excerpts,
+      options.modelFetch,
+      {
+        maxBatches:
+          options.reviewBatches || manifest.analysis?.reviewBatches || 12,
+        progress: options.progress,
+        checkpoint: options.checkpoint,
+        trace: options.trace,
+      },
+    );
   }
   return model;
 }

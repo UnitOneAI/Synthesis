@@ -35,6 +35,7 @@
     categoryFilter = "",
     dispositionFilter = "",
     page = 0,
+    saving = false,
     diagramSequence = 0;
   const root = document.getElementById("workspace");
   const kinds = [
@@ -283,7 +284,7 @@
         )}</tbody></table></div>${!s.matrix.some((r) => r.rowKind === (window.wsRowKind || "boundary")) ? "<p>No subjects of this type. Declare supported boundaries or select component / flow rows.</p>" : ""}`;
       body.insertAdjacentHTML(
         "beforeend",
-        `<section id="ws-usage">${usageHtml(jobState.tokenUsage || model.tokenUsage)}</section>`,
+        `<section id="ws-coverage">${coverageHtml(model)}</section><section id="ws-usage">${usageHtml(jobState.tokenUsage || model.tokenUsage)}</section>`,
       );
       return;
     }
@@ -350,6 +351,35 @@
     } catch (error) {
       notify(error.message, true);
     }
+  }
+  function coverageHtml(m) {
+    const c = m.diagnosticCoverage,
+      review = c?.review;
+    const source = c?.source?.sources || m.sources || [];
+    const graph = m.sourceGraph?.coverage || {};
+    return `<h3>Analysis coverage</h3><p>${source.filter((s) => s.status === "read").length} / ${source.length} repositories read · ${source.reduce((n, s) => n + (s.coverage?.inspected || 0), 0)} files inspected · ${graph.parsed || 0} files parsed · ${(graph.failed || 0) + (graph.syntaxErrors || 0) + (graph.limited || 0)} syntax errors, parser failures or limits.</p>${
+      review
+        ? `<p><strong>${review.reviewed} / ${review.total} review obligations submitted successfully</strong> · ${review.pending} pending · ${review.blocked} blocked</p><div class="table-wrap"><table><thead><tr><th>Review subject</th><th>Reviewed</th><th>Pending</th><th>Blocked</th></tr></thead><tbody>${Object.entries(
+            review.byKind,
+          )
+            .map(
+              ([kind, count]) =>
+                `<tr><th>${e(kind.replaceAll("-", " "))}</th><td>${count.reviewed} / ${count.total}</td><td>${count.pending}</td><td>${count.blocked}</td></tr>`,
+            )
+            .join(
+              "",
+            )}</tbody></table></div><p>${review.gaps.length} recorded gaps. ${Object.entries(
+            review.gaps.reduce((counts, gap) => {
+              counts[gap.kind] = (counts[gap.kind] || 0) + 1;
+              return counts;
+            }, {}),
+          )
+            .map(([kind, count]) => `${count} ${e(kind.replaceAll("-", " "))}`)
+            .join(
+              " · ",
+            )}. Unresolved calls may include library calls; they are not vulnerability findings. Full locations are in the diagnostic bundle.</p>`
+        : "<p>Run STRIDE analysis to create the review worklist.</p>"
+    }<p class="hint">Review coverage measures submitted evidence. It does not prove that every threat was identified. Syntax paths do not establish deployed reachability or effective controls.</p><button data-ws-export="diagnostics">Download diagnostic bundle · ZIP</button><p class="hint">Includes graph metadata, source coverage, request failures and token counts. No raw source excerpts or model prose. Inspect confidential architecture metadata before sharing.</p>`;
   }
   function usageHtml(u) {
     if (!u)
@@ -466,6 +496,11 @@
     panel.scrollIntoView({ block: "nearest" });
   }
   async function save(payload) {
+    if (saving) return;
+    saving = true;
+    root.inert = true;
+    root.setAttribute("aria-busy", "true");
+    notify("Saving system model…");
     try {
       const result = await api("system", { revision: s.revision, ...payload });
       update(result);
@@ -474,6 +509,10 @@
       );
     } catch (error) {
       notify(error.message, true);
+    } finally {
+      saving = false;
+      root.inert = false;
+      root.removeAttribute("aria-busy");
     }
   }
   root.addEventListener("click", async (event) => {
@@ -558,6 +597,7 @@
         ["json", "Complete model · JSON"],
         ["manifest", "Source manifest"],
         ["usage", "Token usage · CSV"],
+        ["diagnostics", "Diagnostic bundle · ZIP"],
       ]
         .map(([k, l]) => `<button data-ws-export="${k}">${l}</button>`)
         .join("")}</div>`;

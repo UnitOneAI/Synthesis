@@ -74,7 +74,7 @@ The same options work with `analyze`:
 node src/cli.mjs analyze --manifest /private/scope.json --source-root /private/clones --out /private/new-model-report --provider anthropic --model YOUR_APPROVED_CLAUDE_MODEL --review-batches 12 --include-source-excerpts
 ```
 
-The graph review plans repository-local batches (round-robin across repositories), cross-repository protocol cohorts, and explicit declared-flow endpoint reviews. Each packet contains at most **60 records and 96 KiB**, including syntax ownership and call-site context. A shared protocol is a review candidate, never proof of a connection. The source graph itself is built before inference and is not replaced by model output. Partial excerpts are at most 12 lines / 1,600 characters each; collection remains bounded to the first 120 interface evidence records per repository and 12,000 overall.
+The graph review plans repository-local batches (round-robin across repositories), cross-repository protocol cohorts, recursive candidate-call neighborhoods, and explicit flow / actor-access / boundary-crossing obligations. Large scopes are recursively split; relationships cut by partitions receive focused bridge requests. Two invalid responses on the same non-atomic packet trigger smaller child requests on continuation, up to six refinement levels. Each packet contains at most **60 records and 96 KiB**, including syntax ownership and call-site context. A shared protocol is a review candidate, never proof of a connection. The source graph itself is built before inference and is not replaced by model output. Partial excerpts are at most 12 lines / 1,600 characters each; collection takes up to 120 evidence records per file during streamed local analysis, with a 12,000-excerpt portfolio cap. Missing excerpts are not missing interfaces; metadata review remains available.
 
 Each request allows 8,192 output tokens, a 120-second timeout and a 1 MiB response. A review action stops scheduling new requests after 24 minutes or its chosen request budget; completed batches are checkpointed for continuation after restart. HTTP 401/403/429 and transport failures stop further calls in that action. Other failed batches remain visible. Explicit continuation retries prior schema/evidence failures with smaller response instructions while retaining successful batches; every retry consumes the selected request budget. The UI/report tracks completed, failed and pending batches plus unique submitted/reviewed/unreviewed interface IDs. Completing all planned batches does not establish semantic completeness. CLI `analyze` without `--review-batches` retains the legacy one-request path (up to 120 records); use the flag for the graph batch pipeline.
 
@@ -137,7 +137,7 @@ Exported connection declarations include evidence fingerprints. Reusing them aft
 | Actors/threats | Interface-specific conditional scenarios and access assumptions | Severity unassessed; no confirmed findings |
 | DFD | Declared connections and unresolved interface sheets | Source groups are not proven processes; trust transitions require declarations |
 
-Per-repository limits: 20,000 file entries, 1 MiB per inspected file, 64 MiB inspected text, 2,000 interface/control candidates. System extraction stops at a repository boundary after 10,000 candidates (maximum 11,999). Excluded directories are recorded but not recursively counted. UI worker limit: 768 MiB heap and 30 minutes. GitHub archive limits: 96 MiB compressed, 256 MiB expanded. Large scopes may require separate, explicitly bounded runs. Local digests cover inspected files and the ledger; they are not atomic snapshots or Git commits. Keep source trees stationary during analysis.
+Local analysis streams eligible files and has no aggregate file-count, inspected-byte or interface-candidate cutoff. The 1 MiB per-file limit remains. GitHub archives retain 20,000-entry and 64 MiB inspected-text bounds. Excluded directories are recorded but not recursively counted. UI worker limit: 768 MiB heap and 30 minutes. GitHub archive limits: 96 MiB compressed, 256 MiB expanded. Large scopes may require separate, explicitly bounded runs. Local digests cover inspected files and the ledger; they are not atomic snapshots or Git commits. Keep source trees stationary during analysis.
 
 ## Verify before a customer run
 
@@ -152,7 +152,7 @@ Use equivalent writable paths on Windows. Fixtures are synthetic and never execu
 
 ## Source graph bounds and qualification
 
-Source collection still allows at most 20,000 discovered files and 64 MiB inspected content per repository, with a 1 MiB file limit. Security interface extraction still caps at 100 candidates per file and 2,000 per repository, and stops starting extraction for additional repositories once the portfolio reaches 10,000 candidates. These are explicit partial-coverage limits, not promises that every file or interface was understood.
+Version 0.5.0 removes the previous local aggregate collection and candidate cutoffs. Each eligible local file is extracted independently, so a large repository does not prevent later repositories from contributing interfaces. Per-file, parser, graph, process and checkpoint safeguards remain; inspect their ledgers before claiming coverage.
 
 The syntax graph allows 100,000 nodes, 200,000 edges and 5,000 emitted nodes per file. Parser time is bounded per file; malformed/unsupported/limited files remain visible. Call sites are source-supported, but target edges are only unique same-file scope candidates. Literal project-reference paths can link collected projects across local clones. This does not resolve runtime services, build conditions, dependency injection, polymorphism, macros, effective controls or deployed permissions. The graph preview Mermaid is limited to 200 nodes; full graph JSON retains all collected nodes/edges. DFD Mermaid aggregates unresolved interfaces by source component, protocol and direction; it never treats project containment as a trust zone.
 
@@ -165,3 +165,12 @@ See [functional test specification](../../docs/testing/system-threat-workspace.m
 ## Token usage
 
 Version 0.4.1 adds provider-reported token accounting in the STRIDE view, full request-ledger CSV/JSON and HTML summaries. Failed responses and retries are included; local cached batches add no requests. Shared cross-repository requests are counted once. Missing usage and older unmetered history remain explicit. See [accounting contract](../../docs/design/token-usage.md) and the [Windows instructions](../../docs/runbooks/windows-static-workspace.md#inspect-token-consumption-041).
+
+
+## Recursive coverage and diagnostics (0.5.0)
+
+**STRIDE matrix → Analysis coverage** separates interface, callable, candidate path, flow, actor-access and boundary-crossing obligations. A successful request counts only for obligations whose required records and context were submitted together. Unsupported files, unresolved targets, unconfirmed assumptions and limits remain explicit. This is submission coverage, not proof of security or complete semantic analysis.
+
+**Download diagnostic bundle** is available even before a completed scan. It exports the retained source graph, source/parser ledgers, recursive worklist, request attempts, safe failure codes, provider request IDs, token counts and durable traces in one ZIP. Traces default to `<workspace>/traces`; `--trace-dir` chooses another directory outside the source root. The offline `diagnostics` command works without a provider key. Raw excerpts, prompts and model-response prose are excluded; graph metadata remains confidential.
+
+See the [recursive review and observability contract](../../docs/design/recursive-coverage-observability.md) and [Windows diagnostic instructions](../../docs/runbooks/windows-static-workspace.md#collect-portable-diagnostics-050). The retained graph still has resource limits; full disk-backed graph indexing and compiler-aware cross-file dispatch are not implemented.

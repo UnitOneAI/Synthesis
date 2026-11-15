@@ -57,3 +57,25 @@ Use a read-only clone and keep evidence outside the public checkout:
 The synthetic 12-repository case verifies scheduling and recovery, not performance or semantic completeness on twelve large customer repositories. Qualification on the actual selected customer clones still requires their files, coverage inspection, critical-flow reference cases and security-champion review. Gateway protocol mocks do not establish access from a customer Windows host.
 
 Collectors are bounded and framework-specific. They do not perform compiler-wide call resolution, evaluate every deployment conditional, automatically prove cross-repository endpoints, or verify runtime reachability/enforcement. The system records declarations and unresolved references so reviewers can supply the architecture supported by the available source. No runtime tests or probes are part of this workflow.
+
+
+## Recursive review and diagnostics (0.5.0)
+
+| ID | Acceptance | Automated evidence |
+| --- | --- | --- |
+| COV-01 | Traverse multi-hop candidate calls, terminate cycles, keep source-supported path context, never invent runtime flows | `diagnostics.test.mjs` recursive planner |
+| COV-02 | Do not count endpoints in different requests as a covered relationship; keep packets within byte/record limits | Recursive planner + 12-repository source graph tests |
+| COV-03 | Stream local files beyond old aggregate bounds, retain project ownership and all lexical candidates including same-line occurrences | Streamed collection test |
+| COV-04 | Extract 10,200 interfaces across all 12 synthetic clones without portfolio cutoff | Portfolio test |
+| COV-05 | After repeated invalid output, refine pending scopes; restart reuses successful children with zero extra requests | Recursive refinement test |
+| OBS-01 | Correlate provider request IDs, attempts, response failure, token usage and cache reuse | Durable trace test |
+| OBS-02 | Exclude active credentials, access tokens, raw excerpts, prompts, endpoint URLs and response prose; verify ZIP hashes | Privacy/integrity test |
+| OBS-03 | Export without a completed snapshot, preserve valid lines after interruption, reject trace output in source root | Trace recovery test |
+| OBS-04 | Require local access token for ZIP; retain disk traces after restart/close | Diagnostic server test |
+| OBS-05 | Show separate coverage counts and download a valid ZIP through the UI | Browser diagnostic test |
+| OBS-06 | Invalidate successful obligation counts after model revision becomes stale | Durable trace test |
+| OBS-07 | Save the static graph before combined inference; checkpoint usage before rejecting output; do not dispatch when required tracing fails | Combined scan test |
+| OBS-08 | Retain every inspected file in the graph ledger when graph resource limits are reached | Graph resource test |
+| UX-05 | Wait for a pending save before opening another editor; delayed responses cannot replace a new draft | Delayed-save browser test |
+
+Real qualification remains source-only against the operator-selected repository. Record source revision, inspected files/bytes, graph nodes/edges, parser statuses, worklist size, gap categories, token totals and observed provider errors. Synthetic scale tests establish collector/scheduler behavior, not complete language/framework semantics or live gateway qualification.

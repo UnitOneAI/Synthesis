@@ -1,3 +1,11 @@
+import path from "node:path";
+import {
+  traceStore,
+  diagnosticBundle,
+  diagnosticCoverage,
+  failureDetail,
+  buildIdentity,
+} from "./diagnostics.mjs";
 import {
   usageSummary,
   usageCsv,
@@ -36,6 +44,7 @@ async function body(req) {
 export async function serve({
   sourceRoot,
   workspace,
+  traceDirectory,
   persist = false,
   port = 4173,
   githubToken,
@@ -55,6 +64,29 @@ export async function serve({
   let reviewExcerpts = [],
     scanPriorManifest;
   const store = persist ? await workspaceStore(root, workspace) : null;
+  let traces;
+  try {
+    traces = await traceStore({
+      directory:
+        traceDirectory || (store ? path.join(store.dir, "traces") : undefined),
+      sourceRoot: root,
+      secrets: [githubToken, modelConfig?.apiKey, token],
+    });
+  } catch (error) {
+    await store?.close();
+    throw error;
+  }
+  try {
+    await traces.record("session.started", {
+      identity: await buildIdentity(),
+      provider: modelConfig?.provider || "none",
+      model: modelConfig?.model || null,
+    });
+  } catch (error) {
+    await traces.close();
+    await store?.close();
+    throw error;
+  }
   let persistenceError = null;
   if (store) {
     try {
@@ -68,6 +100,10 @@ export async function serve({
             "The workspace contains a different manifest; use a separate --workspace folder",
           );
         model = saved.model;
+        await traces.record("workspace.restored", {
+          sourceRevision: model.modelRevision,
+          priorStatus: model.aiReview?.status,
+        });
         interruptUsage(model.usageLedger);
         manifest = saved.manifest;
         validateManifest(manifest);
@@ -83,6 +119,7 @@ export async function serve({
         };
       }
     } catch (error) {
+      await traces.close();
       await store.close();
       throw error;
     }
@@ -92,44 +129,70 @@ export async function serve({
     try {
       await store.save({ manifest, model });
       persistenceError = null;
+      await traces.record("checkpoint.saved", {
+        sourceRevision: model.modelRevision,
+        status: model.aiReview?.status,
+      });
     } catch (error) {
       persistenceError = error.message;
+      await traces
+        .record("checkpoint.failed", { failure: failureDetail(error.message) })
+        .catch(() => {});
     }
   };
   const outputModel = () => ({
     ...model,
     strideMatrix: strideMatrix(model),
     systemModel: systemModel(model),
+    diagnosticCoverage: diagnosticCoverage(model),
     tokenUsage: usageSummary(
       model.usageLedger,
       !model.usageLedger && Boolean(model.aiReview),
     ),
   });
-  const startJob = (mode, data) => {
+  const startJob = async (mode, data) => {
+    const jobId = randomBytes(12).toString("hex");
     if (mode === "review") scanPriorManifest = null;
     job = {
       status: "running",
+      jobId,
       mode,
       message:
         mode === "review"
           ? "Starting graph-based STRIDE review"
           : "Building static source graph",
     };
+    try {
+      await traces.record("job.started", {
+        jobId,
+        mode,
+        sourceRevision: model?.modelRevision,
+      });
+    } catch (error) {
+      if (mode !== "review" && model && scanPriorManifest)
+        manifest = scanPriorManifest;
+      job = { status: "failed", message: "Trace output could not be written" };
+      throw error;
+    }
     const active = new Worker(new URL("./worker.mjs", import.meta.url), {
       workerData: { mode, ...data },
       resourceLimits: { maxOldGenerationSizeMb: 768 },
     });
     worker = active;
+    let finishing = false;
     const stop = (message) => {
-      if (worker !== active || job.status !== "running") return;
+      if (worker !== active || job.status !== "running" || finishing) return;
       if (model?.aiReview?.status === "pending") {
         model.aiReview.status = "partial";
         model.aiReview.error = message;
       }
       interruptUsage(model?.usageLedger);
-      checkpoint();
+      traces
+        .record("job.failed", { jobId, mode, failure: failureDetail(message) })
+        .catch(() => {});
       if (mode !== "review" && model && scanPriorManifest)
         manifest = scanPriorManifest;
+      checkpoint();
       job = { status: model ? "ready" : "failed", message };
     };
     const activeTimer = setTimeout(
@@ -142,50 +205,100 @@ export async function serve({
       30 * 60 * 1000,
     );
     timer = activeTimer;
-    active.on("message", async (m) => {
-      if (worker !== active || job.status !== "running") return;
-      if (m.type === "progress") job.message = m.message;
-      if (m.type === "checkpoint" && model) {
-        model.aiReview = m.aiReview;
-        model.usageLedger = m.usageLedger;
-        await checkpoint();
-        if (worker === active)
-          active.postMessage({
-            type: "checkpoint-saved",
-            id: m.id,
-            error: Boolean(persistenceError),
-          });
-      }
-      if (m.type === "done") {
-        if (mode !== "review")
+    active.on("message", (m) => {
+      (async () => {
+        if (worker !== active || job.status !== "running") return;
+        if (m.type === "progress") job.message = m.message;
+        if (m.type === "trace") {
+          let failed = false;
+          try {
+            await traces.record(m.event, { ...m.data, jobId });
+          } catch {
+            failed = true;
+          }
+          if (worker === active)
+            active.postMessage({
+              type: "trace-saved",
+              id: m.id,
+              error: failed,
+            });
+        }
+        if (m.type === "static-checkpoint") {
           m.model.usageLedger = mergeUsage(
             model?.usageLedger,
             m.model.usageLedger,
             !model?.usageLedger && Boolean(model?.aiReview),
           );
-        if (mode !== "review" && model?.architecture) {
-          m.model.architecture = structuredClone(model.architecture);
-          m.model.architecture.rebuildNotice =
-            "Reviewer declarations retained from the previous snapshot. Recheck source references and stale decisions after rebuilding.";
+          if (model?.architecture) {
+            m.model.architecture = structuredClone(model.architecture);
+            m.model.architecture.rebuildNotice =
+              "Reviewer declarations retained. Recheck references and stale decisions after rebuilding.";
+          }
+          model = m.model;
+          scanPriorManifest = null;
+          await checkpoint();
+          if (worker === active)
+            active.postMessage({
+              type: "static-saved",
+              id: m.id,
+              error: Boolean(persistenceError),
+              model,
+            });
         }
-        model = m.model;
-        reviewExcerpts = m.excerpts || [];
-        job = {
-          status: "ready",
-          message:
-            model.aiReview?.status === "failed"
-              ? "Graph retained; model review FAILED. See review details."
-              : model.aiReview?.status === "partial"
-                ? "Partial review saved. Continue to process remaining batches."
-                : "Draft ready; inspect coverage and unresolved relationships.",
-        };
+        if (m.type === "checkpoint" && model) {
+          model.aiReview = m.aiReview;
+          model.usageLedger = m.usageLedger;
+          await checkpoint();
+          if (worker === active)
+            active.postMessage({
+              type: "checkpoint-saved",
+              id: m.id,
+              error: Boolean(persistenceError),
+            });
+        }
+        if (m.type === "done") {
+          finishing = true;
+          if (mode !== "review")
+            m.model.usageLedger = mergeUsage(
+              model?.usageLedger,
+              m.model.usageLedger,
+              !model?.usageLedger && Boolean(model?.aiReview),
+            );
+          if (mode !== "review" && model?.architecture) {
+            m.model.architecture = structuredClone(model.architecture);
+            m.model.architecture.rebuildNotice =
+              "Reviewer declarations retained from the previous snapshot. Recheck source references and stale decisions after rebuilding.";
+          }
+          await traces.record("job.completed", {
+            jobId,
+            mode,
+            sourceRevision: m.model.modelRevision,
+            status: m.model.aiReview?.status || "static-draft",
+          });
+          model = m.model;
+          reviewExcerpts = m.excerpts || [];
+          job = {
+            status: "ready",
+            message:
+              model.aiReview?.status === "failed"
+                ? "Graph retained; model review FAILED. See review details."
+                : model.aiReview?.status === "partial"
+                  ? "Partial review saved. Continue to process remaining batches."
+                  : "Draft ready; inspect coverage and unresolved relationships.",
+          };
+          clearTimeout(activeTimer);
+          await checkpoint();
+        }
+        if (m.type === "error") {
+          stop(m.message);
+          clearTimeout(activeTimer);
+        }
+      })().catch(() => {
+        finishing = false;
+        stop("Trace or checkpoint write failed; operation stopped");
+        active.terminate();
         clearTimeout(activeTimer);
-        await checkpoint();
-      }
-      if (m.type === "error") {
-        stop(m.message);
-        clearTimeout(activeTimer);
-      }
+      });
     });
     active.on("error", () => {
       stop("Worker failed; any completed review batches were retained.");
@@ -268,6 +381,7 @@ export async function serve({
             ? {
                 enabled: true,
                 error: persistenceError,
+                traceError: traces.error,
                 restored: Boolean(model),
               }
             : { enabled: false },
@@ -302,7 +416,7 @@ export async function serve({
         scanPriorManifest = manifest;
         manifest = proposedManifest;
         reviewExcerpts = [];
-        startJob("analyze", {
+        await startJob("analyze", {
           manifest,
           options: {
             sourceRoot: root,
@@ -323,6 +437,9 @@ export async function serve({
           batches: plan.batches.length,
           oversizedRecords: plan.omitted.length,
           repositories: model.sources.length,
+          obligations: plan.obligations.length,
+          gaps: plan.gaps.length,
+          splits: plan.splits.length,
         });
       }
       if (req.method === "POST" && url.pathname === "/api/review") {
@@ -349,7 +466,7 @@ export async function serve({
             error:
               "Source excerpts are not retained across restarts. Rebuild with excerpts enabled or review metadata only.",
           });
-        startJob("review", {
+        await startJob("review", {
           model,
           excerpts: input.includeSourceExcerpts ? reviewExcerpts : [],
           options: { modelConfig, reviewBatches: input.maxBatches },
@@ -362,6 +479,9 @@ export async function serve({
         if (!reviewing && preserve && scanPriorManifest)
           manifest = scanPriorManifest;
         job.status = "cancelling";
+        await traces
+          .record("job.cancelled", { jobId: job.jobId, mode: job.mode })
+          .catch(() => {});
         await worker?.terminate();
         clearTimeout(timer);
         job = {
@@ -430,6 +550,33 @@ export async function serve({
         return send(200, outputModel());
       }
       if (req.method === "GET" && url.pathname === "/api/export") {
+        if (url.searchParams.get("format") === "diagnostics") {
+          await traces.record("diagnostics.exported", {
+            sourceRevision: model?.modelRevision,
+          });
+          res.setHeader(
+            "Content-Disposition",
+            'attachment; filename="synthesis-diagnostics.zip"',
+          );
+          return send(
+            200,
+            Buffer.from(
+              await diagnosticBundle({
+                model,
+                plan:
+                  model && !model.aiReview?.plan
+                    ? reviewPlan(model)
+                    : undefined,
+                traces: await traces.export(),
+                job,
+                config: modelConfig,
+                secrets: [githubToken, modelConfig?.apiKey, token],
+                roots: [root],
+              }),
+            ),
+            "application/zip",
+          );
+        }
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
@@ -509,6 +656,7 @@ export async function serve({
       server.listen(port, "127.0.0.1", resolve);
     });
   } catch (error) {
+    await traces.close();
     await store?.close();
     throw error;
   }
@@ -520,8 +668,23 @@ export async function serve({
   let closing;
   server.on("close", () => {
     clearTimeout(timer);
-    worker?.terminate();
-    closing = store?.close();
+    const previousStatus = job.status;
+    job.status = "closed";
+    closing = (async () => {
+      await worker?.terminate();
+      if (model?.aiReview?.status === "pending") {
+        model.aiReview.status = "partial";
+        model.aiReview.error =
+          "Server closed during review; continue pending work.";
+      }
+      interruptUsage(model?.usageLedger);
+      await checkpoint();
+      await traces
+        .record("session.closed", { status: previousStatus })
+        .catch(() => {});
+      await store?.close();
+      await traces.close();
+    })();
   });
   return {
     server,

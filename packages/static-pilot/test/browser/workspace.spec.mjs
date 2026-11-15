@@ -1,3 +1,4 @@
+import { unzipSync, strFromU8 } from "fflate";
 import { usageSummary } from "../../src/token-usage.mjs";
 import { test, expect } from "@playwright/test";
 import fs from "node:fs/promises";
@@ -41,7 +42,8 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#workspace")).toBeVisible();
   await expect(page.locator("#ws-canvas svg")).toBeVisible();
 });
-test.afterEach(async () => {
+test.afterEach(async ({ page }) => {
+  await page.close();
   await app?.close();
   expect(errors).toEqual([]);
   await fs.rm(dir, { recursive: true, force: true });
@@ -524,4 +526,63 @@ test("token meter shows repository and shared totals, unknown usage and live upd
         document.documentElement.clientWidth + 1,
     ),
   ).toBeTruthy();
+});
+
+test("coverage and portable diagnostics expose real ledgers and download an inspectable ZIP", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  await expect(page.locator("#ws-coverage")).toContainText("Analysis coverage");
+  await expect(page.locator("#ws-coverage")).toContainText(
+    "3 / 3 repositories read",
+  );
+  const pending = page.waitForEvent("download");
+  await page
+    .locator("#ws-coverage")
+    .getByRole("button", {
+      name: "Download diagnostic bundle · ZIP",
+      exact: true,
+    })
+    .click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe("synthesis-diagnostics.zip");
+  const files = unzipSync(await fs.readFile(await download.path()));
+  const summary = JSON.parse(strFromU8(files["summary.json"]));
+  const coverage = JSON.parse(strFromU8(files["coverage.json"]));
+  expect(summary.staticOnly).toBe(true);
+  expect(coverage.source.sources).toHaveLength(3);
+  expect(coverage.review.total).toBeGreaterThan(0);
+  expect(strFromU8(files["trace.ndjson"])).toContain("graph.file-completed");
+  expect(
+    Object.values(files)
+      .map((bytes) => strFromU8(bytes))
+      .join(""),
+  ).not.toContain(app.token);
+});
+
+test("pending saves finish before another editor can replace the form", async ({
+  page,
+}) => {
+  await page.route("**/api/system", async (route) => {
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.fulfill({ response });
+  });
+  await tab(page, "Components");
+  await page.getByRole("button", { name: "Add record", exact: true }).click();
+  await field(page, "Name").fill("Saved before navigation");
+  await field(page, "Object type").selectOption("process");
+  await page.getByRole("button", { name: "Save record", exact: true }).click();
+  await expect(page.locator("#workspace")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#workspace")).toHaveAttribute("inert", "");
+  await tab(page, "Flow register");
+  await expect(page.locator("#workspace")).not.toHaveAttribute("aria-busy");
+  await page.getByRole("button", { name: "Add record", exact: true }).click();
+  await field(page, "Operation").fill("Next draft retained");
+  await field(page, "To component or entity").selectOption({
+    label: "Saved before navigation",
+  });
+  await expect(field(page, "Operation")).toHaveValue("Next draft retained");
 });
