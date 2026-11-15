@@ -566,3 +566,71 @@ test("explicit continuation retries only failed validation batches with stricter
   assert.equal(model.aiReview.batches[0].validationRetry, true);
   assert.ok(model.aiReview.batches[0].requestPromptHash);
 });
+
+test("one STRIDE request returns matrix scenarios before any manual actor or boundary declarations", async () => {
+  const { root, model } = await portfolio();
+  try {
+    const { systemModel } = await import("../src/system-model.mjs");
+    let packet;
+    await enrichGraphModel(
+      model,
+      config,
+      new Map(),
+      async (url, options) => {
+        packet = JSON.parse(JSON.parse(options.body).messages[0].content);
+        const r = packet.records[0];
+        return Response.json({
+          stop_reason: "end_turn",
+          usage: { input_tokens: 100, output_tokens: 50 },
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                summary: "One packet reviewed.",
+                threats: [
+                  {
+                    title: "Unauthorized operation",
+                    category: "Elevation of Privilege",
+                    actor: "Untrusted caller",
+                    startingAccess: "Can reach the HTTP handler",
+                    asset: "Protected operations",
+                    scenario:
+                      "If authorization is absent the caller may invoke protected operations.",
+                    prerequisites:
+                      "Reachable endpoint and missing authorization.",
+                    controls: "No enforcement established in this packet.",
+                    mitigation: "Verify operation authorization.",
+                    interfaceIds: [r.id],
+                    evidenceIds: [r.evidence[0].id],
+                  },
+                ],
+                connections: [],
+                questions: [],
+              }),
+            },
+          ],
+        });
+      },
+      { maxBatches: 1 },
+    );
+    const s = systemModel(model);
+    assert.equal(model.aiReview.status, "partial");
+    assert.equal(model.aiReview.coverage.callsThisRun, 1);
+    assert.equal(model.aiReview.stopReason, "request-budget");
+    assert.equal(model.aiReview.coverage.repositories.length, 12);
+    assert.ok(model.aiReview.coverage.pendingBatches > 0);
+    assert.ok(s.actors.length);
+    assert.ok(s.boundaries.some((b) => b.basis === "inference"));
+    assert.ok(
+      s.matrix
+        .filter((r) => r.rowKind === "component")
+        .some((r) => r.cells.some((c) => c.scenarioCount === 1)),
+    );
+    assert.ok(
+      s.matrix.some((r) => r.cells.some((c) => c.state === "not-analyzed")),
+    );
+    assert.ok(packet.systemContext.actors.length);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

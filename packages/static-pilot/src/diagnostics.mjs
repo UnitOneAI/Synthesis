@@ -429,6 +429,28 @@ export async function diagnosticBundle({
     })),
   });
   // Source excerpts and model prose are deliberately excluded; only diagnostic shapes are exported.
+  json(
+    "cwe-source-review.json",
+    model?.cweModelReview
+      ? {
+          ...model.cweModelReview,
+          findings: model.cweModelReview.findings.map((f) => ({
+            id: f.id,
+            cwe: f.cwe,
+            locations: f.locations,
+            status: f.status,
+          })),
+          batches: model.cweModelReview.batches.map(
+            ({ limitations, ...b }) => b,
+          ),
+        }
+      : { status: "not-run" },
+  );
+  json("cwe-review.json", model?.cweReview || { status: "not-run" });
+  json(
+    "connection-discovery.json",
+    model?.connectionDiscovery || { status: "not-run" },
+  );
   json("trace-index.json", {
     files: traces.files,
     omittedFiles: traces.omittedFiles,

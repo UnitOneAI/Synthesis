@@ -36,6 +36,7 @@ test.beforeEach(async ({ page }) => {
     port: 0,
     quiet: true,
     initialManifest: manifest,
+    cweScanner: process.execPath,
   });
   await page.goto(app.url);
   await page
@@ -680,5 +681,94 @@ test("coverage reports grouped unresolved call counts rather than summary record
   );
   await expect(page.locator("#ws-coverage")).toContainText(
     "46 unsupported files",
+  );
+});
+
+test("CWE tab exposes scan failure and downloadable report without hiding the graph", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "5 · CWE code review", exact: true })
+    .click();
+  await expect(page.locator("#cwe")).toBeVisible();
+  await expect(page.locator("#cwe-run")).toBeEnabled();
+  await page.locator("#cwe-run").click();
+  await expect(page.locator("#cwe-status")).toContainText("failed", {
+    timeout: 20000,
+  });
+  const download = page.waitForEvent("download");
+  await page
+    .locator("#cwe")
+    .getByRole("button", { name: "Export JSON", exact: true })
+    .click();
+  expect((await download).suggestedFilename()).toBe("cwe-review.json");
+  await page
+    .getByRole("button", { name: "3 · System model", exact: true })
+    .click();
+  await expect(page.locator("#ws-canvas svg")).toBeVisible();
+});
+
+test("partial STRIDE results default to component scenarios without requiring declared boundaries", async ({
+  page,
+}) => {
+  const { systemModel } = await import("../../src/system-model.mjs");
+  const base = app.url.split("/#")[0];
+  const data = await (
+    await fetch(base + "/api/model", {
+      headers: { "X-Synthesis-Token": app.token },
+    })
+  ).json();
+  const i = data.interfaces[0];
+  data.aiReview = {
+    status: "partial",
+    responseHash: "fixture",
+    coverage: {
+      completedBatches: 1,
+      totalBatches: 12,
+      pendingBatches: 11,
+      failedBatches: 0,
+      reviewedInterfaceIds: [i.id],
+      repositories: data.sources.map((s) => ({
+        repository: s.name,
+        totalInterfaces: data.interfaces.filter((i) => i.repository === s.name)
+          .length,
+        reviewedInterfaces: s.name === i.repository ? 1 : 0,
+        state: s.name === i.repository ? "partial" : "not-reviewed",
+      })),
+    },
+    threats: [
+      {
+        id: "scenario-fixture",
+        title: "Unauthorized operation",
+        category: "Elevation of Privilege",
+        actor: "Untrusted caller",
+        startingAccess: "Can reach the handler",
+        asset: "Protected operation",
+        scenario: "Missing authorization could expose the operation.",
+        prerequisites: "Reachable route and absent authorization",
+        controls: "Not established",
+        mitigation: "Verify operation authorization",
+        interfaceIds: [i.id],
+        evidenceIds: i.evidence,
+      },
+    ],
+    questions: [],
+  };
+  data.systemModel = systemModel(data);
+  await page.route("**/api/model", (route) => route.fulfill({ json: data }));
+  await page.reload();
+  await page
+    .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+    .click();
+  await expect(page.getByLabel("Rows", { exact: true })).toHaveValue(
+    "component",
+  );
+  await expect(page.locator(".ws-matrix")).toContainText("threat scenario");
+  await expect(page.locator(".ws-matrix")).not.toContainText("checklist items");
+  await expect(page.locator("#workspace")).toContainText(
+    "A budget of 1 reviews one evidence packet",
+  );
+  await expect(page.locator("#workspace")).toContainText(
+    "Repository review progress",
   );
 });

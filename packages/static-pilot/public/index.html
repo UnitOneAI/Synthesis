@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/workspace.css" />
     <script src="/app.js" defer></script>
     <script src="/workspace.js" defer></script>
+    <script src="/cwe.js" defer></script>
   </head>
   <body>
     <header>
@@ -39,9 +40,67 @@
         ><button data-tab="workspace">3 · System model</button
         ><button data-tab="review">Connection declarations</button
         ><button data-tab="stride">4 · STRIDE matrix</button
+        ><button data-tab="cwe">5 · CWE code review</button
         ><button data-tab="model">Evidence and details</button>
       </nav>
       <div id="message" role="status" aria-live="polite"></div>
+      <section id="cwe" class="panel" hidden>
+        <h2>CWE code review</h2>
+        <p>
+          Scan the selected local clones with the bundled Semgrep rules.
+          Potential weaknesses require review. No target code is executed. Local
+          scanner tokens: 0.
+        </p>
+        <div class="toolbar">
+          <button id="cwe-run" disabled>Scan selected repositories</button
+          ><button id="cwe-stop" hidden>Cancel CWE scan</button
+          ><button data-export="cwe-json">Export JSON</button
+          ><button data-export="cwe-csv">Export CSV</button
+          ><button data-export="cwe-sarif">Export SARIF</button>
+        </div>
+        <p id="cwe-status" role="status">
+          Build a source graph before scanning.
+        </p>
+        <div id="cwe-coverage"></div>
+        <label
+          >Filter CWE findings
+          <input id="cwe-filter" placeholder="Repository, CWE, file or status"
+        /></label>
+        <div id="cwe-findings"></div>
+        <div id="cwe-detail"></div>
+        <hr />
+        <h3>CWE source review</h3>
+        <p>
+          Run the local scanner first for fast results. Then review source code
+          and graph interactions with the configured model provider. Covers
+          injection, access control, cryptography, unsafe parsing, filesystem,
+          memory safety, concurrency and isolation. Findings and CWE mappings
+          require review.
+        </p>
+        <label
+          ><input type="checkbox" id="cwe-model-consent" /> Send redacted source
+          segments to the configured provider for CWE review</label
+        >
+        <label
+          >Model requests this run
+          <input
+            id="cwe-model-budget"
+            type="number"
+            min="1"
+            max="100"
+            value="12"
+        /></label>
+        <p>
+          One request reviews one source or interaction packet. Continue to
+          review the remaining scope. Completed packets are retained.
+        </p>
+        <button id="cwe-model-run" disabled>
+          Run or continue CWE source review</button
+        ><button id="cwe-model-stop" hidden>Stop CWE source review</button
+        ><button data-export="cwe-model-json">Export CWE source review</button>
+        <p id="cwe-model-status" role="status">No source review has run.</p>
+        <div id="cwe-model-results"></div>
+      </section>
       <section id="workspace" class="panel" hidden>
         <h2>System model</h2>
         <p>Build the source graph first.</p>

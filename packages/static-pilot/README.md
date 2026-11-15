@@ -1,12 +1,12 @@
 # Static multi-repository pilot
 
-Graph-first local source review with optional Claude or Gemini analysis and no target-system access. Add existing clones or import inventory, build the source graph, review the DFD, run bounded STRIDE batches, and export HTML, SVG, Mermaid, CSV and JSON.
+Graph-first local source review with optional Claude or Gemini analysis and no target-system access. Add existing clones or import inventory, build the source graph, review automatically discovered DFD connections, run resumable STRIDE and CWE source-review batches, and export HTML, SVG, Mermaid, CSV and JSON.
 
 **This is a discovery and review pilot, not the completed Synthesis architecture.** Tree-sitter syntax graphs cover C#, C/C++, JavaScript, TypeScript and Python. Security interface collectors remain bounded lexical recognizers. Neither establishes effective authorization, compiler-resolved call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
 
 ## Run tonight
 
-Prerequisites: **a current Node.js 24 release**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, Python, database or application services are needed. Provider-free discovery needs no AI key; model review requires the selected provider key.
+Prerequisites: **a current Node.js 24 release**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, database or target application services are needed. Optional local CWE scanning requires Python 3.12 and Semgrep; model CWE review uses the existing configured provider. Provider-free discovery needs no AI key; model review requires the selected provider key.
 
 From the Synthesis repository:
 
@@ -186,3 +186,7 @@ Review now includes a bundled, pinned adaptation of the existing UnitOne threat-
 See the [implementation boundary](../../docs/design/disk-backed-static-graph.md#06-implementation-boundary), [analysis method](../../docs/design/static-analysis-methodology.md), [test specification](../../docs/testing/disk-graph-and-analysis-quality.md), and [Windows runbook](../../docs/runbooks/windows-static-workspace.md).
 
 Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.
+
+## Connected DFD and CWE source review
+
+Version 0.7.0 adds disk-graph connection discovery, automatic actor/boundary candidates, component-first STRIDE results, local Semgrep scanning and model-assisted CWE source review. See the [architecture and coverage limits](../../docs/design/connected-dfd-cwe-review.md), [Windows instructions](../../docs/runbooks/windows-static-workspace.md#connected-dfd-stride-results-and-cwe-review-070) and [test specification](../../docs/testing/connected-dfd-cwe-review.md). Model request budgets count calls, not repositories.

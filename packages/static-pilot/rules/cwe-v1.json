@@ -1,0 +1,220 @@
+{
+  "rules": [
+    {
+      "id": "synthesis.python-tls-verification",
+      "languages": [
+        "python"
+      ],
+      "severity": "WARNING",
+      "message": "Certificate verification is disabled.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Enable certificate and hostname verification with an approved trust store.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "requests.$METHOD(..., verify=False, ...)"
+        },
+        {
+          "pattern": "httpx.$METHOD(..., verify=False, ...)"
+        },
+        {
+          "pattern": "ssl._create_unverified_context(...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.javascript-tls-verification",
+      "languages": [
+        "javascript",
+        "typescript"
+      ],
+      "severity": "WARNING",
+      "message": "TLS certificate validation is disabled.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Remove rejectUnauthorized: false and configure trusted certificates.",
+        "confidence": "review-required"
+      },
+      "pattern": "{..., rejectUnauthorized: false, ...}"
+    },
+    {
+      "id": "synthesis.csharp-tls-verification",
+      "languages": [
+        "csharp"
+      ],
+      "severity": "WARNING",
+      "message": "Certificate callback accepts every certificate.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Use platform certificate validation; do not return true for every certificate.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "$OBJ.ServerCertificateCustomValidationCallback = (...) => true;"
+        },
+        {
+          "pattern": "$OBJ.ServerCertificateValidationCallback += (...) => true;"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-shell",
+      "languages": [
+        "python"
+      ],
+      "severity": "WARNING",
+      "message": "A shell command is constructed with formatted input.",
+      "metadata": {
+        "cwe": "CWE-78",
+        "remediation": "Pass a fixed executable and separate argument list with shell=False; verify input trust.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "subprocess.$RUN(f\"...\", ..., shell=True, ...)"
+        },
+        {
+          "pattern": "subprocess.$RUN($X + $Y, ..., shell=True, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.javascript-shell",
+      "languages": [
+        "javascript",
+        "typescript"
+      ],
+      "severity": "WARNING",
+      "message": "An interpolated command is passed to a shell.",
+      "metadata": {
+        "cwe": "CWE-78",
+        "remediation": "Use execFile or spawn with a fixed executable and a separate validated argument list.",
+        "confidence": "review-required"
+      },
+      "pattern": "exec(`...${$INPUT}...`, ...)"
+    },
+    {
+      "id": "synthesis.csharp-sql",
+      "languages": [
+        "csharp"
+      ],
+      "severity": "WARNING",
+      "message": "SQL command text contains interpolation or concatenation.",
+      "metadata": {
+        "cwe": "CWE-89",
+        "remediation": "Use parameterized SQL and verify the origin of each input.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "new SqlCommand($\"...\", ...)"
+        },
+        {
+          "pattern": "new SqlCommand($X + $Y, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-sql",
+      "languages": [
+        "python"
+      ],
+      "severity": "WARNING",
+      "message": "SQL execution receives formatted command text.",
+      "metadata": {
+        "cwe": "CWE-89",
+        "remediation": "Use driver parameters and keep SQL structure constant.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "$CURSOR.execute(f\"...\", ...)"
+        },
+        {
+          "pattern": "$CURSOR.execute($QUERY % $ARGS, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-deserialization",
+      "languages": [
+        "python"
+      ],
+      "severity": "WARNING",
+      "message": "Object deserialization requires a trusted input source.",
+      "metadata": {
+        "cwe": "CWE-502",
+        "remediation": "Avoid pickle on untrusted input; use a constrained data format and schema validation.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "pickle.loads(...)"
+        },
+        {
+          "pattern": "pickle.load(...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.csharp-deserialization",
+      "languages": [
+        "csharp"
+      ],
+      "severity": "WARNING",
+      "message": "BinaryFormatter deserialization can instantiate unsafe objects.",
+      "metadata": {
+        "cwe": "CWE-502",
+        "remediation": "Replace BinaryFormatter with constrained data serialization and verify trust boundaries.",
+        "confidence": "review-required"
+      },
+      "pattern": "(BinaryFormatter $FORMATTER).Deserialize(...)"
+    },
+    {
+      "id": "synthesis.python-eval",
+      "languages": [
+        "python"
+      ],
+      "severity": "WARNING",
+      "message": "Request data is passed directly to eval.",
+      "metadata": {
+        "cwe": "CWE-94",
+        "remediation": "Replace evaluation with explicit parsing and a constrained set of operations.",
+        "confidence": "review-required"
+      },
+      "pattern": "eval(request.$SOURCE.get(...), ...)"
+    },
+    {
+      "id": "synthesis.csharp-des",
+      "languages": [
+        "csharp"
+      ],
+      "severity": "WARNING",
+      "message": "DES encryption is obsolete.",
+      "metadata": {
+        "cwe": "CWE-327",
+        "remediation": "Use an approved authenticated encryption scheme appropriate to the protocol.",
+        "confidence": "review-required"
+      },
+      "pattern": "DES.Create(...)"
+    },
+    {
+      "id": "synthesis.c-gets",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "severity": "WARNING",
+      "message": "gets cannot bound the number of bytes read.",
+      "metadata": {
+        "cwe": "CWE-242",
+        "remediation": "Use a bounded input operation and validate its return value.",
+        "confidence": "review-required"
+      },
+      "pattern": "gets(...)"
+    }
+  ]
+}

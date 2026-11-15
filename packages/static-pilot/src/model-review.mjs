@@ -462,7 +462,7 @@ export async function requestReview(
   options = {},
 ) {
   const requestPrompt =
-    SYSTEM_PROMPT +
+    (options.systemPrompt || SYSTEM_PROMPT) +
     (options.validationRetry === true ? VALIDATION_RETRY_PROMPT : "");
   // Direct endpoints are fixed; gateway destination comes only from server configuration.
   // Never follow redirects with credentials.
@@ -501,7 +501,9 @@ export async function requestReview(
     const response = await fetchImpl(url, {
       method: "POST",
       redirect: "error",
-      signal: AbortSignal.timeout(120000),
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(120000)])
+        : AbortSignal.timeout(120000),
       headers: {
         "Content-Type": "application/json",
         ...(gateway
@@ -607,7 +609,7 @@ export async function requestReview(
   const parsed = parseReviewText(text);
   return {
     usage,
-    review: validateReview(parsed, packet),
+    review: (options.validate || validateReview)(parsed, packet),
     responseHash: sha(text),
     requestPromptHash: sha(requestPrompt),
   };

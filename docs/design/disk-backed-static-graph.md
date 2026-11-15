@@ -181,3 +181,7 @@ Do not remove current graph caps merely after adding SQLite. Replace each memory
 The release report must identify implemented phases, tested platforms, measured limits and remaining semantic gaps. Only limits explicitly retired by the 0.6.0 implementation boundary are removed. The remaining gates and constraints must not be described as completed.
 
 Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly; use the separate full source-graph JSON export for larger graphs and retain the workspace and traces.
+
+## 0.7.0 connection and code review extension
+
+The published disk generation now supplies static connection facts to automatic DFD correlation. Source and interaction packets also support model-assisted CWE code review. See [Connected DFD and CWE source review](connected-dfd-cwe-review.md) for components, evidence semantics, limits and persistence behavior.

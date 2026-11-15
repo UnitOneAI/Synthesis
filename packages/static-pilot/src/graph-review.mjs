@@ -559,6 +559,27 @@ export async function enrichGraphModel(
       interfaceIds: [...submitted],
       reviewedInterfaceIds: [...reviewed],
       reviewedInterfaces: reviewed.size,
+      repositories: model.sources.map((source) => {
+        const ids = model.interfaces
+          .filter((i) => i.repository === source.name)
+          .map((i) => i.id);
+        const count = ids.filter((id) => reviewed.has(id)).length;
+        return {
+          repository: source.name,
+          totalInterfaces: ids.length,
+          reviewedInterfaces: count,
+          state:
+            source.status !== "read"
+              ? "unavailable"
+              : !ids.length
+                ? "no-interfaces"
+                : count === ids.length
+                  ? "submitted"
+                  : count
+                    ? "partial"
+                    : "not-reviewed",
+        };
+      }),
       unreviewedInterfaces: model.interfaces.length - reviewed.size,
       totalBatches: plan.batches.length,
       completedBatches: done,
@@ -640,9 +661,9 @@ export async function enrichGraphModel(
       );
       entry.validationRetry = Boolean(
         failed &&
-          /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
-            failed.error || "",
-          ),
+        /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
+          failed.error || "",
+        ),
       );
       attempt = beginAttempt(model, config, batch.packet, {
         batchId: batch.id,
@@ -762,6 +783,13 @@ export async function enrichGraphModel(
         (!plan.batches.length
           ? "No collected interfaces to review"
           : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
+  review.stopReason = terminalFailure
+    ? "provider-failure"
+    : calls >= maxBatches
+      ? "request-budget"
+      : Date.now() > deadline
+        ? "time-budget"
+        : "plan-exhausted";
   await options.trace?.("review.finished", {
     runKey,
     status: review.status,

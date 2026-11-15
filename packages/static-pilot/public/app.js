@@ -149,6 +149,7 @@ async function status() {
   const s = await api("status");
   $("root").textContent = s.sourceRoot;
   window.SynthesisWorkspace?.setStatus(s);
+  window.SynthesisCwe?.setStatus(s);
   if (!inferenceInitialized) {
     inferenceInitialized = true;
     providerAvailable = Boolean(s.inference);
@@ -178,7 +179,7 @@ async function status() {
     clearInterval(polling);
     polling = null;
     await refresh();
-    tab("workspace");
+    tab(s.mode?.startsWith("cwe") ? "cwe" : "workspace");
     message(s.message);
   }
   return s;
@@ -249,6 +250,42 @@ function renderModel() {
     update: (value) => {
       model = value;
       renderModel();
+    },
+  });
+  window.SynthesisCwe?.render(model, {
+    api,
+    download,
+    notify: message,
+    update: (value) => {
+      model = value;
+      renderModel();
+    },
+    start: async () => {
+      await api("cwe", { modelRevision: model.modelRevision });
+      clearInterval(polling);
+      polling = setInterval(
+        () => status().catch((e) => message(e.message, true)),
+        750,
+      );
+      await status();
+    },
+    startModel: async (budget, includeSourceCode) => {
+      await api("cwe/model", {
+        modelRevision: model.modelRevision,
+        budget,
+        includeSourceCode,
+      });
+      clearInterval(polling);
+      polling = setInterval(
+        () => status().catch((e) => message(e.message, true)),
+        750,
+      );
+      await status();
+    },
+    stop: async () => {
+      await api("cancel", {});
+      await refresh();
+      await status();
     },
   });
   renderGraph();
@@ -667,6 +704,10 @@ async function download(format, preview = false) {
     stride: "stride-matrix.csv",
     json: "model.json",
     usage: "token-usage.csv",
+    "cwe-model-json": "cwe-source-review.json",
+    "cwe-json": "cwe-review.json",
+    "cwe-csv": "cwe-findings.csv",
+    "cwe-sarif": "cwe-findings.sarif",
     diagnostics: "synthesis-diagnostics.zip",
   }[format];
   a.click();
