@@ -356,7 +356,7 @@
       review = c?.review;
     const source = c?.source?.sources || m.sources || [];
     const graph = m.sourceGraph?.coverage || {};
-    return `<h3>Analysis coverage</h3><p>${source.filter((s) => s.status === "read").length} / ${source.length} repositories read · ${source.reduce((n, s) => n + (s.coverage?.inspected || 0), 0)} files inspected · ${graph.parsed || 0} files parsed · ${(graph.failed || 0) + (graph.syntaxErrors || 0) + (graph.limited || 0)} parser failures or limits.</p>${
+    return `<h3>Analysis coverage</h3><p>${source.filter((s) => s.status === "read").length} / ${source.length} repositories read · ${source.reduce((n, s) => n + (s.coverage?.inspected || 0), 0)} files inspected · ${graph.parsed || 0} files parsed · ${(graph.failed || 0) + (graph.syntaxErrors || 0) + (graph.limited || 0)} syntax errors, parser failures or limits.</p>${
       review
         ? `<p><strong>${review.reviewed} / ${review.total} review obligations submitted successfully</strong> · ${review.pending} pending · ${review.blocked} blocked</p><div class="table-wrap"><table><thead><tr><th>Review subject</th><th>Reviewed</th><th>Pending</th><th>Blocked</th></tr></thead><tbody>${Object.entries(
             review.byKind,

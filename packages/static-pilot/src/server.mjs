@@ -169,6 +169,8 @@ export async function serve({
         sourceRevision: model?.modelRevision,
       });
     } catch (error) {
+      if (mode !== "review" && model && scanPriorManifest)
+        manifest = scanPriorManifest;
       job = { status: "failed", message: "Trace output could not be written" };
       throw error;
     }
@@ -188,9 +190,9 @@ export async function serve({
       traces
         .record("job.failed", { jobId, mode, failure: failureDetail(message) })
         .catch(() => {});
-      checkpoint();
       if (mode !== "review" && model && scanPriorManifest)
         manifest = scanPriorManifest;
+      checkpoint();
       job = { status: model ? "ready" : "failed", message };
     };
     const activeTimer = setTimeout(
