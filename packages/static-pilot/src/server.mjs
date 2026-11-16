@@ -128,19 +128,37 @@ export async function serve({
         query.terminate();
         reject(Error("Graph query time budget reached"));
       }, 120000);
-      let completed = false;
+      let response;
       query.once("message", (message) => {
-        completed = true;
-        clearTimeout(deadline);
-        message.error ? reject(Error(message.error)) : resolve(message.result);
+        response = message;
       });
       query.once("error", reject);
-      query.once("exit", () => {
+      query.once("exit", (code) => {
         clearTimeout(deadline);
         queryWorkers.delete(query);
-        if (!completed) reject(Error("Graph query interrupted"));
+        // Release the worker slot before another refresh can start a query.
+        if (!response || code !== 0) reject(Error("Graph query interrupted"));
+        else if (response.error) reject(Error(response.error));
+        else resolve(response.result);
       });
     });
+  const pendingPlans = new Map();
+  const queryPlan = () => {
+    const key = sha(
+      JSON.stringify([
+        model.modelRevision,
+        model.sourceGraph.generation,
+        model.architecture,
+      ]),
+    );
+    if (!pendingPlans.has(key)) {
+      const pending = queryGraph({ operation: "plan", model }).finally(() =>
+        pendingPlans.delete(key),
+      );
+      pendingPlans.set(key, pending);
+    }
+    return pendingPlans.get(key);
+  };
   let traces;
   try {
     traces = await traceStore({
@@ -562,7 +580,7 @@ export async function serve({
       if (req.method === "GET" && url.pathname === "/api/review-plan") {
         if (!model) return send(409, { error: "Build the source graph first" });
         if (model.sourceGraph?.storage === "sqlite")
-          return send(200, await queryGraph({ operation: "plan", model }));
+          return send(200, await queryPlan());
         const plan = reviewPlan(model);
         return send(200, {
           modelRevision: model.modelRevision,
@@ -857,6 +875,8 @@ export async function serve({
             focus: url.searchParams.get("focus") || "",
             actor: url.searchParams.get("actor") || "",
             threat: url.searchParams.get("threat") || "",
+            showUnresolved: url.searchParams.get("showUnresolved") === "true",
+            showSupporting: url.searchParams.get("showSupporting") === "true",
           }),
           "image/svg+xml",
         );
@@ -1004,10 +1024,19 @@ export async function serve({
           );
         if (format === "html")
           return send(200, systemReport(model), "text/html");
+        const diagramOptions = {
+          level: url.searchParams.get("level") || "system",
+          lens: url.searchParams.get("lens") || "identity",
+          focus: url.searchParams.get("focus") || "",
+          actor: url.searchParams.get("actor") || "",
+          threat: url.searchParams.get("threat") || "",
+          showUnresolved: url.searchParams.get("showUnresolved") === "true",
+          showSupporting: url.searchParams.get("showSupporting") === "true",
+        };
         if (format === "svg")
-          return send(200, systemSvg(model), "image/svg+xml");
+          return send(200, systemSvg(model, diagramOptions), "image/svg+xml");
         if (format === "mermaid")
-          return send(200, systemMermaid(model), "text/plain");
+          return send(200, systemMermaid(model, diagramOptions), "text/plain");
         if (format === "graph-mermaid")
           return withGraph(() =>
             send(200, sourceGraphMermaid(model), "text/plain"),

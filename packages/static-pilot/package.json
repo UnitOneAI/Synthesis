@@ -1,6 +1,6 @@
 {
   "name": "@synthesis/static-pilot",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "Local, evidence-led multi-repository static threat modeling pilot",
@@ -9,8 +9,8 @@
   },
   "scripts": {
     "start": "node src/cli.mjs serve",
-    "test": "node --test test/pilot.test.mjs test/model-review.test.mjs test/source-graph.test.mjs test/system-workspace.test.mjs test/token-usage.test.mjs test/diagnostics.test.mjs test/graph-store.test.mjs test/analysis-guidance.test.mjs test/connection-discovery.test.mjs test/cwe-scan.test.mjs test/cwe-model.test.mjs",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/server.mjs && node --check src/model-review.mjs && node --check src/source-graph.mjs && node --check src/graph-review.mjs && node --check src/graph-exports.mjs && node --check public/app.js && node --check src/system-model.mjs && node --check src/system-exports.mjs && node --check src/workspace-store.mjs && node --check public/workspace.js && node --check src/token-usage.mjs && node --check src/coverage-plan.mjs && node --check src/diagnostics.mjs && node --check src/graph-store.mjs && node --check src/graph-stream.mjs && node --check src/graph-plan-store.mjs && node --check src/graph-query-worker.mjs && node --check src/analysis-guidance.mjs && node --check src/connection-discovery.mjs && node --check src/cwe-scan.mjs && node --check public/cwe.js && node --check src/cwe-model.mjs",
+    "test": "node --test test/pilot.test.mjs test/model-review.test.mjs test/source-graph.test.mjs test/system-workspace.test.mjs test/token-usage.test.mjs test/diagnostics.test.mjs test/graph-store.test.mjs test/analysis-guidance.test.mjs test/connection-discovery.test.mjs test/cwe-scan.test.mjs test/cwe-model.test.mjs test/architecture-dfd.test.mjs",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/server.mjs && node --check src/model-review.mjs && node --check src/source-graph.mjs && node --check src/graph-review.mjs && node --check src/graph-exports.mjs && node --check public/app.js && node --check src/system-model.mjs && node --check src/system-exports.mjs && node --check src/workspace-store.mjs && node --check public/workspace.js && node --check src/token-usage.mjs && node --check src/coverage-plan.mjs && node --check src/diagnostics.mjs && node --check src/graph-store.mjs && node --check src/graph-stream.mjs && node --check src/graph-plan-store.mjs && node --check src/graph-query-worker.mjs && node --check src/analysis-guidance.mjs && node --check src/connection-discovery.mjs && node --check src/cwe-scan.mjs && node --check public/cwe.js && node --check src/cwe-model.mjs && node --check src/architecture.mjs && node --check src/diagram-model.mjs && node --check src/static-endpoints.mjs",
     "test:ui": "playwright test"
   },
   "dependencies": {

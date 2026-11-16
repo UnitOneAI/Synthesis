@@ -1,3 +1,4 @@
+import { architectureComponents, sourceScope } from "./architecture.mjs";
 import { assessRisk, RISK_FACTORS } from "./analysis-guidance.mjs";
 import { id, sha } from "./sources.mjs";
 import { redact } from "./model-review.mjs";
@@ -41,7 +42,7 @@ const claim = (basis = "source observation") => ({
   reviewState: "pending",
 });
 
-// A projection of the source snapshot and explicit reviewer annotations. No deployment inference.
+// Evidence-backed architecture candidates and reviewer annotations; no runtime claims.
 export function systemModel(model, { matrix = true } = {}) {
   const w = model.architecture || empty();
   const assignedOwners = new Map();
@@ -51,6 +52,9 @@ export function systemModel(model, { matrix = true } = {}) {
     ...i,
     component: assignedOwners.get(i.id) || i.component,
   }));
+  const classification = new Map(
+    architectureComponents(model).map((c) => [c.id, c]),
+  );
   const components = model.components.map((c) => ({
     id: c.id,
     name: c.name,
@@ -64,8 +68,13 @@ export function systemModel(model, { matrix = true } = {}) {
         .filter((i) => i.component === c.id)
         .flatMap((i) => i.evidence),
     ),
-    ...claim("source grouping"),
+    ...claim(
+      classification.get(c.id)?.type === "source-group"
+        ? "source grouping"
+        : "static architecture candidate",
+    ),
     description: c.basis,
+    ...classification.get(c.id),
   }));
   const entities = [],
     assets = [],
@@ -75,7 +84,7 @@ export function systemModel(model, { matrix = true } = {}) {
     actors = [],
     threats = [];
   const securityControls = sourceInterfaces
-    .filter((i) => i.direction === "control")
+    .filter((i) => i.direction === "control" && i.protocol !== "architecture")
     .map((i) => ({
       id: id("control", i.id),
       name: i.operation,
@@ -95,7 +104,10 @@ export function systemModel(model, { matrix = true } = {}) {
   const connectedFlows = [...model.flows, ...discovered];
   const declared = new Set(connectedFlows.flatMap((f) => [f.from, f.to]));
   for (const i of sourceInterfaces.filter(
-    (i) => i.direction !== "control" && !declared.has(i.id),
+    (i) =>
+      i.direction !== "control" &&
+      i.connection?.kind !== "http-config" &&
+      !declared.has(i.id),
   )) {
     const key = [i.component, i.protocol, i.direction].join(":");
     if (!grouped.has(key)) grouped.set(key, []);
@@ -145,6 +157,7 @@ export function systemModel(model, { matrix = true } = {}) {
         model.interfaces.find((i) => i.id === f.from)?.protocol ||
         "Unknown",
       data: f.data,
+      transport: f.transport || "unknown",
       controls: f.controls,
       description: f.reason,
       interfaceIds: [f.from, f.to].filter(Boolean),
@@ -173,7 +186,10 @@ export function systemModel(model, { matrix = true } = {}) {
     )
       continue;
     const controls = sourceInterfaces.filter(
-      (i) => i.component === f.target && i.direction === "control",
+      (i) =>
+        i.component === f.target &&
+        i.direction === "control" &&
+        i.protocol !== "architecture",
     );
 
     boundaries.push({
@@ -192,6 +208,28 @@ export function systemModel(model, { matrix = true } = {}) {
       ]),
       ...claim("inference"),
     });
+  }
+  for (const f of flows.filter((f) => f.basis !== "unresolved")) {
+    const declarations = sourceInterfaces.filter(
+      (i) =>
+        i.component === f.target && i.connection?.role === "execution-identity",
+    );
+    if (declarations.length)
+      boundaries.push({
+        id: id("execution-boundary", f.id),
+        name: "Service execution identity boundary candidate",
+        dimension: "execution",
+        before: "Calling component authority",
+        after: "Configured service execution identity (unverified)",
+        enforcement:
+          "Source declares a service execution identity. Runtime account, credential delegation and effective permissions require review.",
+        flowIds: [f.id],
+        evidenceIds: uniq([
+          ...f.evidenceIds,
+          ...declarations.flatMap((i) => i.evidence),
+        ]),
+        ...claim("inference"),
+      });
   }
   const actorEntries = new Map();
   for (const i of model.interfaces) {
@@ -358,6 +396,15 @@ export function systemModel(model, { matrix = true } = {}) {
   result.flows.forEach((f) => {
     if (!nodes.has(f.source) || !nodes.has(f.target)) f.reviewState = "stale";
   });
+  const sourceEvidence = new Map(model.evidence.map((e) => [e.id, e]));
+  const sourceInterfaceMap = new Map(model.interfaces.map((i) => [i.id, i]));
+  for (const f of result.flows) {
+    const first = sourceInterfaceMap.get(f.interfaceIds?.[0]);
+    f.scope =
+      f.basis === "reviewer declaration"
+        ? "production-candidate"
+        : sourceScope(sourceEvidence.get(first?.evidence?.[0])?.path);
+  }
   for (const f of result.flows)
     f.boundaryIds = result.boundaries
       .filter((b) => b.flowIds.includes(f.id))
@@ -413,6 +460,18 @@ export function systemModel(model, { matrix = true } = {}) {
       }
     }
   result.coverage = {
+    architecture: {
+      candidateProcesses: result.components.filter(
+        (c) => c.type !== "source-group",
+      ).length,
+      sourceGroups: result.components.filter((c) => c.type === "source-group")
+        .length,
+      nonProductionGroups: result.components.filter(
+        (c) => c.scope && c.scope !== "production-candidate",
+      ).length,
+      hostAssociations: result.components.filter((c) => c.hostCandidateId)
+        .length,
+    },
     repositories: model.sources.length,
     unavailable: model.sources
       .filter((s) => s.status === "unavailable")

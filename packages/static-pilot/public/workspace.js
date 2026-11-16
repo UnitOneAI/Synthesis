@@ -36,7 +36,12 @@
     dispositionFilter = "",
     page = 0,
     saving = false,
-    diagramSequence = 0;
+    diagramSequence = 0,
+    showUnresolved = false,
+    showSupporting = false,
+    bundleIds = [],
+    diagramZoom = 0,
+    gapQuery = "";
   const root = document.getElementById("workspace");
   const kinds = [
     "components",
@@ -249,13 +254,30 @@
       const nodes = [...s.components, ...s.entities];
       body.innerHTML = `<div class="toolbar"><label>View<select aria-label="View" id="ws-level">${[
         ["context", "Context"],
-        ["system", "Overall system"],
+        ["system", "Service DFD"],
         ["focus", "Component detail"],
       ]
         .map(([k, n]) => option(k, n, k === level))
         .join(
           "",
-        )}</select></label><label>Trust lens<select aria-label="Trust lens" id="ws-lens">${["identity", "privilege", "network", "execution", "data-ownership", "third-party"].map((k) => option(k, k, k === lens)).join("")}</select></label><label>Component focus<select aria-label="Component focus" id="ws-focus"><option value="">Choose a component</option>${nodes.map((n) => option(n.id, n.name, n.id === focus)).join("")}</select></label><label>Actor path<select aria-label="Actor path" id="ws-actor"><option value="">No actor overlay</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">${actor ? "Conditional path under the selected access assumptions. Connectivity does not establish exploitability." : "Select a component, flow or domain to inspect its evidence."} Trust zones appear only after a domain declaration. Repository boundaries do not imply trust boundaries.</p><p id="ws-connection-status" role="status">${s.coverage.discoveredFlows ? "Matched connections are shown with their evidence. Dashed unresolved peers remain separate." : "No connections between identified services or resources were matched. Dashed links show interfaces with unknown peers; they do not prove inter-repository connections. Rebuild after updating the extractor, then use Export errors to inspect connection coverage."}</p>${model.connectionDiscovery?.coverage ? `<p class="hint">HTTP calls with matchable destinations: ${model.connectionDiscovery.coverage.httpClients || 0} / ${model.connectionDiscovery.coverage.httpOutboundCandidates ?? "unknown"}. Matchable routes: ${model.connectionDiscovery.coverage.httpServers ?? "unknown"} / ${model.connectionDiscovery.coverage.httpInboundCandidates ?? "unknown"}.</p>` : ""}<div id="ws-canvas" class="ws-canvas"><p>Loading system diagram…</p></div><div class="toolbar"><button data-new="flows">Declare flow</button><button data-new="boundaries">Add trust boundary</button><button data-new="domains">Add trust domain</button><button data-new="actors">Add actor profile</button></div><p class="hint">The overview shows up to 80 objects. Use component focus and the full registers for larger models; nothing is removed from the export.</p>`;
+        )}</select></label><label>Trust lens<select aria-label="Trust lens" id="ws-lens">${["identity", "privilege", "network", "execution", "data-ownership", "third-party"].map((k) => option(k, k, k === lens)).join("")}</select></label><label>Component focus<select aria-label="Component focus" id="ws-focus"><option value="">Choose a component</option>${nodes.map((n) => option(n.id, n.name, n.id === focus)).join("")}</select></label><label>Actor path<select aria-label="Actor path" id="ws-actor"><option value="">No actor overlay</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">${actor ? "Conditional path under the selected access assumptions. Connectivity does not establish exploitability." : "Select a component, flow or domain to inspect its evidence."} Trust zones appear only after a domain declaration. Repository boundaries do not imply trust boundaries.</p><p id="ws-connection-status" role="status">${s.coverage.discoveredFlows ? "Matched connections are grouped by direction, protocol and security context. Select a connector to inspect its member flows." : "Incomplete DFD: no service or resource connections were matched. Inspect unresolved coverage below. Rebuild the source graph after updating to collect the new endpoint facts."}</p>${model.connectionDiscovery?.coverage ? `<p class="hint">HTTP calls with matchable destinations: ${model.connectionDiscovery.coverage.httpClients || 0} / ${model.connectionDiscovery.coverage.httpOutboundCandidates ?? "unknown"}. Matchable routes: ${model.connectionDiscovery.coverage.httpServers ?? "unknown"} / ${model.connectionDiscovery.coverage.httpInboundCandidates ?? "unknown"}.</p>` : ""}<div class="toolbar dfd-tools"><button id="ws-zoom-out" aria-label="Zoom out">−</button><button id="ws-fit">Fit diagram</button><button id="ws-zoom-in" aria-label="Zoom in">+</button><label><input id="ws-show-unresolved" type="checkbox" ${showUnresolved ? "checked" : ""}>Show unresolved peers</label><label><input id="ws-show-supporting" type="checkbox" ${showSupporting ? "checked" : ""}>Include supporting source groups</label><button data-dfd-export="svg">Export this view · SVG</button><button data-dfd-export="mermaid">Export this view · Mermaid</button></div><div id="ws-canvas" class="ws-canvas" tabindex="0" aria-label="Diagram canvas; scroll to pan"><p>Loading system diagram…</p></div>${connectionCoverageHtml()}${
+        actor
+          ? `<section><h3>Actor-related threats</h3>${
+              s.threats
+                .filter(
+                  (t) =>
+                    t.origin !== "review checklist" &&
+                    t.actorIds.includes(actor),
+                )
+                .map(
+                  (t) =>
+                    `<button data-select="${e(t.id)}">${e(t.name)}</button>`,
+                )
+                .join("") ||
+              "<p>No returned threat scenarios linked to this actor.</p>"
+            }</section>`
+          : ""
+      }<div class="toolbar"><button data-new="flows">Declare flow</button><button data-new="boundaries">Add trust boundary</button><button data-new="domains">Add trust domain</button><button data-new="actors">Add actor profile</button></div><p class="hint">Scroll the canvas to pan; use zoom for labels or Fit diagram for the full view. The canvas shows up to 80 objects and 240 grouped connections. Counts disclose omissions. View exports match these filters; the complete model and registers retain all source evidence and relationships.</p>`;
       loadDiagram();
       return;
     }
@@ -331,6 +353,56 @@
       "<p>No records. Add an evidence-supported declaration or an explicit assumption.</p>"
     }</div><div class="toolbar"><button id="ws-prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="ws-next" ${(page + 1) * 50 >= filtered.length ? "disabled" : ""}>Next</button></div>`;
   }
+  function connectionCoverageHtml() {
+    const gaps = model.connectionDiscovery?.gaps || [];
+    const byInterface = new Map(model.interfaces.map((i) => [i.id, i]));
+    const byEvidence = new Map(model.evidence.map((v) => [v.id, v]));
+    const rows = gaps.map((g) => {
+      const i = byInterface.get(g.interfaceId),
+        ev = byEvidence.get(i?.evidence?.[0]);
+      return {
+        ...g,
+        item: i,
+        location: ev ? `${ev.repository}/${ev.path}:${ev.line}` : g.interfaceId,
+      };
+    });
+    const filtered = rows.filter((g) =>
+      `${g.location} ${g.reason}`
+        .toLowerCase()
+        .includes(gapQuery.toLowerCase()),
+    );
+    const counts = s.coverage.architecture || {};
+    return `<details id="ws-unresolved"><summary>Connection coverage · ${gaps.length} resolution gaps · ${s.coverage.unresolvedFlows} unresolved relationships</summary><p>${counts.candidateProcesses || 0} candidate processes/resources · ${counts.sourceGroups || 0} source groups · ${counts.nonProductionGroups || 0} test/generated groups · ${counts.hostAssociations || 0} candidate host associations. These labels do not prove deployment.</p><label>Filter unresolved locations<input id="ws-gap-search" type="search" value="${e(gapQuery)}" placeholder="Repository, file or reason"></label><p>${filtered.length} matching gaps; first 100 shown. Export errors provides a bounded diagnostic sample; complete model JSON retains all gaps.</p><div class="table-wrap"><table><thead><tr><th>Source location</th><th>Unresolved reason</th><th>Component</th></tr></thead><tbody>${filtered
+      .slice(0, 100)
+      .map(
+        (g) =>
+          `<tr><td>${e(g.location)}</td><td>${e(g.reason)}</td><td>${g.item ? `<button data-select="${e(g.item.component)}">Inspect component</button>` : "Unknown"}</td></tr>`,
+      )
+      .join(
+        "",
+      )}</tbody></table></div><p>Unknown peers remain in the flow register. Source files and test code remain in scan coverage even when excluded from this canvas.</p></details>`;
+  }
+  function applyZoom() {
+    const canvas = root.querySelector("#ws-canvas"),
+      svg = canvas?.querySelector("svg");
+    if (!svg) return;
+    svg.style.width = diagramZoom
+      ? `${diagramZoom * 100}%`
+      : `max(100%, ${svg.viewBox.baseVal.width * 0.75}px)`;
+    svg.style.minWidth = "0";
+    svg.style.height = "auto";
+  }
+  function diagramOptions() {
+    return {
+      level,
+      lens,
+      focus,
+      actor,
+      threat: selected,
+      showUnresolved: String(showUnresolved),
+      showSupporting: String(showSupporting),
+    };
+  }
   async function loadDiagram() {
     const seq = ++diagramSequence;
     try {
@@ -340,6 +412,8 @@
         focus,
         actor,
         threat: selected,
+        showUnresolved: String(showUnresolved),
+        showSupporting: String(showSupporting),
       });
       const response = await fetch("/api/system-diagram?" + q, {
         headers: { "X-Synthesis-Token": window.synthesisAccessToken },
@@ -350,8 +424,10 @@
         seq === diagramSequence &&
         view === "system" &&
         root.querySelector("#ws-canvas")
-      )
+      ) {
         root.querySelector("#ws-canvas").innerHTML = svg;
+        applyZoom();
+      }
     } catch (error) {
       notify(error.message, true);
     }
@@ -404,7 +480,18 @@
         "<h3>Review context</h3><p>Select a diagram object or register entry to inspect its access assumptions, controls and evidence.</p><p>Legitimate external entities and threat-actor profiles are separate records.</p>";
       return;
     }
-    const visibleThreatIds = (r.threatIds || []).filter(
+    const relatedIds =
+      r.threatIds ||
+      s.threats
+        .filter(
+          (t) =>
+            t.origin !== "review checklist" &&
+            (t.flowIds?.some((id) => id === r.id || bundleIds.includes(id)) ||
+              t.boundaryIds?.includes(r.id) ||
+              t.interfaceIds?.some((id) => r.interfaceIds?.includes(id))),
+        )
+        .map((t) => t.id);
+    const visibleThreatIds = relatedIds.filter(
       (id) => !actor || threatIndex.get(id)?.actorIds.includes(actor),
     );
     const linked = visibleThreatIds
@@ -415,12 +502,32 @@
     const linkedButton = (t) =>
       `<button class="ws-linked-record" data-select="${e(t.id)}"><strong>${e(t.name)}</strong><small>${e((refs(t.evidenceIds)[0] || t.id).split(" · ")[0])}</small></button>`;
     const linkedSection =
-      r.kind === "cell"
+      r.kind === "cell" || linked.length > 0
         ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
         : "";
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
-    out.innerHTML = `<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Attack steps", r.analysis?.attackSteps?.join(" → "))}${field("Conditional impact", r.analysis?.impact)}${field("Analysis assumptions", r.analysis?.assumptions?.join("; "))}${field("Framework mappings", r.analysis?.mappings?.map((m) => `${m.framework} ${m.id}: ${m.name} — ${m.rationale} (proposed)`).join("; "))}${field("Analysis quality", r.analysisQuality?.gaps?.join("; ") || r.analysisQuality?.semantics)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
+    out.innerHTML = `${
+      bundleIds.length > 1
+        ? `<section><h3>Grouped connection · ${bundleIds.length} flows</h3><p>Each member retains its interfaces, source evidence and review decision.</p><div class="ws-bundle">${bundleIds
+            .map((id) => s.flows.find((f) => f.id === id))
+            .filter(Boolean)
+            .map(
+              (f) =>
+                `<button data-bundle-member="${e(f.id)}">${e(f.name)}</button>`,
+            )
+            .join("")}</div></section>`
+        : ""
+    }<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Architecture classification", r.classification)}${field("Source scope", r.scope)}${field("Candidate host", r.hostCandidateId ? names([r.hostCandidateId]) : "")}${
+      s.components.some((c) => c.hostCandidateId === r.id)
+        ? `<section><h4>Associated source groups</h4><p>Unique project-reference ownership; deployment requires review.</p>${s.components
+            .filter((c) => c.hostCandidateId === r.id)
+            .map(
+              (c) => `<button data-select="${e(c.id)}">${e(c.name)}</button>`,
+            )
+            .join("")}</section>`
+        : ""
+    }${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Transport", r.transport ? `${r.transport} in source URL; enforcement requires review` : "")}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Attack steps", r.analysis?.attackSteps?.join(" → "))}${field("Conditional impact", r.analysis?.impact)}${field("Analysis assumptions", r.analysis?.assumptions?.join("; "))}${field("Framework mappings", r.analysis?.mappings?.map((m) => `${m.framework} ${m.id}: ${m.name} — ${m.rationale} (proposed)`).join("; "))}${field("Analysis quality", r.analysisQuality?.gaps?.join("; ") || r.analysisQuality?.semantics)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
       refs(r.evidenceIds)
         .map((v) => `<p class="evidence">${e(v)}</p>`)
         .join("") ||
@@ -556,7 +663,32 @@
   root.addEventListener("click", async (event) => {
     const b = event.target.closest("button,[data-select]");
     if (!b) return;
-    if (b.dataset.view) {
+    if (b.dataset.dfdExport) {
+      download(b.dataset.dfdExport, false, diagramOptions()).catch((error) =>
+        notify(error.message, true),
+      );
+    } else if (["ws-fit", "ws-zoom-in", "ws-zoom-out"].includes(b.id)) {
+      const canvas = root.querySelector("#ws-canvas"),
+        svg = canvas?.querySelector("svg");
+      const current =
+        diagramZoom ||
+        Math.max(
+          1,
+          ((svg?.viewBox.baseVal.width || 950) * 0.75) /
+            (canvas?.clientWidth || 900),
+        );
+      diagramZoom =
+        b.id === "ws-fit"
+          ? 1
+          : Math.min(
+              12,
+              Math.max(0.5, current * (b.id === "ws-zoom-in" ? 1.25 : 0.8)),
+            );
+      applyZoom();
+    } else if (b.dataset.bundleMember) {
+      selected = b.dataset.bundleMember;
+      renderInspector();
+    } else if (b.dataset.view) {
       view = b.dataset.view;
       query = "";
       dispositionFilter = "";
@@ -564,6 +696,7 @@
       render();
     } else if (b.dataset.select) {
       selected = b.dataset.select;
+      bundleIds = (b.dataset.flowIds || "").split(" ").filter(Boolean);
       renderInspector();
     } else if (b.dataset.new) editor(b.dataset.new);
     else if (b.dataset.edit) {
@@ -620,7 +753,7 @@
     } else if (b.id === "ws-export") {
       const panel = root.querySelector("#ws-export-panel");
       panel.hidden = !panel.hidden;
-      panel.innerHTML = `<h3>Full review package</h3><p>Exports contain the complete selected scope and revision, regardless of current filters. Open the HTML report and choose Print → Save as PDF for a printable copy.</p><div class="toolbar">${[
+      panel.innerHTML = `<h3>Full review package</h3><p>Registers and model exports contain the complete selected scope and revision. These diagram exports use the default service view; use Export this view on the canvas to preserve current filters. Open the HTML report and choose Print → Save as PDF for a printable copy.</p><div class="toolbar">${[
         ["html", "Complete HTML report"],
         ["svg", "System DFD · SVG"],
         ["mermaid", "System DFD · Mermaid"],
@@ -650,11 +783,23 @@
       event.target.matches("[data-select]:not(button)")
     ) {
       event.preventDefault();
+      bundleIds = (event.target.dataset.flowIds || "")
+        .split(" ")
+        .filter(Boolean);
       selected = event.target.dataset.select;
       renderInspector();
     }
   });
   root.addEventListener("input", (event) => {
+    if (event.target.id === "ws-gap-search") {
+      gapQuery = event.target.value;
+      const pos = event.target.selectionStart;
+      root.querySelector("#ws-unresolved").outerHTML = connectionCoverageHtml();
+      root.querySelector("#ws-unresolved").open = true;
+      const input = root.querySelector("#ws-gap-search");
+      input.focus();
+      input.setSelectionRange(pos, pos);
+    }
     if (event.target.id === "ws-search") {
       query = event.target.value;
       page = 0;
@@ -667,10 +812,13 @@
   });
   root.addEventListener("change", (event) => {
     const id = event.target.id;
+    if (id === "ws-gap-search" || id === "ws-search") return;
     if (id === "ws-request-budget") {
       requestBudget = Number(event.target.value);
       return;
     }
+    if (id === "ws-show-unresolved") showUnresolved = event.target.checked;
+    if (id === "ws-show-supporting") showSupporting = event.target.checked;
     if (id === "ws-level") level = event.target.value;
     if (id === "ws-lens") lens = event.target.value;
     if (id === "ws-focus") {
