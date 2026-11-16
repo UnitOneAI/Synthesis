@@ -1,6 +1,6 @@
 # Architecture DFD implementation plan
 
-Status: implemented on `codex/architecture-dfd`; release candidate static-pilot 0.8.0. CI and merge verification pending.
+Status: implemented in static-pilot 0.8.0. Release verification is tracked in the pull request.
 
 ## Problem and outcome
 
@@ -40,4 +40,4 @@ Local verification on 16 November 2026:
 - Read-only open-autofix validation: 503 files inspected, 228 route-match candidates, 67 unresolved interfaces. The default service DFD shows two candidate applications and one grouped connection representing 92 production-candidate calls. 136 test-related flows and five unresolved relationship groups remain outside the default canvas and available in filters/registers. No target code or model calls ran.
 - No browser errors in the real-repository validation. SVG, Mermaid and compact error exports succeeded. Customer source, screenshots and validation artifacts are not included in the public repository.
 
-JCI-specific connection coverage cannot be certified without rebuilding against the customer clones. The resolver is deliberately bounded: arbitrary cross-file symbols, inheritance, DI, generated clients, interpolated URLs and non-default broker bindings remain gaps. Existing narrow JavaScript wrapper and literal queue adapters are retained, not replaced by a general interprocedural resolver. Trust candidates do not establish effective authority or deployment zones.
+Customer-specific connection coverage cannot be certified without rebuilding against the customer clones. The resolver is deliberately bounded: arbitrary cross-file symbols, inheritance, DI, generated clients, interpolated URLs and non-default broker bindings remain gaps. Existing narrow JavaScript wrapper and literal queue adapters are retained, not replaced by a general interprocedural resolver. Trust candidates do not establish effective authority or deployment zones.
