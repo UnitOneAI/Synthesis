@@ -29,3 +29,5 @@ Set `SYNTHESIS_TEST_SEMGREP` to an already installed scanner to exercise the rea
 The UnitOne validation uses a read-only open-autofix clone and a separate SQLite graph directory. Record inspected file count, discovered/unresolved interface counts, represented/filtered flows and grouped diagram connections. This validates the mechanism against a real codebase; it does not establish coverage of a customer's unavailable repositories.
 
 Transport regression: calls with HTTP and HTTPS source URLs must form separate connections even when source, target and route match. SVG, Mermaid and the inspector retain the transport distinction; a source URL does not establish TLS validation or runtime enforcement.
+
+Concurrency regression: eight simultaneous requests for the same disk-backed review plan must all succeed with the same revision and obligations. Pending identical plans share one query; worker slots are released on exit before completion is reported. The start/cancel browser flow must not produce resource errors during overlapping refreshes.

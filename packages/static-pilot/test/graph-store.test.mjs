@@ -238,6 +238,23 @@ diskTest(
     assert.equal(graph.nodes.length, model.sourceGraph.counts.nodes);
     const plan = await (await call("/api/review-plan")).json();
     assert.ok(plan.obligations > 0);
+    const concurrentPlans = await Promise.all(
+      Array.from({ length: 8 }, () => call("/api/review-plan")),
+    );
+    assert.deepEqual(
+      concurrentPlans.map((r) => r.status),
+      Array(8).fill(200),
+      "overlapping refreshes must share the same plan query",
+    );
+    const plans = await Promise.all(concurrentPlans.map((r) => r.json()));
+    assert.ok(
+      plans.every(
+        (p) =>
+          p.modelRevision === model.modelRevision &&
+          p.obligations === plan.obligations,
+      ),
+    );
+
     await app.close();
     app = await serve({
       sourceRoot: f.root,
