@@ -20,6 +20,7 @@
     </header>
     <main>
       <p>
+        <button data-export="errors" class="secondary">Export errors</button>
         <button data-export="diagnostics" class="secondary">
           Download diagnostic bundle
         </button>
@@ -46,6 +47,7 @@
       <div id="message" role="status" aria-live="polite"></div>
       <section id="cwe" class="panel" hidden>
         <h2>CWE code review</h2>
+        <h3>Local Semgrep scan</h3>
         <p>
           Scan the selected local clones with the bundled Semgrep rules.
           Potential weaknesses require review. No target code is executed. Local
@@ -54,9 +56,11 @@
         <div class="toolbar">
           <button id="cwe-run" disabled>Scan selected repositories</button
           ><button id="cwe-stop" hidden>Cancel CWE scan</button
-          ><button data-export="cwe-json">Export JSON</button
-          ><button data-export="cwe-csv">Export CSV</button
-          ><button data-export="cwe-sarif">Export SARIF</button>
+          ><button data-export="cwe-json" disabled>Export Semgrep JSON</button
+          ><button data-export="cwe-csv" disabled>Export Semgrep CSV</button
+          ><button data-export="cwe-sarif" disabled>
+            Export Semgrep SARIF
+          </button>
         </div>
         <p id="cwe-status" role="status">
           Build a source graph before scanning.
@@ -97,7 +101,9 @@
         <button id="cwe-model-run" disabled>
           Run or continue CWE source review</button
         ><button id="cwe-model-stop" hidden>Stop CWE source review</button
-        ><button data-export="cwe-model-json">Export CWE source review</button>
+        ><button data-export="cwe-model-json" disabled>
+          Export model CWE review
+        </button>
         <p id="cwe-model-status" role="status">No source review has run.</p>
         <div id="cwe-model-results"></div>
       </section>

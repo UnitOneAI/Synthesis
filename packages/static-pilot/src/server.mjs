@@ -12,6 +12,7 @@ import path from "node:path";
 import {
   traceStore,
   diagnosticBundle,
+  errorReport,
   diagnosticCoverage,
   failureDetail,
   buildIdentity,
@@ -882,6 +883,23 @@ export async function serve({
         return send(200, outputModel());
       }
       if (req.method === "GET" && url.pathname === "/api/export") {
+        if (url.searchParams.get("format") === "errors") {
+          res.setHeader(
+            "Content-Disposition",
+            'attachment; filename="synthesis-errors.json"',
+          );
+          return send(
+            200,
+            await errorReport({
+              model,
+              job,
+              traces: await traces.export(),
+              config: modelConfig,
+              secrets: [githubToken, modelConfig?.apiKey, token],
+              roots: [root],
+            }),
+          );
+        }
         if (url.searchParams.get("format") === "diagnostics") {
           await traces.record("diagnostics.export-started", {
             sourceRevision: model?.modelRevision,

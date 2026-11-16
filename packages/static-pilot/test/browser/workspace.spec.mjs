@@ -699,7 +699,7 @@ test("CWE tab exposes scan failure and downloadable report without hiding the gr
   const download = page.waitForEvent("download");
   await page
     .locator("#cwe")
-    .getByRole("button", { name: "Export JSON", exact: true })
+    .getByRole("button", { name: "Export Semgrep JSON", exact: true })
     .click();
   expect((await download).suggestedFilename()).toBe("cwe-review.json");
   await page
@@ -721,6 +721,7 @@ test("partial STRIDE results default to component scenarios without requiring de
   const i = data.interfaces[0];
   data.aiReview = {
     status: "partial",
+    stopReason: "request-budget",
     responseHash: "fixture",
     coverage: {
       completedBatches: 1,
@@ -766,9 +767,29 @@ test("partial STRIDE results default to component scenarios without requiring de
   await expect(page.locator(".ws-matrix")).toContainText("threat scenario");
   await expect(page.locator(".ws-matrix")).not.toContainText("checklist items");
   await expect(page.locator("#workspace")).toContainText(
+    "Request limit reached successfully",
+  );
+  await expect(page.locator("#workspace")).toContainText(
     "A budget of 1 reviews one evidence packet",
   );
   await expect(page.locator("#workspace")).toContainText(
     "Repository review progress",
   );
+});
+
+test("small error download includes discovery coverage without the source graph", async ({
+  page,
+}) => {
+  await expect(page.locator("#ws-connection-status")).toBeVisible();
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Export errors", exact: true })
+    .click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("synthesis-errors.json");
+  const content = await fs.readFile(await download.path(), "utf8");
+  const report = JSON.parse(content);
+  expect(report.connections.coverage).toHaveProperty("httpClients");
+  expect(report).not.toHaveProperty("sourceGraph");
+  expect(Buffer.byteLength(content)).toBeLessThan(1024 * 1024);
 });

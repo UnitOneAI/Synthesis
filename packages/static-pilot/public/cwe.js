@@ -65,6 +65,8 @@
       model = value;
       actions = callbacks;
       const r = model?.cweReview;
+      for (const format of ["cwe-json", "cwe-csv", "cwe-sarif"])
+        document.querySelector(`[data-export="${format}"]`).disabled = !r;
       $("cwe-run").disabled = !model;
       $("cwe-status").textContent = r
         ? `${r.status} · ${r.findings.length} potential weaknesses · ${r.rulePack.rules.length} rules · ${r.tokens} model tokens${r.error ? " · " + r.error : ""}`
@@ -78,6 +80,8 @@
         actions.stop().catch((e) => actions.notify(e.message, true));
       $("cwe-filter").oninput = list;
       const review = model?.cweModelReview;
+      document.querySelector('[data-export="cwe-model-json"]').disabled =
+        !review;
       $("cwe-model-run").onclick = () =>
         actions
           .startModel(
@@ -89,7 +93,7 @@
         actions.stop().catch((e) => actions.notify(e.message, true));
       $("cwe-model-status").textContent = review
         ? `${review.status} · ${review.completedBatches || 0} / ${review.totalBatches || 0} packets completed · ${review.pendingBatches ?? "Unknown"} pending · ${review.findings.length} potential weaknesses${review.error ? " · " + review.error : ""}`
-        : "No source review has run.";
+        : "Model CWE source review has not run. Semgrep results are separate: use Export Semgrep JSON, CSV or SARIF above. To add model review, enable source sharing and select Run or continue CWE source review.";
       $("cwe-model-results").innerHTML = review
         ? `<p>${esc(review.provider)} / ${esc(review.model)} · Scanner findings are reviewed first, then graph interactions and remaining source. Token usage is included in the workspace token meter and export.</p><table><thead><tr><th>Repository</th><th>Reviewed / planned segments</th></tr></thead><tbody>${review.repositories.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.reviewedSegments || 0} / ${r.chunks}</td></tr>`).join("")}</tbody></table>${review.gaps.length ? `<p>${review.gaps.length} coverage gaps. Inspect the export before accepting coverage.</p>` : ""}${review.findings
             .slice(0, 200)

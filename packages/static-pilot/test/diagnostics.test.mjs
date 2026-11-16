@@ -16,6 +16,7 @@ import {
   readTraces,
   diagnosticCoverage,
   failureDetail,
+  errorReport,
 } from "../src/diagnostics.mjs";
 import { modelConfig } from "../src/model-review.mjs";
 import { serve } from "../src/server.mjs";
@@ -33,6 +34,72 @@ const config = modelConfig(
   { baseUrl: "https://gateway.example/anthropic" },
 );
 const fixture = () => analyze(manifest, { sourceRoot: root });
+test("compact error report distinguishes budget stops, bounds history and excludes source and secrets", async () => {
+  const model = await fixture();
+  model.aiReview = {
+    status: "partial",
+    stopReason: "request-budget",
+    error: "Review budget reached",
+    batches: [{ id: "done", status: "completed" }],
+    coverage: {
+      completedBatches: 2,
+      totalBatches: 444,
+      pendingBatches: 442,
+      failedBatches: 0,
+    },
+  };
+  model.cweReview = {
+    status: "partial",
+    repositories: [
+      {
+        name: "repo",
+        errors: [
+          {
+            type: "PartialParsing",
+            code: 3,
+            path: "file.cs",
+            message: "RAW_SOURCE_SENTINEL",
+          },
+        ],
+        skipped: [],
+      },
+    ],
+  };
+  model.usageLedger = {
+    attempts: Array.from({ length: 150 }, (_, i) => ({
+      id: String(i),
+      status: "failed",
+      prompt: "RAW_SOURCE_SENTINEL",
+    })),
+  };
+  const report = await errorReport({
+    model,
+    job: { message: "private-key-sentinel" },
+    secrets: ["private-key-sentinel"],
+    traces: {
+      events: JSON.stringify({
+        event: "model.request-failed",
+        timestamp: "2026-11-15",
+        failure: { code: "response-format" },
+        sourceText: "RAW_SOURCE_SENTINEL",
+      }),
+    },
+  });
+  assert.equal(report.stride.failure, null);
+  assert.equal(report.stride.coverage.pendingBatches, 442);
+  assert.equal(report.requestOutcomes.items.length, 100);
+  assert.equal(report.requestOutcomes.omitted, 50);
+  assert.equal(
+    report.semgrep.repositories.items[0].errors[0].type,
+    "PartialParsing",
+  );
+  assert.equal(report.failureEvents.items[0].failure.code, "response-format");
+  assert.doesNotMatch(
+    JSON.stringify(report),
+    /RAW_SOURCE_SENTINEL|private-key-sentinel/,
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(report)) < 1024 * 1024);
+});
 const reply = (
   text = JSON.stringify({
     summary:
@@ -322,6 +389,19 @@ test("diagnostic download works before first scan, requires local access token a
       quiet: true,
     });
     const origin = new URL(app.url).origin;
+    assert.equal(
+      (await fetch(origin + "/api/export?format=errors")).status,
+      401,
+    );
+    const small = await fetch(origin + "/api/export?format=errors", {
+      headers: { "X-Synthesis-Token": app.token },
+    });
+    assert.equal(small.status, 200);
+    assert.match(
+      small.headers.get("content-disposition"),
+      /synthesis-errors.json/,
+    );
+    assert.equal((await small.json()).sourceDiagnostics.total, 0);
     assert.equal(
       (await fetch(origin + "/api/export?format=diagnostics")).status,
       401,

@@ -1,5 +1,14 @@
 # Connected DFD, STRIDE results and CWE verification
 
+## 0.7.1 regression cases
+
+- A model with more than 80 source components still displays complete endpoint pairs and their SVG connectors, including unresolved peers. Component focus retains the selected component.
+- Legacy .NET controller `RoutePrefix` and separate method `Route`/HTTP attributes correlate; ambiguous method routes do not produce guessed connections. XML app settings and connection strings retain sanitized configuration facts.
+- Unsupported HTTP destinations and routes appear in discovery counts and gap categories even when no connection can be extracted.
+- Error export works before the first successful model, requires the local access token, excludes source/prompt/prose/secrets, bounds histories and distinguishes a successful request-budget stop from failure.
+- Browser exports for Semgrep and model CWE review are independently enabled. The scanner export works while the model export remains disabled, and the dedicated error download contains no source graph.
+- The STRIDE UI explicitly describes a successful budget stop and retains returned scenarios.
+
 ## Acceptance cases
 
 1. Build a disk graph for 12 synthetic local repositories. Eleven caller/listener matches connect them without declarations. Warm rebuild, database reopen and Mermaid export retain evidence. Changing a route removes its prior automatic connection.

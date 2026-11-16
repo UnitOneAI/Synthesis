@@ -43,6 +43,81 @@ function literal(text) {
   return text.match(/^\s*["']([^"'\n]*)["']/)?.[1];
 }
 
+// Conservative Web API attribute routing. Keep attributes local to one
+// declaration; a method Route is never mistaken for a controller prefix.
+function csharpRoute(text, offset) {
+  const controllers = [...text.matchAll(/\bclass\s+(\w+)Controller\b/g)];
+  if (controllers.length !== 1) return null;
+  const attributes = [
+    ...text.matchAll(/\[(?:[^\]"']|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')*\]/g),
+  ];
+  const group = (index) => {
+    let start = index,
+      end = index;
+    while (
+      start > 0 &&
+      !text
+        .slice(
+          attributes[start - 1].index + attributes[start - 1][0].length,
+          attributes[start].index,
+        )
+        .trim()
+    )
+      start--;
+    while (
+      end + 1 < attributes.length &&
+      !text
+        .slice(
+          attributes[end].index + attributes[end][0].length,
+          attributes[end + 1].index,
+        )
+        .trim()
+    )
+      end++;
+    return attributes.slice(start, end + 1).map((m) => m[0]);
+  };
+  const index = attributes.findIndex((a) => a.index === offset);
+  if (index < 0 || offset < controllers[0].index) return null;
+  const methodAttributes = group(index);
+  const template = (a) =>
+    a.match(
+      /^\[(?:Route|RoutePrefix|Http(?:Get|Post|Put|Delete|Patch|Head|Options))\(\s*"([^"\n]*)"\s*\)\]$/,
+    )?.[1];
+  const methodRoutes = methodAttributes.filter((a) =>
+    /^\[(?:Route|Http(?:Get|Post|Put|Delete|Patch|Head|Options))\(/.test(a),
+  );
+  if (
+    methodRoutes.length > 1 ||
+    methodRoutes.some((a) => template(a) === undefined)
+  )
+    return null;
+  let p = methodRoutes.length ? template(methodRoutes[0]) : "";
+  const classIndex = attributes.findLastIndex(
+    (a) => a.index < controllers[0].index,
+  );
+  let prefix = "";
+  if (
+    classIndex >= 0 &&
+    /^\s*(?:(?:public|internal|private|protected|abstract|sealed|partial|static)\s+)*$/.test(
+      text.slice(
+        attributes[classIndex].index + attributes[classIndex][0].length,
+        controllers[0].index,
+      ),
+    )
+  ) {
+    const prefixes = group(classIndex).filter((a) =>
+      /^\[(?:Route|RoutePrefix)\(/.test(a),
+    );
+    if (prefixes.length > 1 || prefixes.some((a) => template(a) === undefined))
+      return null;
+    if (prefixes.length) prefix = template(prefixes[0]);
+  }
+  if (!methodRoutes.length && !prefix) return null;
+  if (p.startsWith("~/") || p.startsWith("/"))
+    return route(p.replace(/^~/, ""));
+  return route(`${prefix}/${p}`.replaceAll("[controller]", controllers[0][1]));
+}
+
 export function interfaceConnection(item, file, offset) {
   const tail = file.text.slice(offset, offset + 1000);
   if (item.protocol === "messaging") {
@@ -93,24 +168,8 @@ export function interfaceConnection(item, file, offset) {
       else return undefined;
     }
     if (/^\[Http/.test(tail)) {
-      const prefixes = [
-        ...file.text.matchAll(/\[Route\(\s*"([^"\n]+)"\s*\)\]/g),
-      ];
-      if (prefixes.length === 1) {
-        let prefix = prefixes[0][1];
-        const controllers = [
-          ...file.text.matchAll(/class\s+(\w+)Controller\b/g),
-        ];
-        if (controllers.length === 1)
-          prefix = prefix.replace("[controller]", controllers[0][1]);
-        p =
-          p === "[controller route]"
-            ? prefix
-            : p.startsWith("/")
-              ? p
-              : `${prefix}/${p}`;
-      } else if (prefixes.length > 1 || p === "[controller route]")
-        return undefined;
+      p = csharpRoute(file.text, offset);
+      if (p === null) return undefined;
     }
     if (file.path.endsWith(".py")) {
       const receiver = tail.match(/^@(\w+)\./)?.[1];
@@ -166,8 +225,10 @@ export function interfaceConnection(item, file, offset) {
 }
 
 // Called only on safely parsed JSON/XML, not arbitrary target configuration scripts.
-export function configurationConnection(key, value, pointer) {
+export function configurationConnection(key, value, pointer, parent) {
   if (typeof value !== "string") return null;
+  if (key === "@value" && typeof parent?.["@key"] === "string")
+    key = parent["@key"];
   const ep = endpoint(value);
   if (
     ep &&
@@ -233,6 +294,21 @@ export function discoverConnections(model, nodes) {
   const flows = [],
     entities = [],
     gaps = [];
+  for (const item of model.interfaces.filter(
+    (i) =>
+      i.protocol === "HTTP" && ["inbound", "outbound"].includes(i.direction),
+  )) {
+    const expected = item.direction === "inbound" ? "server" : "client";
+    if (indexed.get(item.id)?.connection?.role !== expected)
+      gaps.push({
+        interfaceId: item.id,
+        reason:
+          expected === "server"
+            ? "http-route-not-resolved"
+            : "http-client-not-resolved",
+        candidateCount: 0,
+      });
+  }
   for (const client of items.filter(
     (i) => indexed.get(i.id).connection.role === "client",
   )) {
@@ -408,8 +484,11 @@ export function discoverConnections(model, nodes) {
       graphNodeIds: [item.id],
     });
   }
+  const outboundIds = new Set(
+    model.interfaces.filter((i) => i.direction === "outbound").map((i) => i.id),
+  );
   return {
-    version: 1,
+    version: 2,
     graphFingerprint: model.sourceGraph.fingerprint,
     flows,
     entities,
@@ -419,8 +498,23 @@ export function discoverConnections(model, nodes) {
       httpClients: items.filter(
         (i) => indexed.get(i.id).connection.role === "client",
       ).length,
+      httpServers: servers.length,
+      httpOutboundCandidates: model.interfaces.filter(
+        (i) => i.protocol === "HTTP" && i.direction === "outbound",
+      ).length,
+      httpInboundCandidates: model.interfaces.filter(
+        (i) => i.protocol === "HTTP" && i.direction === "inbound",
+      ).length,
+      gapReasons: Object.fromEntries(
+        [...new Set(gaps.map((g) => g.reason))].map((reason) => [
+          reason,
+          gaps.filter((g) => g.reason === reason).length,
+        ]),
+      ),
       connectedFlows: flows.length,
-      unresolvedClients: gaps.length,
+      unresolvedClients: gaps.filter((g) => outboundIds.has(g.interfaceId))
+        .length,
+      unresolvedInterfaces: gaps.length,
     },
     limitations: [
       "Static candidates do not prove runtime reachability or trust boundaries.",

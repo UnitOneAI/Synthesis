@@ -66,12 +66,33 @@ test("12 repositories connect automatically and support CWE scan, review, export
     await page
       .getByRole("button", { name: "5 · CWE code review", exact: true })
       .click();
+    await expect(
+      page.getByRole("button", { name: "Export Semgrep JSON", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", {
+        name: "Export model CWE review",
+        exact: true,
+      }),
+    ).toBeDisabled();
     await page.locator("#cwe-run").click();
     await expect(page.locator("#cwe-status")).toContainText(
       "completed · 12 potential weaknesses",
       { timeout: 60000 },
     );
     await expect(page.locator("#cwe-coverage tbody tr")).toHaveCount(12);
+    await expect(
+      page.getByRole("button", { name: "Export Semgrep JSON", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page.getByRole("button", {
+        name: "Export model CWE review",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    await expect(page.locator("#cwe-model-status")).toContainText(
+      "Semgrep results are separate",
+    );
     await page.locator("#cwe-filter").fill("repo0");
     await expect(page.locator("#cwe-findings tbody tr")).toHaveCount(1);
     await page.locator("#cwe-findings button").click();
@@ -91,7 +112,7 @@ test("12 repositories connect automatically and support CWE scan, review, export
     const downloading = page.waitForEvent("download");
     await page
       .locator("#cwe")
-      .getByRole("button", { name: "Export SARIF", exact: true })
+      .getByRole("button", { name: "Export Semgrep SARIF", exact: true })
       .click();
     const download = await downloading;
     const contents = JSON.parse(
@@ -212,7 +233,7 @@ test("CWE source review sends consented code, shows partial results and resumes 
     expect(calls).toBe(2);
     const exported = page.waitForEvent("download");
     await page
-      .getByRole("button", { name: "Export CWE source review", exact: true })
+      .getByRole("button", { name: "Export model CWE review", exact: true })
       .click();
     const report = JSON.parse(
       await fs.readFile(await (await exported).path(), "utf8"),
