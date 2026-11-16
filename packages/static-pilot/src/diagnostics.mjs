@@ -1,3 +1,4 @@
+import { architectureComponents } from "./architecture.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -421,6 +422,29 @@ export async function errorReport({
           skippedFiles: r.skipped?.length || 0,
         })),
       },
+      architecture:
+        model?.components && model?.interfaces && model?.evidence
+          ? (() => {
+              const nodes = architectureComponents(model);
+              return {
+                candidates: nodes.filter((n) => n.type !== "source-group")
+                  .length,
+                sourceGroups: nodes.filter((n) => n.type === "source-group")
+                  .length,
+                nonProductionGroups: nodes.filter(
+                  (n) => n.scope !== "production-candidate",
+                ).length,
+                candidateHostAssociations: nodes.filter(
+                  (n) => n.hostCandidateId,
+                ).length,
+                diagramNodeLimit: 80,
+                diagramConnectionLimit: 240,
+                unresolvedPeersHiddenByDefault: true,
+                interpretation:
+                  "Static candidates; no runtime reachability or deployment verification",
+              };
+            })()
+          : null,
       connections: {
         coverage: pick(model?.connectionDiscovery?.coverage, [
           "indexedInterfaces",

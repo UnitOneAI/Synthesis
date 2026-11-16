@@ -190,3 +190,11 @@ Diagnostic ZIP output is limited to 2 GiB. An oversized export fails explicitly;
 ## Connected DFD and CWE source review
 
 Version 0.7.0 adds disk-graph connection discovery, automatic actor/boundary candidates, component-first STRIDE results, local Semgrep scanning and model-assisted CWE source review. See the [architecture and coverage limits](../../docs/design/connected-dfd-cwe-review.md), [Windows instructions](../../docs/runbooks/windows-static-workspace.md#connected-dfd-stride-results-and-cwe-review-070) and [test specification](../../docs/testing/connected-dfd-cwe-review.md). Model request budgets count calls, not repositories.
+
+## Architecture DFD (0.8.0)
+
+The architecture view is separate from the disk source graph. Host/project/installer markers identify candidate processes; unique project references associate supporting libraries without asserting deployment. Test/generated source groups remain in analysis but are excluded from the default canvas. Configured HTTP clients resolve bounded expressions across same-project configuration files; ambiguous values remain explicit gaps.
+
+The Service DFD uses directional layout and aggregates equivalent calls while preserving flow, interface and evidence IDs. Select a connection to inspect its members and linked threats. Context/component views, trust lenses, actor paths, zoom/pan, unresolved-coverage filtering and selected-view SVG/Mermaid exports are available. The canvas is limited to 80 nodes and 240 grouped connections; full JSON and registers preserve the underlying scope. Updating requires a graph rebuild for new facts; save exports before rebuilding.
+
+See the [implementation plan and limits](../../docs/design/architecture-dfd-plan.md), [acceptance specification](../../docs/testing/architecture-dfd.md), and [Windows upgrade steps](../../docs/runbooks/windows-static-workspace.md#architecture-dfd-upgrade-080).

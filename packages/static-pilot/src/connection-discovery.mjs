@@ -1,3 +1,4 @@
+import { symbolicHttpConnection } from "./static-endpoints.mjs";
 import { id, sha } from "./sources.mjs";
 
 // Only literal identities are retained. Credentials, query strings and source excerpts are never stored.
@@ -191,6 +192,19 @@ export function interfaceConnection(item, file, offset) {
       : undefined;
   }
   if (item.direction !== "outbound") return undefined;
+  const symbolic = symbolicHttpConnection(item, file, offset);
+  if (symbolic) {
+    if (symbolic.kind === "http-unresolved") return symbolic;
+    for (const part of [symbolic.value, symbolic.base].filter(Boolean)) {
+      if (part.value !== undefined) {
+        const ep = endpoint(part.value);
+        if (ep) part.value = ep.origin + ep.path;
+        else if (/[?#@]|:\/\//.test(part.value)) return undefined;
+      }
+      if (part.suffix && /[?#@]/.test(part.suffix)) return undefined;
+    }
+    return symbolic;
+  }
   const opening = tail.indexOf("(");
   if (opening < 0) return undefined;
   const argument = tail.slice(opening + 1);
@@ -230,15 +244,17 @@ export function configurationConnection(key, value, pointer, parent) {
   if (key === "@value" && typeof parent?.["@key"] === "string")
     key = parent["@key"];
   const ep = endpoint(value);
-  if (
-    ep &&
-    ["http", "https"].includes(ep.scheme) &&
-    /url|uri|address|endpoint/i.test(key)
-  ) {
+  if (ep && ["http", "https"].includes(ep.scheme)) {
     const role = /kestrel|aspnetcore_urls|\/urls$|\/binding/i.test(pointer)
       ? "listener"
       : "base";
-    return { kind: "http-config", role, ...ep };
+    return {
+      kind: "http-config",
+      role,
+      key,
+      configPath: pointer.split("/").filter(Boolean).join(":"),
+      ...ep,
+    };
   }
   if (ep && !["http", "https"].includes(ep.scheme)) {
     return {
@@ -288,6 +304,71 @@ export function discoverConnections(model, nodes) {
   const configs = items.filter(
     (i) => indexed.get(i.id).connection.kind === "http-config",
   );
+  const resolutionGaps = new Map();
+  for (const item of items) {
+    const node = indexed.get(item.id),
+      c = node.connection;
+    if (c.kind === "http-unresolved") {
+      resolutionGaps.set(item.id, c.reason);
+      continue;
+    }
+    if (c.kind !== "http-symbolic") continue;
+    const evidence = new Set(item.evidence);
+    let reason;
+    const resolve = (part) => {
+      if (!part) return null;
+      if (part.value !== undefined) return part.value;
+      const matches = configs.filter(
+        (i) =>
+          i.component === item.component &&
+          (indexed.get(i.id).connection.configPath === part.configKey ||
+            indexed.get(i.id).connection.key === part.configKey),
+      );
+      const values = [
+        ...new Set(
+          matches.map((i) => {
+            const x = indexed.get(i.id).connection;
+            return x.origin + x.path;
+          }),
+        ),
+      ];
+      if (values.length !== 1) {
+        reason = values.length
+          ? "ambiguous-configuration"
+          : "configuration-key-not-resolved";
+        return null;
+      }
+      matches.flatMap((i) => i.evidence).forEach((id) => evidence.add(id));
+      return values[0] + (part.suffix || "");
+    };
+    const value = resolve(c.value),
+      base = resolve(c.base);
+    let ep = value && endpoint(value),
+      pathname;
+    if (value && !ep && base) {
+      try {
+        ep = endpoint(new URL(value, base).href);
+      } catch {}
+    }
+    if (!reason && value)
+      pathname = ep?.path || (value.startsWith("/") ? route(value) : null);
+    if (reason || !pathname) {
+      resolutionGaps.set(item.id, reason || "relative-url-base-unresolved");
+      continue;
+    }
+    indexed.set(item.id, {
+      ...node,
+      connection: {
+        kind: "http",
+        role: "client",
+        method: c.method,
+        path: pathname,
+        origin: ep?.origin || null,
+        resolutionEvidence: [...evidence],
+        resolution: c.resolution,
+      },
+    });
+  }
   const servers = items.filter(
     (i) => indexed.get(i.id).connection.role === "server",
   );
@@ -299,30 +380,27 @@ export function discoverConnections(model, nodes) {
       i.protocol === "HTTP" && ["inbound", "outbound"].includes(i.direction),
   )) {
     const expected = item.direction === "inbound" ? "server" : "client";
-    if (indexed.get(item.id)?.connection?.role !== expected)
+    if (
+      resolutionGaps.has(item.id) ||
+      indexed.get(item.id)?.connection?.role !== expected
+    )
       gaps.push({
         interfaceId: item.id,
         reason:
-          expected === "server"
+          resolutionGaps.get(item.id) ||
+          (expected === "server"
             ? "http-route-not-resolved"
-            : "http-client-not-resolved",
+            : "http-client-not-resolved"),
         candidateCount: 0,
       });
   }
   for (const client of items.filter(
-    (i) => indexed.get(i.id).connection.role === "client",
+    (i) =>
+      indexed.get(i.id).connection.role === "client" &&
+      !resolutionGaps.has(i.id),
   )) {
     const c = indexed.get(client.id).connection;
-    const bases = configs.filter(
-      (i) =>
-        i.component === client.component &&
-        indexed.get(i.id).connection.role === "base",
-    );
-    const uniqueBases = [
-      ...new Set(bases.map((i) => indexed.get(i.id).connection.origin)),
-    ];
-    const origin =
-      c.origin || (uniqueBases.length === 1 ? uniqueBases[0] : null);
+    const origin = c.origin || null;
     const candidates = servers.filter((server) => {
       const s = indexed.get(server.id).connection;
       if (s.method !== c.method || !matches(s.path, c.path)) return false;
@@ -355,9 +433,7 @@ export function discoverConnections(model, nodes) {
         indexed.get(i.id).connection.origin === origin,
     );
     const exact = Boolean(origin && listeners.length);
-    const configEvidence = [...(c.origin ? [] : bases), ...listeners].flatMap(
-      (i) => i.evidence,
-    );
+    const configEvidence = listeners.flatMap((i) => i.evidence);
     flows.push({
       id: id("discovered-flow", client.id, target.id),
       from: client.id,
@@ -376,6 +452,7 @@ export function discoverConnections(model, nodes) {
       evidence: [
         ...new Set([
           ...client.evidence,
+          ...(c.resolutionEvidence || []),
           ...candidates.flatMap((i) => i.evidence),
           ...configEvidence,
         ]),
@@ -488,7 +565,7 @@ export function discoverConnections(model, nodes) {
     model.interfaces.filter((i) => i.direction === "outbound").map((i) => i.id),
   );
   return {
-    version: 2,
+    version: 3,
     graphFingerprint: model.sourceGraph.fingerprint,
     flows,
     entities,
@@ -496,7 +573,9 @@ export function discoverConnections(model, nodes) {
     coverage: {
       indexedInterfaces: indexed.size,
       httpClients: items.filter(
-        (i) => indexed.get(i.id).connection.role === "client",
+        (i) =>
+          indexed.get(i.id).connection.role === "client" &&
+          !resolutionGaps.has(i.id),
       ).length,
       httpServers: servers.length,
       httpOutboundCandidates: model.interfaces.filter(

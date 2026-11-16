@@ -348,3 +348,40 @@ nav[aria-label="Workflow"] button {
 .ws-analysis input {
   max-width: 120px;
 }
+
+.dfd-tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.dfd-tools input[type="checkbox"] {
+  width: auto;
+}
+.ws-canvas {
+  background: #fff;
+  max-height: 720px;
+}
+.ws-canvas svg {
+  min-width: 0;
+}
+.ws-bundle {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+}
+#ws-unresolved {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#ws-unresolved summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+#ws-unresolved .table-wrap {
+  max-height: 350px;
+  overflow: auto;
+}

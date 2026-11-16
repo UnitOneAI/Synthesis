@@ -1,3 +1,4 @@
+import { architectureFacts } from "./architecture.mjs";
 import {
   GUIDANCE_VERSION,
   GUIDANCE_HASH,
@@ -22,7 +23,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.7.1";
+export const ENGINE_VERSION = "static-pilot-0.8.0";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -369,6 +370,26 @@ export function extract(source, files, options = {}) {
   for (const file of files) {
     const ext = path.posix.extname(file.path).toLowerCase();
     componentFor(file.path);
+    for (const fact of architectureFacts(
+      file.path,
+      stripComments(file.text, ext),
+    )) {
+      const item = add(
+        file,
+        null,
+        fact.offset,
+        "architecture",
+        "control",
+        "architecture",
+        fact.reason,
+        "static architecture candidate",
+      );
+      item.connection = {
+        kind: "architecture",
+        role: fact.role,
+        dimension: fact.dimension,
+      };
+    }
     let tree;
     try {
       if (ext === ".json") tree = JSON.parse(file.text);
@@ -581,6 +602,26 @@ export function extract(source, files, options = {}) {
     const e = byEvidence.get(item.evidence[0]);
     if (!item.connection && Number.isInteger(e.offset))
       item.connection = interfaceConnection(item, byPath.get(e.path), e.offset);
+    if (item.connection?.kind === "http-symbolic") {
+      for (const part of [item.connection.value, item.connection.base].filter(
+        Boolean,
+      )) {
+        for (const offset of part.offsets || []) {
+          const supporting = {
+            ...e,
+            id: id("expression-evidence", e.id, offset),
+            offset,
+            line: lineAt(byPath.get(e.path), offset),
+            basis: "Static expression supporting endpoint resolution",
+          };
+          if (!evidence.some((v) => v.id === supporting.id))
+            evidence.push(supporting);
+          if (!item.evidence.includes(supporting.id))
+            item.evidence.push(supporting.id);
+        }
+        delete part.offsets;
+      }
+    }
   }
   return { components, interfaces, evidence, dependencies, diagnostics };
 }

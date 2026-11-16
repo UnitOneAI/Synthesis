@@ -194,3 +194,34 @@ The DFD preview now selects both endpoints of each visible flow before filling r
 STRIDE **Request limit reached successfully** means the configured call budget was consumed and pending work remains; successful results are retained. A budget of two does not complete a portfolio.
 
 Use **Export Semgrep JSON**, **Export Semgrep CSV** or **Export Semgrep SARIF** for local scan results. **Export model CWE review** is separate and disabled until a model source review exists. Running Semgrep does not implicitly run the model review.
+
+## Architecture DFD upgrade (0.8.0)
+
+Stop the local Synthesis server with Ctrl+C. Save the current model/report exports and back up the existing workspace before rebuilding. Keep the clones unchanged and reuse the same source root, workspace, gateway model and trace directory. Updating the application does not require reinstalling the scanner.
+
+From the existing checkout:
+
+```powershell
+Set-Location "C:/Tools/Synthesis"
+git status --short
+# Stop here if you have local changes; preserve them before updating.
+git switch main
+git pull --ff-only
+Set-Location packages/static-pilot
+npm ci --ignore-scripts
+node -p "require('./package.json').version"
+npm run check
+npm test
+```
+
+The version must be **0.8.0 or later** once this change is merged. Restart with your existing `node src/cli.mjs serve` command and the same `--workspace` and `--trace-dir`. Enter the gateway key through the existing secure prompt if using a new PowerShell session. Open the newly printed access link.
+
+1. Export the previous results, then choose **Build source graph** once. The extractor cache version changes so existing files are reparsed for architecture and endpoint facts. Do not delete the workspace. Review records are retained, but changed evidence can make them stale; rebuilding is not a promise of retaining prior model-review coverage.
+2. Open **System model → System DFD → Service DFD**. The default shows candidate hosts, connected source groups and resources. Test/generated groups and unresolved peers are excluded from the canvas, not from source analysis or registers.
+3. Select a connector to see its member flows, supporting source locations, related threats and review decisions. Select an individual flow for its details. Library associations are shown as candidate project ownership, not proven deployment.
+4. Open **Connection coverage** to filter unresolved locations and reasons. Use **Show unresolved peers** or **Include supporting source groups** when investigating gaps. A zero-connection view explicitly remains incomplete; increasing STRIDE request budgets cannot repair source extraction.
+5. Select a trust lens or actor path. Candidate boundary badges remain pending until reviewed; declared trust zones are separate. Actor paths describe conditional access, not demonstrated attacks.
+6. Use **Export this view · SVG/Mermaid** for the current level, focus, lens and overlays. Canvas limits are 80 objects and 240 grouped connections, with omission counts. Complete model JSON and registers preserve underlying records beyond these view limits.
+7. Save **Export errors** and the current SVG/Mermaid under your export directory for troubleshooting. Error reports now include architecture classification counts. Automatic traces still require the configured `--trace-dir`; browser downloads do not automatically follow that directory.
+
+The new resolver supports bounded same-file literal assignments, configuration-key references, `HttpClient.BaseAddress` plus relative paths, and explicit `HttpRequestMessage` method/URI assignments. Configuration lookup crosses files within the same source project, then matches endpoints across repositories. Conflicting configuration values remain gaps; Synthesis does not choose a deployment environment. Existing attribute-route, same-file JavaScript-wrapper, store and default-exchange queue adapters remain available. General cross-file symbol/DI binding, arbitrary wrappers, proxy rewrites and non-default broker routing remain limitations.

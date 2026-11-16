@@ -857,6 +857,8 @@ export async function serve({
             focus: url.searchParams.get("focus") || "",
             actor: url.searchParams.get("actor") || "",
             threat: url.searchParams.get("threat") || "",
+            showUnresolved: url.searchParams.get("showUnresolved") === "true",
+            showSupporting: url.searchParams.get("showSupporting") === "true",
           }),
           "image/svg+xml",
         );
@@ -1004,10 +1006,19 @@ export async function serve({
           );
         if (format === "html")
           return send(200, systemReport(model), "text/html");
+        const diagramOptions = {
+          level: url.searchParams.get("level") || "system",
+          lens: url.searchParams.get("lens") || "identity",
+          focus: url.searchParams.get("focus") || "",
+          actor: url.searchParams.get("actor") || "",
+          threat: url.searchParams.get("threat") || "",
+          showUnresolved: url.searchParams.get("showUnresolved") === "true",
+          showSupporting: url.searchParams.get("showSupporting") === "true",
+        };
         if (format === "svg")
-          return send(200, systemSvg(model), "image/svg+xml");
+          return send(200, systemSvg(model, diagramOptions), "image/svg+xml");
         if (format === "mermaid")
-          return send(200, systemMermaid(model), "text/plain");
+          return send(200, systemMermaid(model, diagramOptions), "text/plain");
         if (format === "graph-mermaid")
           return withGraph(() =>
             send(200, sourceGraphMermaid(model), "text/plain"),

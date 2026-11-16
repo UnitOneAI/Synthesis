@@ -1,3 +1,4 @@
+import { diagramModel, layoutDiagram, actorPath } from "./diagram-model.mjs";
 import { usageSummary } from "./token-usage.mjs";
 import { systemModel, CATEGORIES } from "./system-model.mjs";
 import { sha } from "./sources.mjs";
@@ -16,207 +17,84 @@ const e = escapeHtml,
       .replace(/[^\p{L}\p{N} _./:()-]/gu, " ")
       .slice(0, 180);
 export function selectedPath(s, actorId) {
-  const a = s.actors.find((a) => a.id === actorId);
-  if (!a || ["rejected", "stale"].includes(a.reviewState)) return [];
-  let reached = new Set(a.entryIds || []),
-    edges = new Set();
-  for (let depth = 0; depth < 6; depth++) {
-    const next = new Set(reached);
-    for (const f of s.flows)
-      if (
-        reached.has(f.source) &&
-        f.basis !== "unresolved" &&
-        !["rejected", "stale"].includes(f.reviewState)
-      ) {
-        edges.add(f.id);
-        next.add(f.target);
-      }
-    if (next.size === reached.size) break;
-    reached = next;
-  }
-  return [...edges];
+  return actorPath(s, actorId).flowIds;
 }
-export function systemSvg(
-  model,
-  {
-    level = "system",
-    lens = "identity",
-    focus = "",
-    actor = "",
-    threat = "",
-    limit = 80,
-  } = {},
-) {
-  const s = systemModel(model, { matrix: false });
-  let nodes = [...s.components, ...s.entities],
-    flows = s.flows;
-  const active = new Set([
-    ...selectedPath(s, actor),
-    ...(s.threats.find((t) => t.id === threat)?.flowIds || []),
-  ]);
-  const selectedThreat = s.threats.find((t) => t.id === threat);
-  const activeNodes = new Set([
-    ...(s.actors.find(
-      (a) => a.id === actor && !["rejected", "stale"].includes(a.reviewState),
-    )?.entryIds || []),
-    ...s.components
-      .filter((c) =>
-        c.interfaceIds.some((id) => selectedThreat?.interfaceIds.includes(id)),
-      )
-      .map((c) => c.id),
-    ...s.flows
-      .filter((f) => active.has(f.id))
-      .flatMap((f) => [f.source, f.target]),
-  ]);
-  if (level === "context") {
-    const internal = new Set(s.components.map((c) => c.id));
-    nodes = [
-      {
-        id: "system-scope",
-        name: s.title,
-        type: "process",
-        basis: "scope boundary; not a trust boundary",
-      },
-      ...s.entities,
-    ];
-    flows = s.flows
-      .filter((f) => internal.has(f.source) !== internal.has(f.target))
-      .map((f) => ({
-        ...f,
-        source: internal.has(f.source) ? "system-scope" : f.source,
-        target: internal.has(f.target) ? "system-scope" : f.target,
-      }));
-  } else if (level === "focus" && focus) {
-    const ids = new Set([focus]);
-    for (const f of flows)
-      if (f.source === focus || f.target === focus) {
-        ids.add(f.source);
-        ids.add(f.target);
-      }
-    nodes = nodes.filter((n) => ids.has(n.id));
-    flows = flows.filter((f) => ids.has(f.source) && ids.has(f.target));
-  }
-  const total = nodes.length;
-  // Keep both endpoints together. Taking components first can hide every edge
-  // when unknown peers or connected components fall beyond the preview limit.
-  const available = new Set(nodes.map((n) => n.id));
-  const included = new Set();
-  if (level === "focus" && available.has(focus)) included.add(focus);
-  const priority = (f) =>
-    active.has(f.id) ? 0 : f.basis === "unresolved" ? 2 : 1;
-  for (const f of [...flows].sort((a, b) => priority(a) - priority(b))) {
-    const pair = [...new Set([f.source, f.target])];
-    if (
-      pair.every((id) => available.has(id)) &&
-      included.size + pair.filter((id) => !included.has(id)).length <= limit
-    )
-      pair.forEach((id) => included.add(id));
-  }
-  for (const n of [...nodes].sort(
-    (a, b) => Number(activeNodes.has(b.id)) - Number(activeNodes.has(a.id)),
-  ))
-    if (included.size < limit) included.add(n.id);
-  nodes = nodes.filter((n) => included.has(n.id));
-  const ids = new Set(nodes.map((n) => n.id));
-  flows = flows.filter((f) => ids.has(f.source) && ids.has(f.target));
-  const domains = s.domains.filter(
-    (d) => d.dimension === lens && d.reviewState !== "rejected",
+export function systemSvg(model, options = {}) {
+  const s = systemModel(model, { matrix: false }),
+    d = diagramModel(s, options);
+  const { positions, boxes, width, height } = layoutDiagram(d);
+  const actor = s.actors.find(
+    (a) =>
+      a.id === options.actor && !["rejected", "stale"].includes(a.reviewState),
   );
-  const domainIds = new Set(domains.map((d) => d.id));
-  const groups = new Map(
-    domains.map((d) => [d.id, { domain: d, members: [], children: [] }]),
-  );
-  const roots = [];
-  for (const g of groups.values()) {
-    if (domainIds.has(g.domain.parentId))
-      groups.get(g.domain.parentId).children.push(g);
-    else roots.push(g);
+  const text = (x, y, value, size = 12) =>
+    `<text x="${x}" y="${y}" font-size="${size}" fill="#20344c">${e(value)}</text>`;
+  const edgeCounts = new Map(),
+    edgeIndices = new Map();
+  for (const f of d.connections) {
+    const key = [f.source, f.target].sort().join(":");
+    edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
   }
-  const assigned = new Set();
-  function assign(g) {
-    for (const child of g.children) assign(child);
-    g.members = nodes.filter(
-      (n) => g.domain.memberIds?.includes(n.id) && !assigned.has(n.id),
-    );
-    g.members.forEach((n) => assigned.add(n.id));
-  }
-  roots.forEach(assign);
-  const rest = nodes.filter((n) => !assigned.has(n.id));
-  if (rest.length)
-    roots.push({
-      domain: { name: "No declared trust domain" },
-      members: rest,
-      children: [],
-    });
-  const positions = new Map(),
-    boxes = [];
-  let y = 65;
-  function layout(g, start, depth = 0) {
-    const inset = Math.min(depth, 8) * 18,
-      x = 20 + inset,
-      width = 1010 - inset * 2;
-    const box = { g, y: start, height: 0, x, width };
-    boxes.push(box);
-    let next = start + 75;
-    const columns = Math.max(1, Math.floor((width - 30) / 300));
-    g.members.forEach((n, i) =>
-      positions.set(n.id, {
-        x: x + 15 + ((i % columns) * (width - 30)) / columns,
-        y: next + Math.floor(i / columns) * 120,
-      }),
-    );
-    next += Math.ceil(g.members.length / columns) * 120;
-    for (const child of g.children) next = layout(child, next, depth + 1) + 14;
-    box.height = Math.max(55, next - start + 12);
-    return start + box.height;
-  }
-  for (const g of roots) y = layout(g, y) + 22;
-  const height = Math.max(200, y + 40);
-  const text = (x, y, t, size = 13) =>
-    `<text x="${x}" y="${y}" font-size="${size}" fill="#20344c">${e(t)}</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" viewBox="0 0 1050 ${height}" width="1050" height="${height}" role="img" aria-label="${e(s.title)} system data flow diagram"><rect width="1050" height="${height}" fill="#fff"/><defs><marker id="system-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6" fill="#61758c"/></marker></defs>${text(24, 25, `${s.title} · ${level} · ${lens} lens`, 17)}${text(24, 46, `${nodes.length}/${total} objects shown. ${total > limit ? "Use component focus or the full registers for omitted objects." : "Static evidence and review declarations; deployment not verified."}`, 11)}${boxes.map(({ g, y, height, x, width }) => `<g data-select="${e(g.domain.id || "")}" data-domain-parent="${e(g.domain.parentId || "")}" role="button" tabindex="0" aria-label="${e(g.domain.name)}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="9" fill="#f5f8fc" stroke="${g.domain.id ? "#8e79a5" : "#d6e0ed"}" ${g.domain.id ? 'stroke-dasharray="6 5"' : ""}/>${text(x + 15, y + 23, g.domain.name + (g.domain.id ? " · " + g.domain.basis : ""), 12)}</g>`).join("")}${flows
+  const flowSvg = d.connections
     .map((f) => {
       const a = positions.get(f.source),
-        b = positions.get(f.target),
-        same = a.y === b.y;
-      const x1 = a.x + 135,
-        y1 = a.y + 65,
-        x2 = b.x + 135,
-        y2 = b.y;
-      const labelY = same ? a.y - 28 : (y1 + y2) / 2;
-      const crossings = s.boundaries.filter(
-        (b) =>
-          b.flowIds.includes(f.id) &&
-          b.dimension === lens &&
-          b.reviewState !== "rejected",
+        b = positions.get(f.target);
+      const key = [f.source, f.target].sort().join(":"),
+        ordinal = edgeIndices.get(key) || 0;
+      edgeIndices.set(key, ordinal + 1);
+      const offset = (ordinal - (edgeCounts.get(key) - 1) / 2) * 28;
+      let path, lx, ly;
+      if (b.x > a.x) {
+        const x1 = a.x + 260,
+          x2 = b.x,
+          mid = (x1 + x2) / 2;
+        path = `M${x1} ${a.y + 40} C${mid + offset} ${a.y + 40} ${mid + offset} ${b.y + 40} ${x2} ${b.y + 40}`;
+        lx = mid;
+        ly = (a.y + b.y) / 2 + 30 + offset;
+      } else {
+        const x1 = a.x + 260,
+          x2 = b.x + 260,
+          outside = Math.max(x1, x2) + 55 + ordinal * 18;
+        const by = f.source === f.target ? b.y + 65 : b.y + 45;
+        path = `M${x1} ${a.y + 20} C${outside} ${a.y - 30} ${outside} ${by + 40} ${x2} ${by}`;
+        lx = outside - 12;
+        ly = (a.y + by) / 2 + offset;
+      }
+      const boundaries = d.boundaries.filter(
+        (b) => f.boundaryIds.includes(b.id) && b.dimension === d.lens,
       );
-      const boundaryState = crossings.some((b) => b.reviewState === "stale")
-        ? "stale"
-        : crossings.every((b) => b.reviewState === "accepted")
-          ? "reviewed"
-          : "pending";
-      const path = same
-        ? `M${a.x + 270} ${a.y + 32} C${a.x + 300} ${a.y - 45} ${b.x - 30} ${b.y - 45} ${b.x} ${b.y + 32}`
-        : `M${x1} ${y1} C${x1} ${y1 + 25} ${x2} ${y2 - 25} ${x2} ${y2}`;
-      return `<g data-select="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(f.id + " · " + f.name + " · " + f.basis)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="16"/><path d="${path}" fill="none" stroke="${active.has(f.id) ? "#b56416" : "#61758c"}" stroke-width="${active.has(f.id) ? 3 : 1.5}" ${f.basis === "unresolved" || ["inferred route match", "static queue candidate", "static configuration"].includes(f.basis) ? 'stroke-dasharray="5 5"' : ""} class="${active.has(f.id) ? "selected" : ""}" marker-end="url(#system-arrow)"/>${text((x1 + x2) / 2 + 4, labelY, String(f.protocol || "flow").slice(0, 18), 10)}${crossings.length ? `<g data-select="${e(crossings[0].id)}" role="button" tabindex="0" aria-label="${e(crossings[0].name)}"><title>${e(crossings.map((b) => b.name + " · " + b.basis).join("; "))}</title><rect x="${(x1 + x2) / 2}" y="${labelY + 6}" width="150" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5"/>${text((x1 + x2) / 2 + 5, labelY + 20, `${crossings.length} boundar${crossings.length > 1 ? "ies" : "y"}: ${boundaryState}`, 10)}</g>` : ""}</g>`;
+      const state = boundaries.every((b) => b.reviewState === "accepted")
+        ? "reviewed"
+        : "pending";
+      const dashed =
+        f.basis !== "static endpoint match" &&
+        f.basis !== "reviewer declaration";
+      const label = `${f.protocol || "Data"}${f.flowIds.length > 1 ? ` × ${f.flowIds.length}` : ""}`;
+      return `<g class="dfd-connection" data-select="${e(f.flowIds[0])}" data-flow-ids="${e(f.flowIds.join(" "))}" data-connection-id="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(`${f.name} · ${f.basis} · ${f.reviewState}. Member flows: ${f.flowIds.join(", ")}`)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="18"/><path d="${path}" fill="none" stroke="${f.active ? "#b56416" : "#61758c"}" stroke-width="${f.active ? 3 : 1.7}" ${dashed ? 'stroke-dasharray="6 4"' : ""} marker-end="url(#system-arrow)"/><rect x="${lx - 43}" y="${ly - 14}" width="95" height="20" rx="4" fill="white"/>${text(lx - 38, ly, label, 11)}${boundaries.length ? `<g data-select="${e(boundaries[0].id)}" role="button" tabindex="0" aria-label="${e(boundaries[0].name)}"><title>${e(boundaries.map((b) => `${b.name} · ${b.basis} · ${b.reviewState}`).join("; "))}</title><rect x="${lx - 43}" y="${ly + 9}" width="126" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5" ${state === "pending" ? 'stroke-dasharray="3 3"' : ""}/>${text(lx - 38, ly + 23, `boundary: ${state}`, 10)}</g>` : ""}</g>`;
     })
-    .join("")}${nodes
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${e(s.title)} system data flow diagram"><title>${e(s.title)} · ${e(d.level)} · ${e(d.lens)} lens</title><desc>Static evidence and review declarations. Dashed connections are hypotheses or unresolved relationships. Connectivity does not establish exploitability.</desc><rect width="${width}" height="${height}" fill="#fff"/><defs><marker id="system-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6" fill="#61758c"/></marker></defs>${text(24, 26, `${s.title} · ${d.level} · ${d.lens} lens`, 17)}${text(24, 48, `${d.nodes.length} objects · ${d.connections.length} connections representing ${d.coverage.representedFlows} flows · ${d.coverage.unresolvedRelationships} unresolved relationships in coverage`, 11)}${text(24, 67, `${d.coverage.omittedNodes} omitted objects / ${d.coverage.omittedConnections} omitted connections from canvas limit; ${d.coverage.filteredFlows} flows outside view filters. Full registers retain evidence.`, 11)}${actor ? text(24, 87, `Actor profile: ${actor.name} · conditional access: ${actor.startingAccess}`.slice(0, 150), 11) : ""}${boxes.map(({ domain: g, x, y, width: w, height: h }) => `<g data-select="${e(g.id)}" data-domain-parent="${e(g.parentId || "")}" role="button" tabindex="0" aria-label="${e(g.name)}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#f5f8fc" stroke="#8e79a5" ${g.reviewState !== "accepted" ? 'stroke-dasharray="6 5"' : ""}/>${text(x + 12, y + 22, `${g.name} · ${g.basis} · ${g.reviewState}`)}</g>`).join("")}${flowSvg}${d.nodes
     .map((n) => {
-      const p = positions.get(n.id);
-      return `<g class="node" data-component-type="${e(n.type)}" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(n.name + " · " + n.basis)}</title><rect x="${p.x}" y="${p.y}" width="270" height="65" rx="${n.type === "external" ? 1 : 10}" fill="#fff" stroke="${activeNodes.has(n.id) ? "#b56416" : "#b7c7da"}" stroke-width="${activeNodes.has(n.id) ? 3 : 1}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<line x1="${p.x}" y1="${p.y + 7}" x2="${p.x + 270}" y2="${p.y + 7}" stroke="#b7c7da"/>` : ""}${n.type === "broker" ? `<path d="M${p.x + 6} ${p.y + 8}V${p.y + 57} M${p.x + 264} ${p.y + 8}V${p.y + 57}" stroke="#61758c"/>` : ""}${text(p.x + 12, p.y + 26, n.name.slice(0, 34), 13)}${text(p.x + 12, p.y + 47, `${n.type} · ${n.basis}`.slice(0, 42), 10)}</g>`;
+      const p = positions.get(n.id),
+        active = d.activeNodeIds.includes(n.id);
+      const entry = actor?.entryIds?.some((id) => n.memberIds.includes(id));
+      const chunks = (n.name.match(/.{1,32}/gu) || [""]).slice(0, 2);
+      return `<g class="node" data-component-type="${e(n.type)}" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(`${n.name} · ${n.classification || n.basis} · ${n.memberIds.length} source component(s)`)}</title><rect x="${p.x}" y="${p.y}" width="260" height="85" rx="${n.type === "external" ? 2 : 10}" fill="white" stroke="${active ? "#b56416" : "#a8bfd8"}" stroke-width="${active ? 3 : 1.4}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<path d="M${p.x} ${p.y + 12} Q${p.x + 130} ${p.y + 30} ${p.x + 260} ${p.y + 12}" fill="none" stroke="#a8bfd8"/>` : ""}${n.type === "broker" ? `<path d="M${p.x + 6} ${p.y + 8}V${p.y + 77} M${p.x + 254} ${p.y + 8}V${p.y + 77}" stroke="#61758c"/>` : ""}${entry ? `<circle cx="${p.x + 246}" cy="${p.y + 14}" r="5" fill="#b56416"><title>Actor entry point under stated access assumptions</title></circle>` : ""}${chunks.map((line, i) => text(p.x + 12, p.y + 25 + i * 17, line, 13)).join("")}${text(p.x + 12, p.y + 69, `${n.type}${n.type !== "source-group" && n.classification ? " candidate" : ""}${n.memberIds.length > 1 ? ` · ${n.memberIds.length} source groups` : ""}`, 10)}</g>`;
     })
     .join(
       "",
-    )}${text(24, height - 12, "Dashed connector: unresolved relationship. Zone outlines: selected trust lens. Full labels and evidence in registers.", 11)}</svg>`;
+    )}${!d.connections.length ? text(24, height - 50, "No matched connections in this view. Inspect unresolved coverage or choose a component.", 12) : ""}${text(24, height - 18, "Dashed: candidate / unresolved. Boundary badges: selected trust lens. Actor paths are conditional.", 11)}</svg>`;
 }
-export function systemMermaid(model) {
+export function systemMermaid(model, options = {}) {
   const s = systemModel(model, { matrix: false }),
-    lines = [
-      "flowchart LR",
-      "%% Static system model. Evidence basis and decisions remain in the registers.",
-    ];
-  for (const n of [...s.components, ...s.entities]) {
-    lines.push(`%% Object ${n.id} = ${nid(n.id)}`);
+    d = diagramModel(s, options);
+  const lines = [
+    "flowchart LR",
+    `%% Static architecture DFD: ${d.level}; ${d.lens} lens. Not runtime reachability.`,
+    `%% Coverage: ${JSON.stringify(d.coverage)}`,
+  ];
+  for (const n of d.nodes) {
+    lines.push(`%% Object ${n.id}; source members: ${n.memberIds.join(" ")}`);
     const shape = {
       store: ['[("', '")]'],
       broker: ['[["', '"]]'],
@@ -227,32 +105,42 @@ export function systemMermaid(model) {
       `  ${nid(n.id)}${shape[0]}${label(n.name + " · " + n.basis)}${shape[1]}`,
     );
   }
-  // Identity lens is the default interchange grouping; other dimensions remain explicit below.
-  const used = new Set(),
-    domains = s.domains.filter(
-      (d) => d.dimension === "identity" && d.reviewState !== "rejected",
+  const visible = new Set(d.nodes.map((n) => n.id)),
+    used = new Set(),
+    domainIds = new Set(d.domains.map((g) => g.id));
+  function domain(g, seen = new Set()) {
+    if (seen.has(g.id)) return;
+    lines.push(
+      `%% Domain ${g.id}; ${g.reviewState}`,
+      `  subgraph ${nid(g.id)}["${label(g.name)}"]`,
     );
-  const ids = new Set(domains.map((d) => d.id));
-  function domain(d) {
-    lines.push(`%% Domain ${d.id} = ${nid(d.id)}`);
-    lines.push(`  subgraph ${nid(d.id)}["${label(d.name)}"]`);
-    for (const child of domains.filter((c) => c.parentId === d.id))
-      domain(child);
-    for (const n of d.memberIds || [])
-      if (!used.has(n)) {
-        used.add(n);
-        lines.push(`    ${nid(n)}`);
+    for (const child of d.domains.filter((c) => c.parentId === g.id))
+      domain(child, new Set([...seen, g.id]));
+    for (const id of g.memberIds || [])
+      if (visible.has(id) && !used.has(id)) {
+        used.add(id);
+        lines.push(`    ${nid(id)}`);
       }
     lines.push("  end");
   }
-  domains.filter((d) => !ids.has(d.parentId)).forEach(domain);
-  for (const f of s.flows) {
-    lines.push(`%% Flow ${f.id}: ${f.source} -> ${f.target}`);
-    const b = s.boundaries.filter((b) => b.flowIds.includes(f.id));
+  d.domains.filter((g) => !domainIds.has(g.parentId)).forEach((g) => domain(g));
+  for (const f of d.connections) {
     lines.push(
-      `  ${nid(f.source)} ${f.basis === "unresolved" || ["inferred route match", "static queue candidate", "static configuration"].includes(f.basis) ? "-.->" : "-->"}|"${label([f.protocol, f.name, f.basis, ...b.map((b) => `${b.dimension}: ${b.before} to ${b.after}`)].join(" · "))}"| ${nid(f.target)}`,
+      `%% Flow members: ${f.flowIds.join(" ")}`,
+      `%% Interfaces: ${f.interfaceIds.join(" ")}`,
+      `%% Evidence: ${f.evidenceIds.join(" ")}`,
+    );
+    const boundaries = d.boundaries.filter(
+      (b) => f.boundaryIds.includes(b.id) && b.dimension === d.lens,
+    );
+    lines.push(
+      `  ${nid(f.source)} ${["static endpoint match", "reviewer declaration"].includes(f.basis) ? "-->" : "-.->"}|"${label([f.name, f.basis, ...boundaries.map((b) => `${b.dimension}: ${b.before} to ${b.after} (${b.reviewState})`)].join(" · "))}"| ${nid(f.target)}`,
     );
   }
+  d.connections.forEach((f, i) => {
+    if (f.active)
+      lines.push(`  linkStyle ${i} stroke:#b56416,stroke-width:3px`);
+  });
   return lines.join("\n") + "\n";
 }
 const csvCell = (v) => {

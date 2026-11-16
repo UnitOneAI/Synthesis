@@ -677,10 +677,13 @@ $("bindings").onclick = async (event) => {
     message(e.message, true);
   }
 };
-async function download(format, preview = false) {
-  const r = await fetch("/api/export?format=" + format, {
-    headers: { "X-Synthesis-Token": token },
-  });
+async function download(format, preview = false, options = {}) {
+  const r = await fetch(
+    "/api/export?" + new URLSearchParams({ ...options, format }),
+    {
+      headers: { "X-Synthesis-Token": token },
+    },
+  );
   if (!r.ok) throw new Error((await r.json()).error);
   const blob = await r.blob();
   const url = URL.createObjectURL(blob);

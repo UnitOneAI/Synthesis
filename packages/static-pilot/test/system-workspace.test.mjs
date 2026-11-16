@@ -46,7 +46,8 @@ test("DFD preview retains edge endpoint pairs beyond 80 source components", asyn
   const projection = systemModel(model);
   const unresolved = projection.flows.find((f) => f.basis === "unresolved");
   assert.ok(unresolved);
-  const svg = systemSvg(model);
+  assert.ok(!systemSvg(model).includes(`data-select="${unresolved.target}"`));
+  const svg = systemSvg(model, { showUnresolved: true, showSupporting: true });
   assert.match(svg, /marker-end="url\(#system-arrow\)"/);
   assert.ok(svg.includes(`data-select="${unresolved.source}"`));
   assert.ok(svg.includes(`data-select="${unresolved.target}"`));
@@ -55,6 +56,7 @@ test("DFD preview retains edge endpoint pairs beyond 80 source components", asyn
     level: "focus",
     focus: unresolved.source,
     limit: 2,
+    showUnresolved: true,
   });
   assert.match(focus, /marker-end="url\(#system-arrow\)"/);
 });
@@ -381,7 +383,12 @@ test("all exports retain stable IDs, dispositions, gaps and escaped labels with 
   });
   assert.ok(systemSvg(broker).includes('data-component-type="broker"'));
   assert.ok(systemMermaid(broker).includes('[["Queue broker'));
-  for (const f of s.flows) assert.ok(systemMermaid(m).includes(f.id));
+  for (const f of s.flows)
+    assert.ok(
+      systemMermaid(m, { showUnresolved: true, showSupporting: true }).includes(
+        f.id,
+      ),
+    );
   assert.ok(!/AI scenarios|AI finding/.test(html));
   assert.ok(systemSvg(m, { limit: 1 }).includes("omitted objects"));
 });
