@@ -22,7 +22,7 @@ import {
 } from "./source-graph.mjs";
 import { enrichGraphModel } from "./graph-review.mjs";
 
-export const ENGINE_VERSION = "static-pilot-0.7.0";
+export const ENGINE_VERSION = "static-pilot-0.7.1";
 const short = (value) =>
   String(value ?? "")
     .replace(/[\u0000-\u001f]/g, " ")
@@ -40,7 +40,7 @@ const walkObject = (value, fn, pointer = "", depth = 0) => {
   if (!value || typeof value !== "object") return;
   for (const [key, item] of Object.entries(value)) {
     const p = pointer + "/" + key.replace(/~/g, "~0").replace(/\//g, "~1");
-    fn(key, item, p);
+    fn(key, item, p, value);
     walkObject(item, fn, p, depth + 1);
   }
 };
@@ -388,8 +388,13 @@ export function extract(source, files, options = {}) {
       )
         tree = parseXml(file.text);
       if (tree)
-        walkObject(tree, (key, value, pointer) => {
-          const connection = configurationConnection(key, value, pointer);
+        walkObject(tree, (key, value, pointer, parent) => {
+          const connection = configurationConnection(
+            key,
+            value,
+            pointer,
+            parent,
+          );
           if (connection) {
             const item = add(
               file,
@@ -562,7 +567,15 @@ export function extract(source, files, options = {}) {
           "File hashed and inventoried; no semantic adapter for this format",
       });
   }
-  const byPath = new Map(files.map((f) => [f.path, f]));
+  const byPath = new Map(
+    files.map((f) => [
+      f.path,
+      {
+        ...f,
+        text: stripComments(f.text, path.posix.extname(f.path).toLowerCase()),
+      },
+    ]),
+  );
   const byEvidence = new Map(evidence.map((e) => [e.id, e]));
   for (const item of interfaces) {
     const e = byEvidence.get(item.evidence[0]);

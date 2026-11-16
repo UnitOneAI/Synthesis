@@ -709,6 +709,7 @@ async function download(format, preview = false) {
     "cwe-csv": "cwe-findings.csv",
     "cwe-sarif": "cwe-findings.sarif",
     diagnostics: "synthesis-diagnostics.zip",
+    errors: "synthesis-errors.json",
   }[format];
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);

@@ -297,6 +297,169 @@ export async function buildIdentity() {
   };
 }
 
+// A bounded support report, independent of graph export and available even if
+// the first build failed. Never include packets, model prose or source text.
+export async function errorReport({
+  model,
+  job,
+  traces,
+  config,
+  secrets = [],
+  roots = [],
+} = {}) {
+  const text = (v) =>
+    typeof v === "string"
+      ? v.slice(0, 500)
+      : typeof v === "number" || typeof v === "boolean"
+        ? v
+        : undefined;
+  const pick = (value, keys) =>
+    Object.fromEntries(
+      keys
+        .filter((k) => value?.[k] !== undefined)
+        .map((k) => [k, text(value[k])]),
+    );
+  const sample = (rows = [], map = (v) => v) => ({
+    total: rows.length,
+    omitted: Math.max(0, rows.length - 100),
+    items: rows.slice(-100).map(map),
+  });
+  const batch = (b) => ({
+    ...pick(b, ["id", "phase", "status"]),
+    failure: b.error ? failureDetail(b.error) : null,
+  });
+  const review = (r) => ({
+    ...pick(r, [
+      "status",
+      "stopReason",
+      "completedBatches",
+      "pendingBatches",
+      "totalBatches",
+    ]),
+    failure:
+      r?.error &&
+      (r.status === "failed" || r.batches?.some((b) => b.status === "failed"))
+        ? failureDetail(r.error)
+        : null,
+    batches: sample(
+      (r?.batches || []).filter((b) => b.status !== "completed"),
+      batch,
+    ),
+  });
+  const events = [];
+  for (const line of (traces?.events || "").split("\n")) {
+    try {
+      const v = JSON.parse(line);
+      if (/fail|error|cancel|limit/i.test(v.event || "") || v.failure)
+        events.push({
+          ...pick(v, [
+            "timestamp",
+            "event",
+            "sessionId",
+            "jobId",
+            "attemptId",
+            "batchId",
+            "repository",
+          ]),
+          failure: v.failure
+            ? pick(v.failure, ["code", "httpStatus", "retryable", "action"])
+            : undefined,
+        });
+    } catch {
+      /* Partial trace lines are excluded by the trace reader. */
+    }
+  }
+  events.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+  const interfaces = new Map((model?.interfaces || []).map((i) => [i.id, i]));
+  const evidence = new Map((model?.evidence || []).map((e) => [e.id, e]));
+  return safeMetadata(
+    {
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+      identity: pick(await buildIdentity(), [
+        "version",
+        "codeFingerprint",
+        "node",
+        "platform",
+        "architecture",
+      ]),
+      modelRevision: model?.modelRevision,
+      provider: config?.provider,
+      model: config?.model,
+      job: pick(job, ["status", "mode", "message"]),
+      stride: {
+        ...review(model?.aiReview),
+        coverage: pick(model?.aiReview?.coverage, [
+          "completedBatches",
+          "failedBatches",
+          "pendingBatches",
+          "totalBatches",
+          "callsThisRun",
+        ]),
+        budgetNote:
+          "A request-budget stop is pending work, not a failed model request.",
+      },
+      cweSourceReview: review(model?.cweModelReview),
+      semgrep: {
+        status: model?.cweReview?.status,
+        failure: model?.cweReview?.error
+          ? failureDetail(model.cweReview.error)
+          : null,
+        repositories: sample(model?.cweReview?.repositories, (r) => ({
+          ...pick(r, [
+            "name",
+            "status",
+            "scannedFiles",
+            "eligibleFiles",
+            "unsupportedFiles",
+            "matchesGraphSnapshot",
+          ]),
+          errorCount: r.errors?.length || 0,
+          errors: (r.errors || [])
+            .slice(0, 10)
+            .map((v) => pick(v, ["type", "code", "level", "path"])),
+          skippedFiles: r.skipped?.length || 0,
+        })),
+      },
+      connections: {
+        coverage: pick(model?.connectionDiscovery?.coverage, [
+          "indexedInterfaces",
+          "httpClients",
+          "httpServers",
+          "httpOutboundCandidates",
+          "httpInboundCandidates",
+          "connectedFlows",
+          "unresolvedClients",
+          "unresolvedInterfaces",
+        ]),
+        gaps: sample(model?.connectionDiscovery?.gaps, (g) => {
+          const item = interfaces.get(g.interfaceId);
+          return {
+            ...pick(g, ["interfaceId", "reason", "candidateCount"]),
+            ...pick(item, ["repository", "operation", "direction", "protocol"]),
+            ...pick(evidence.get(item?.evidence?.[0]), ["path", "line"]),
+          };
+        }),
+      },
+      sourceDiagnostics: sample(model?.diagnostics, (d) =>
+        pick(d, ["repository", "path", "kind", "message"]),
+      ),
+      requestOutcomes: sample(model?.usageLedger?.attempts, (a) =>
+        pick(a, ["id", "batchId", "phase", "status", "startedAt", "endedAt"]),
+      ),
+      failureEvents: sample(events),
+      traceScope: {
+        retention: text(traces?.retention),
+        omittedSegments: traces?.omittedFiles?.length || 0,
+      },
+      privacy:
+        "Confidential architecture metadata. No source graph, source excerpts, prompts or model response prose. Lists retain at most 100 entries; each scanner repository retains at most 10 errors. Preserve the full diagnostic bundle for omitted history.",
+    },
+    secrets,
+    roots,
+  );
+}
+
 export function sourceCoverage(model) {
   return {
     sources: model?.sources || [],

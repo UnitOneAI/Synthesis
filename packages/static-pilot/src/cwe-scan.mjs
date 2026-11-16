@@ -305,12 +305,27 @@ export async function scanCwe(
           );
           repo.scannedFiles = scanned.size;
           repo.skipped = [...files.keys()].filter((p) => !scanned.has(p));
-          repo.errors = data.errors.map((e) => ({
-            type: /^[\w -]{1,100}$/.test(e.type) ? e.type : "scanner-error",
-            path: files.has(relative(e.path, stage))
-              ? relative(e.path, stage)
-              : undefined,
-          }));
+          repo.errors = data.errors.map((e) => {
+            const kind =
+              typeof e.type === "string"
+                ? e.type
+                : Array.isArray(e.type)
+                  ? e.type[0]
+                  : e.type?.kind;
+            return {
+              type:
+                typeof kind === "string" && /^[\w -]{1,100}$/.test(kind)
+                  ? kind
+                  : "scanner-error",
+              code: Number.isInteger(e.code) ? e.code : undefined,
+              level: ["error", "warning", "info"].includes(e.level)
+                ? e.level
+                : undefined,
+              path: files.has(relative(e.path, stage))
+                ? relative(e.path, stage)
+                : undefined,
+            };
+          });
           for (const finding of data.results) {
             const rule = byRule.get(finding.check_id),
               p = relative(finding.path, stage),

@@ -34,6 +34,30 @@ const manifest = {
   ],
 };
 const fixture = () => analyze(manifest, { sourceRoot: root });
+test("DFD preview retains edge endpoint pairs beyond 80 source components", async () => {
+  const model = await fixture();
+  model.components.unshift(
+    ...Array.from({ length: 100 }, (_, i) => ({
+      id: `unused-${i}`,
+      name: `Unconnected source ${i}`,
+      repository: "frontdoor",
+    })),
+  );
+  const projection = systemModel(model);
+  const unresolved = projection.flows.find((f) => f.basis === "unresolved");
+  assert.ok(unresolved);
+  const svg = systemSvg(model);
+  assert.match(svg, /marker-end="url\(#system-arrow\)"/);
+  assert.ok(svg.includes(`data-select="${unresolved.source}"`));
+  assert.ok(svg.includes(`data-select="${unresolved.target}"`));
+  assert.ok((svg.match(/class="node"/g) || []).length <= 80);
+  const focus = systemSvg(model, {
+    level: "focus",
+    focus: unresolved.source,
+    limit: 2,
+  });
+  assert.match(focus, /marker-end="url\(#system-arrow\)"/);
+});
 const edit = (m, kind, record) =>
   editSystem(m, {
     revision: systemModel(m).revision,

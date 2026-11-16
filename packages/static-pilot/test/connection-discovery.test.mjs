@@ -11,6 +11,66 @@ const manifest = (names) => ({
   profile: "server",
   repositories: names.map((name) => ({ name, selected: true })),
 });
+test("legacy .NET attribute routes and XML configuration correlate without mixing method routes", async (t) => {
+  const root = await fixture(t, {
+    client: {
+      "client.cs":
+        'class Caller { void Run() { client.GetAsync("/api/items/42"); client.PostAsync("/api/items/create", body); } }',
+    },
+    api: {
+      "ItemsController.cs":
+        '[RoutePrefix("api/items")] public class ItemsController { [HttpGet] [Route("{id}")] public string Get(int id) => ""; [Route("create")] [HttpPost] public void Create() {} }',
+      "web.config":
+        '<configuration><appSettings><add key="ServiceUrl" value="https://service.example/api" /></appSettings><connectionStrings><add name="Main" connectionString="Server=db;Database=shared;Password=PRIVATE" /></connectionStrings></configuration>',
+    },
+    other: {
+      "settings.json":
+        '{"ConnectionStrings":{"Main":"Server=db;Database=shared;Password=OTHER"}}',
+    },
+  });
+  const model = await analyze(manifest(["client", "api", "other"]), {
+    sourceRoot: root,
+  });
+  assert.equal(model.connectionDiscovery.coverage.httpServers, 2);
+  assert.equal(
+    model.connectionDiscovery.flows.filter((f) => f.protocol === "HTTP").length,
+    2,
+  );
+  assert.equal(
+    model.connectionDiscovery.entities.filter(
+      (e) => e.repositories.length === 2,
+    ).length,
+    1,
+  );
+  assert.ok(model.interfaces.some((i) => i.connection?.kind === "http-config"));
+  assert.doesNotMatch(JSON.stringify(model), /PRIVATE|OTHER/);
+});
+test("unresolved HTTP patterns are counted and ambiguous C# route declarations are not matched", async (t) => {
+  const root = await fixture(t, {
+    client: {
+      "client.cs":
+        'class Caller { void Run() { client.GetAsync(destination); client.GetAsync("/api/a"); } }',
+    },
+    api: {
+      "Controller.cs":
+        '[Route("api")] class TestController { [Route("a")] [Route("b")] [HttpGet] public string Get() => ""; }',
+    },
+  });
+  const model = await analyze(manifest(["client", "api"]), {
+    sourceRoot: root,
+  });
+  assert.equal(model.connectionDiscovery.flows.length, 0);
+  assert.equal(model.connectionDiscovery.coverage.httpOutboundCandidates, 2);
+  assert.equal(model.connectionDiscovery.coverage.httpClients, 1);
+  assert.equal(
+    model.connectionDiscovery.coverage.gapReasons["http-client-not-resolved"],
+    1,
+  );
+  assert.equal(
+    model.connectionDiscovery.coverage.gapReasons["http-route-not-resolved"],
+    1,
+  );
+});
 async function fixture(t, repos) {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "synthesis-connections-"),

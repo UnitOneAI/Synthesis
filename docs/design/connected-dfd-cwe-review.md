@@ -61,6 +61,8 @@ Exports include local scanner JSON/CSV/SARIF, detailed model CWE JSON, system DF
 
 ## Remaining gaps
 
+The 0.7.1 patch keeps flow endpoint pairs together when selecting the bounded SVG preview, exposes matchable HTTP call/route counts, and includes conservative legacy .NET attribute routing. Zero discovered connections is explicitly distinguished from unresolved unknown-peer edges. A separate bounded `synthesis-errors.json` export provides failures and discovery coverage without exporting the graph. Semgrep and model CWE exports are independently gated by their respective report availability.
+
 Dynamic configuration, proxy rewrites, multi-router mounts, non-default broker routing, DI and compiler-level cross-file bindings may remain unresolved. Same-file wrapper recognition is deliberately narrow. The DFD remains a candidate static model. Model review can miss weaknesses or produce false positives. Native scanner rules do not cover every language or CWE; model support does not remove that uncertainty. Disk storage does not remove parser, planner, metadata or provider limits.
 
 References: [Semgrep CLI](https://docs.semgrep.dev/cli-reference), [Semgrep ignore behavior](https://docs.semgrep.dev/ignoring-files-folders-code), [CWE mapping guidance](https://cwe.mitre.org/documents/cwe_usage/guidance.html).

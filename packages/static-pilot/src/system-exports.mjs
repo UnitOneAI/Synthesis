@@ -96,10 +96,27 @@ export function systemSvg(
     nodes = nodes.filter((n) => ids.has(n.id));
     flows = flows.filter((f) => ids.has(f.source) && ids.has(f.target));
   }
-  if (level === "focus" && focus)
-    nodes.sort((a, b) => Number(b.id === focus) - Number(a.id === focus));
   const total = nodes.length;
-  nodes = nodes.slice(0, limit);
+  // Keep both endpoints together. Taking components first can hide every edge
+  // when unknown peers or connected components fall beyond the preview limit.
+  const available = new Set(nodes.map((n) => n.id));
+  const included = new Set();
+  if (level === "focus" && available.has(focus)) included.add(focus);
+  const priority = (f) =>
+    active.has(f.id) ? 0 : f.basis === "unresolved" ? 2 : 1;
+  for (const f of [...flows].sort((a, b) => priority(a) - priority(b))) {
+    const pair = [...new Set([f.source, f.target])];
+    if (
+      pair.every((id) => available.has(id)) &&
+      included.size + pair.filter((id) => !included.has(id)).length <= limit
+    )
+      pair.forEach((id) => included.add(id));
+  }
+  for (const n of [...nodes].sort(
+    (a, b) => Number(activeNodes.has(b.id)) - Number(activeNodes.has(a.id)),
+  ))
+    if (included.size < limit) included.add(n.id);
+  nodes = nodes.filter((n) => included.has(n.id));
   const ids = new Set(nodes.map((n) => n.id));
   flows = flows.filter((f) => ids.has(f.source) && ids.has(f.target));
   const domains = s.domains.filter(
