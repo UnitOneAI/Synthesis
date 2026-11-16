@@ -75,13 +75,11 @@ export function diagramModel(s, options = {}) {
         interfaceIds: unique(members.flatMap((m) => m.interfaceIds || [])),
       };
     });
-  let flows = s.flows
-    .filter(usable)
-    .map((f) => ({
-      ...f,
-      source: owners.get(f.source) || f.source,
-      target: owners.get(f.target) || f.target,
-    }));
+  let flows = s.flows.filter(usable).map((f) => ({
+    ...f,
+    source: owners.get(f.source) || f.source,
+    target: owners.get(f.target) || f.target,
+  }));
   const unresolvedCount = flows.filter((f) => f.basis === "unresolved").length;
   if (!showUnresolved) {
     flows = flows.filter((f) => f.basis !== "unresolved");
@@ -173,6 +171,7 @@ export function diagramModel(s, options = {}) {
       f.source,
       f.target,
       f.protocol,
+      f.transport || "unknown",
       f.data,
       f.controls,
       f.basis,

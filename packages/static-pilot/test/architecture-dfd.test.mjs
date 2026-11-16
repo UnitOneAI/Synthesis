@@ -313,3 +313,24 @@ test("base assignment after the call remains unresolved; named service configura
     ),
   );
 });
+
+test("HTTP and HTTPS calls retain separate diagram connections and source transport evidence", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    web: { "a.js": "fetch('http://api/items'); fetch('https://api/items');" },
+    api: {
+      "app.js": "app.get('/items', handler);",
+      "settings.json":
+        '{"Kestrel":{"Endpoints":{"Http":{"Url":"http://api"},"Https":{"Url":"https://api"}}}}',
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root }),
+    s = systemModel(m),
+    d = diagramModel(s);
+  assert.equal(d.connections.length, 2);
+  assert.deepEqual(
+    new Set(d.connections.map((f) => f.transport)),
+    new Set(["HTTP", "HTTPS"]),
+  );
+  assert.match(systemSvg(m), /HTTPS/);
+  assert.match(systemMermaid(m), /HTTPS in source URL/);
+});

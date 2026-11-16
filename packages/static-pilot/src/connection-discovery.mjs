@@ -442,6 +442,11 @@ export function discoverConnections(model, nodes) {
       target: target.component,
       operation: `${c.method} ${c.path}`,
       protocol: "HTTP",
+      transport: c.origin?.startsWith("https:")
+        ? "HTTPS"
+        : c.origin?.startsWith("http:")
+          ? "HTTP"
+          : "unknown",
       basis: exact ? "static endpoint match" : "inferred route match",
       reason: exact
         ? "Literal client origin, listener origin, method and route match. Deployment and reachability require review."

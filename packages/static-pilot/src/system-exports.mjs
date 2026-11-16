@@ -69,7 +69,7 @@ export function systemSvg(model, options = {}) {
       const dashed =
         f.basis !== "static endpoint match" &&
         f.basis !== "reviewer declaration";
-      const label = `${f.protocol || "Data"}${f.flowIds.length > 1 ? ` × ${f.flowIds.length}` : ""}`;
+      const label = `${f.transport && f.transport !== "unknown" ? f.transport : f.protocol || "Data"}${f.flowIds.length > 1 ? ` × ${f.flowIds.length}` : ""}`;
       return `<g class="dfd-connection" data-select="${e(f.flowIds[0])}" data-flow-ids="${e(f.flowIds.join(" "))}" data-connection-id="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(`${f.name} · ${f.basis} · ${f.reviewState}. Member flows: ${f.flowIds.join(", ")}`)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="18"/><path d="${path}" fill="none" stroke="${f.active ? "#b56416" : "#61758c"}" stroke-width="${f.active ? 3 : 1.7}" ${dashed ? 'stroke-dasharray="6 4"' : ""} marker-end="url(#system-arrow)"/><rect x="${lx - 43}" y="${ly - 14}" width="95" height="20" rx="4" fill="white"/>${text(lx - 38, ly, label, 11)}${boundaries.length ? `<g data-select="${e(boundaries[0].id)}" role="button" tabindex="0" aria-label="${e(boundaries[0].name)}"><title>${e(boundaries.map((b) => `${b.name} · ${b.basis} · ${b.reviewState}`).join("; "))}</title><rect x="${lx - 43}" y="${ly + 9}" width="126" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5" ${state === "pending" ? 'stroke-dasharray="3 3"' : ""}/>${text(lx - 38, ly + 23, `boundary: ${state}`, 10)}</g>` : ""}</g>`;
     })
     .join("");
@@ -134,7 +134,7 @@ export function systemMermaid(model, options = {}) {
       (b) => f.boundaryIds.includes(b.id) && b.dimension === d.lens,
     );
     lines.push(
-      `  ${nid(f.source)} ${["static endpoint match", "reviewer declaration"].includes(f.basis) ? "-->" : "-.->"}|"${label([f.name, f.basis, ...boundaries.map((b) => `${b.dimension}: ${b.before} to ${b.after} (${b.reviewState})`)].join(" · "))}"| ${nid(f.target)}`,
+      `  ${nid(f.source)} ${["static endpoint match", "reviewer declaration"].includes(f.basis) ? "-->" : "-.->"}|"${label([f.name, f.transport && f.transport !== "unknown" ? `${f.transport} in source URL` : "transport unestablished", f.basis, ...boundaries.map((b) => `${b.dimension}: ${b.before} to ${b.after} (${b.reviewState})`)].join(" · "))}"| ${nid(f.target)}`,
     );
   }
   d.connections.forEach((f, i) => {
@@ -213,6 +213,7 @@ export function registerCsv(model, kind) {
         "source",
         "target",
         "protocol",
+        "transport",
         "data",
         "controls",
         "assetIds",

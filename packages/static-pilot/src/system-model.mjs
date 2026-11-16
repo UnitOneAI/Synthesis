@@ -157,6 +157,7 @@ export function systemModel(model, { matrix = true } = {}) {
         model.interfaces.find((i) => i.id === f.from)?.protocol ||
         "Unknown",
       data: f.data,
+      transport: f.transport || "unknown",
       controls: f.controls,
       description: f.reason,
       interfaceIds: [f.from, f.to].filter(Boolean),
