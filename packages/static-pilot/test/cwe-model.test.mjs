@@ -15,6 +15,7 @@ const config = modelConfig(
 );
 const finding = (r) => ({
   cwe: "CWE-89",
+  targetIds: ["server-19"],
   title: "Potential SQL injection",
   explanation: "Formatted SQL receives a function argument.",
   preconditions: "Attacker can influence the argument.",
@@ -22,11 +23,32 @@ const finding = (r) => ({
   remediation: "Use bound parameters.",
   locations: [{ recordId: r.id, startLine: r.startLine, endLine: r.endLine }],
 });
-const response = (value) =>
+const targetReviews = (packet) =>
+  packet.targets.map((t) => ({
+    targetId: t.id,
+    status: "needs-context",
+    rationale: "Caller validation remains unresolved in this fixture.",
+    locations: [
+      ...new Map(packet.records.map((r) => [r.repository, r])).values(),
+    ].map((r) => ({
+      recordId: r.id,
+      startLine: r.startLine,
+      endLine: r.startLine,
+    })),
+  }));
+const response = (value, packet) =>
   Response.json({
     stop_reason: "end_turn",
     usage: { input_tokens: 100, output_tokens: 20 },
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          ...value,
+          ...(packet ? { targetReviews: targetReviews(packet) } : {}),
+        }),
+      },
+    ],
   });
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-cwe-model-"));
@@ -62,10 +84,13 @@ test("model CWE review uses gateway deployment, source evidence, token accountin
     const packet = JSON.parse(body.messages[0].content);
     assert.match(packet.records[0].code, /cursor.execute/);
     requests.push(packet);
-    return response({
-      findings: [finding(packet.records[0])],
-      limitations: ["Caller validation is unresolved."],
-    });
+    return response(
+      {
+        findings: [finding(packet.records[0])],
+        limitations: ["Caller validation is unresolved."],
+      },
+      packet,
+    );
   };
   let r = await reviewCweCode(manifest, model, {
     sourceRoot: root,
@@ -104,6 +129,20 @@ test("model CWE review uses gateway deployment, source evidence, token accountin
     /cursor.execute|test-only-key/,
   );
   assert.ok(usageSummary(model.usageLedger));
+  model.cweModelReview.key = "prior-plan";
+  const restarted = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    fetchImpl: async (_, options) =>
+      response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(options.body).messages[0].content),
+      ),
+  });
+  assert.equal(restarted.retainedFindingsFromPriorPlan, 3);
+  assert.equal(restarted.findings.length, 3);
+  assert.equal(restarted.completedBatches, 1);
 });
 test("CWE validation rejects invented IDs, locations and mappings; failed output still accounts for usage", async (t) => {
   const { root, manifest, model } = await fixture(t);
@@ -185,7 +224,11 @@ test("CWE code review plans every segment of a large file and reports a long-lin
     sourceRoot: root,
     config,
     budget: 100,
-    fetchImpl: async () => response({ findings: [], limitations: [] }),
+    fetchImpl: async (_, options) =>
+      response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(options.body).messages[0].content),
+      ),
   });
   assert.ok(r.totalSegments >= 5);
   assert.equal(r.status, "partial");
@@ -200,7 +243,11 @@ test("CWE scope follows implicit manifest selections and preserves explicit excl
     sourceRoot: root,
     config,
     budget: 10,
-    fetchImpl: async () => response({ findings: [], limitations: [] }),
+    fetchImpl: async (_, options) =>
+      response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(options.body).messages[0].content),
+      ),
   });
   assert.deepEqual(r.requestedRepositories, ["one", "three"]);
   assert.equal(r.completedBatches, 2);
@@ -230,7 +277,7 @@ test("current Semgrep findings are reviewed first without dropping the remaining
     budget: 1,
     fetchImpl: async (url, options) => {
       packet = JSON.parse(JSON.parse(options.body).messages[0].content);
-      return response({ findings: [], limitations: [] });
+      return response({ findings: [], limitations: [] }, packet);
     },
   });
   assert.equal(packet.records[0].repository, "three");
@@ -238,4 +285,61 @@ test("current Semgrep findings are reviewed first without dropping the remaining
   assert.equal(r.priorityBatches, 1);
   assert.equal(r.totalBatches, 3);
   assert.equal(r.pendingBatches, 2);
+});
+
+test("CWE review includes internal worker/storage connections and invalidates a prior profile plan", async (t) => {
+  const { root, manifest } = await fixture(t);
+  manifest.repositories = manifest.repositories.slice(0, 1);
+  await fs.writeFile(
+    path.join(root, "one", "server.py"),
+    "from workers import Consumer\nworker = Consumer()\n",
+  );
+  await fs.writeFile(
+    path.join(root, "one", "workers.py"),
+    "from storage import Store\nclass Consumer:\n    def run(self):\n        store = Store()\n",
+  );
+  await fs.writeFile(
+    path.join(root, "one", "storage.py"),
+    "import sqlite3\nclass Store:\n    def open(self):\n        return sqlite3.connect(self.path)\n",
+  );
+  const model = await analyze(manifest, { sourceRoot: root });
+  const packets = [];
+  const fetchImpl = async (_, options) => {
+    const p = JSON.parse(JSON.parse(options.body).messages[0].content);
+    packets.push(p);
+    return response({ findings: [], limitations: [] }, p);
+  };
+  let r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 100,
+    fetchImpl,
+  });
+  assert.ok(
+    packets.some(
+      (p) =>
+        p.connection &&
+        p.records.some((r) => r.path === "workers.py") &&
+        p.records.some((r) => r.path === "storage.py"),
+    ),
+  );
+  assert.ok(packets.every((p) => p.targets.length === 25));
+  assert.ok(r.repositories[0].plannedBatches > 1);
+  const calls = packets.length;
+  r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 100,
+    fetchImpl,
+  });
+  assert.equal(packets.length, calls);
+  model.cweModelReview.key = "prior-profile-plan";
+  r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    fetchImpl,
+  });
+  assert.equal(packets.length, calls + 1);
+  assert.equal(r.completedBatches, 1);
 });

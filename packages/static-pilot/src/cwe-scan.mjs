@@ -1,3 +1,5 @@
+import { cweMapping } from "./cwe-targets.mjs";
+import { sourceScope } from "./architecture.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +9,7 @@ import { localSource, sha, id } from "./sources.mjs";
 
 export const SCANNER_VERSION = "1.185.0";
 const ruleFile = fileURLToPath(
-  new URL("../rules/cwe-v1.json", import.meta.url),
+  new URL("../rules/cwe-v2.json", import.meta.url),
 );
 const supported = /\.(py|js|mjs|jsx|ts|tsx|cs|c|h|cpp|cc|hpp)$/i;
 const MAX_OUTPUT = 50 * 1024 ** 2,
@@ -144,7 +146,7 @@ export async function scanCwe(
     graphFingerprint: model.sourceGraph.fingerprint,
     engine: { name: "Semgrep CE", expectedVersion: SCANNER_VERSION },
     rulePack: {
-      version: "cwe-v1",
+      version: "cwe-v2",
       sha256: sha(packText),
       rules: rules.map((r) => ({
         id: r.id,
@@ -207,6 +209,7 @@ export async function scanCwe(
         eligibleFiles: 0,
         scannedFiles: 0,
         unsupportedFiles: 0,
+        languages: [],
         findings: 0,
         errors: [],
         skipped: [],
@@ -238,6 +241,21 @@ export async function scanCwe(
               repo.unsupportedFiles++;
               return;
             }
+            const ext = path.extname(f.path).toLowerCase();
+            const language =
+              ext === ".py"
+                ? "python"
+                : ext === ".cs"
+                  ? "csharp"
+                  : [".js", ".mjs", ".jsx"].includes(ext)
+                    ? "javascript"
+                    : [".ts", ".tsx"].includes(ext)
+                      ? "typescript"
+                      : [".c", ".h"].includes(ext)
+                        ? "c"
+                        : "cpp";
+            if (!repo.languages.includes(language))
+              repo.languages.push(language);
             bytes += Buffer.byteLength(f.text);
             if (bytes > MAX_STAGE || files.size >= 100000)
               throw Error("Scanner staging limit exceeded");
@@ -363,11 +381,18 @@ export async function scanCwe(
               id: id("cwe", source.name, p, f.hash, rule.id, line, endLine),
               repository: source.name,
               path: p,
+              sourceScope: sourceScope(p),
               line,
               endLine,
               blobSha256: f.hash,
               ruleId: rule.id,
               cwe: rule.metadata.cwe,
+              mappingUsage: cweMapping(rule.metadata.cwe)?.mappingUsage,
+              mappingStatus:
+                cweMapping(rule.metadata.cwe)?.mappingUsage === "Discouraged"
+                  ? "needs-more-specific-mapping"
+                  : "proposed",
+              targetIds: rule.metadata.targetIds || [],
               title: rule.message,
               remediation: rule.metadata.remediation,
               status: "needs-review",
@@ -490,7 +515,7 @@ export function cweSarif(report) {
         tool: {
           driver: {
             name: "Synthesis CWE code review",
-            version: report?.rulePack.version || "cwe-v1",
+            version: report?.rulePack.version || "cwe-v2",
             rules: (report?.rulePack.rules || []).map((r) => ({
               id: r.id,
               properties: { tags: [r.cwe] },

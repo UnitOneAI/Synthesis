@@ -104,6 +104,16 @@ test("CWE API requires a current graph and exports explicit engine failure", asy
   await api("analyze", f.manifest);
   await wait();
   const model = await (await api("model")).json();
+  const beforeScan = await (
+    await api("export?format=cwe-coverage-json")
+  ).json();
+  assert.equal(beforeScan.targetCount, 29);
+  assert.ok(
+    beforeScan.rows.every((r) =>
+      ["not-run", "additional-evidence-required"].includes(r.modelStatus),
+    ),
+  );
+  assert.equal((await api("export?format=cwe-coverage-csv")).status, 200);
   assert.equal((await api("cwe", { modelRevision: "wrong" })).status, 409);
   assert.equal(
     (await api("cwe", { modelRevision: model.modelRevision })).status,

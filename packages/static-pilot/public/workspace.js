@@ -354,7 +354,8 @@
     }</div><div class="toolbar"><button id="ws-prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="ws-next" ${(page + 1) * 50 >= filtered.length ? "disabled" : ""}>Next</button></div>`;
   }
   function connectionCoverageHtml() {
-    const gaps = model.connectionDiscovery?.gaps || [];
+    const gaps =
+      s.coverage.connectionGaps || model.connectionDiscovery?.gaps || [];
     const byInterface = new Map(model.interfaces.map((i) => [i.id, i]));
     const byEvidence = new Map(model.evidence.map((v) => [v.id, v]));
     const rows = gaps.map((g) => {
@@ -362,7 +363,14 @@
         ev = byEvidence.get(i?.evidence?.[0]);
       return {
         ...g,
-        item: i,
+        item: i
+          ? {
+              ...i,
+              component:
+                s.components.find((c) => c.interfaceIds.includes(i.id))?.id ||
+                i.component,
+            }
+          : i,
         location: ev ? `${ev.repository}/${ev.path}:${ev.line}` : g.interfaceId,
       };
     });
@@ -372,7 +380,7 @@
         .includes(gapQuery.toLowerCase()),
     );
     const counts = s.coverage.architecture || {};
-    return `<details id="ws-unresolved"><summary>Connection coverage · ${gaps.length} resolution gaps · ${s.coverage.unresolvedFlows} unresolved relationships</summary><p>${counts.candidateProcesses || 0} candidate processes/resources · ${counts.sourceGroups || 0} source groups · ${counts.nonProductionGroups || 0} test/generated groups · ${counts.hostAssociations || 0} candidate host associations. These labels do not prove deployment.</p><label>Filter unresolved locations<input id="ws-gap-search" type="search" value="${e(gapQuery)}" placeholder="Repository, file or reason"></label><p>${filtered.length} matching gaps; first 100 shown. Export errors provides a bounded diagnostic sample; complete model JSON retains all gaps.</p><div class="table-wrap"><table><thead><tr><th>Source location</th><th>Unresolved reason</th><th>Component</th></tr></thead><tbody>${filtered
+    return `<details id="ws-unresolved"><summary>Connection coverage · ${gaps.length} resolution gaps · ${s.coverage.unresolvedFlows} unresolved relationships</summary><p>${counts.candidateProcesses || 0} candidate processes/resources · ${counts.sourceGroups || 0} source groups · ${counts.nonProductionGroups || 0} test/generated groups · ${counts.hostAssociations || 0} candidate host associations · ${counts.backgroundWorkers || 0} background worker candidates · ${counts.logicalResources || 0} logical resources. These labels do not prove deployment.</p><label>Filter unresolved locations<input id="ws-gap-search" type="search" value="${e(gapQuery)}" placeholder="Repository, file or reason"></label><p>${filtered.length} matching gaps; first 100 shown. Export errors provides a bounded diagnostic sample; complete model JSON retains all gaps.</p><div class="table-wrap"><table><thead><tr><th>Source location</th><th>Unresolved reason</th><th>Component</th></tr></thead><tbody>${filtered
       .slice(0, 100)
       .map(
         (g) =>

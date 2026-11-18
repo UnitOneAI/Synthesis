@@ -66,6 +66,33 @@
           Build a source graph before scanning.
         </p>
         <div id="cwe-coverage"></div>
+        <section aria-labelledby="cwe-target-heading" class="cwe-target-panel">
+          <h3 id="cwe-target-heading">Requested weakness coverage</h3>
+          <p>
+            Server weakness baseline · Original report references are retained.
+            Findings use precise weakness IDs. No findings does not establish
+            absence.
+          </p>
+          <label
+            >Coverage repository
+            <select id="cwe-target-repository">
+              <option value="">All repositories</option>
+            </select></label
+          >
+          <button data-export="cwe-coverage-json" disabled>
+            Export coverage JSON
+          </button>
+          <button data-export="cwe-coverage-csv" disabled>
+            Export coverage CSV
+          </button>
+          <p id="cwe-target-summary" role="status"></p>
+          <div
+            id="cwe-target-coverage"
+            class="cwe-target-scroll"
+            tabindex="0"
+            aria-label="Requested weakness coverage table"
+          ></div>
+        </section>
         <label
           >Filter CWE findings
           <input id="cwe-filter" placeholder="Repository, CWE, file or status"

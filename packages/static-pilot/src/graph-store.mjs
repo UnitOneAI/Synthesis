@@ -6,7 +6,7 @@ import { id, sha } from "./sources.mjs";
 import { redact } from "./model-review.mjs";
 
 export const GRAPH_SCHEMA = 1;
-export const EXTRACTOR_KEY = "disk-graph-6-architecture-endpoints";
+export const EXTRACTOR_KEY = "disk-graph-7-internal-topology";
 const bindings = new WeakMap();
 const json = JSON.stringify;
 const parse = (row) => (row ? JSON.parse(row.data) : undefined);

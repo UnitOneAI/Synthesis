@@ -112,7 +112,14 @@ export function architectureComponents(model) {
         sourceScope(evidence.get(i.evidence[0])?.path) ===
           "production-candidate",
     );
-    const type = role || (entries.length ? "process" : "source-group");
+    const type =
+      c.internalRole === "gateway"
+        ? "gateway"
+        : c.internalRole === "entrypoint"
+          ? "process"
+          : c.internalRole
+            ? "source-group"
+            : role || (entries.length ? "process" : "source-group");
     const support = facts.filter((i) => i.connection.role === role);
     const classificationEvidenceIds = [
       ...new Set(
@@ -136,13 +143,24 @@ export function architectureComponents(model) {
         : base;
     return {
       id: c.id,
-      name,
+      name: ["gateway", "entrypoint"].includes(c.internalRole)
+        ? c.name
+        : c.internalRole
+          ? `${c.name} · ${c.internalRole === "worker" ? "background worker" : c.internalRole === "service" ? "service entry" : c.internalRole === "storage-adapter" ? "storage adapter" : "client adapter"}`
+          : name,
+      internalRole: c.internalRole,
+      resourceKinds: c.resourceKinds,
+      parentComponentId: c.parentComponentId,
       sourceRoot: c.sourceRoot,
       type,
       scope,
-      classificationEvidenceIds,
-      classification:
-        type === "source-group"
+      classificationEvidenceIds: [
+        ...classificationEvidenceIds,
+        ...(c.declarationEvidence || []),
+      ],
+      classification: c.internalRole
+        ? "Internal source unit; separate process and activation not established"
+        : type === "source-group"
           ? "Source ownership only; executable host not identified"
           : role
             ? "Candidate from host or installer declaration"
@@ -198,4 +216,76 @@ export function architectureComponents(model) {
         "Unique executable project-reference owner in collected source; deployment requires review";
     }
   return result;
+}
+
+// Literal deployment declarations only; commands and configuration are never executed.
+export function deploymentFacts(file, text) {
+  const facts = [];
+  const add = (m, role, extra) =>
+    facts.push({
+      offset: m.index,
+      role,
+      reason: `Static deployment ${role}`,
+      ...extra,
+    });
+  if (/(^|\/)pyproject\.toml$/.test(file)) {
+    const section =
+      /^\[project\.scripts\]\s*\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(text);
+    if (section)
+      for (const m of section[1].matchAll(
+        /^\s*([\w-]+)\s*=\s*["']([\w.]+):\w+["']/gm,
+      ))
+        add(
+          {
+            index:
+              section.index + section[0].length - section[1].length + m.index,
+          },
+          "entrypoint",
+          {
+            module: m[2],
+            label: m[1],
+          },
+        );
+  }
+  if (!/(^|\/)Dockerfile(?:\.[\w-]+)?$|\.(?:conf|ini)$/i.test(file))
+    return facts;
+  const clean = text.replace(/^\s*#.*$/gm, (m) => m.replace(/[^\n]/g, " "));
+  const workdirs = [...clean.matchAll(/^WORKDIR\s+(\/[\w/.-]+)\s*$/gm)];
+  for (const m of clean.matchAll(
+    /^command=[^\n]*?\buvicorn\s+([\w.]+):\w+[^\n]*?--port\s+(\d+)\b[^\n]*/gm,
+  ))
+    if (/--host\s+(?:127\.0\.0\.1|0\.0\.0\.0|localhost)\b/.test(m[0]))
+      add(m, "host-binding", { module: m[1], port: Number(m[2]) });
+  for (const m of clean.matchAll(
+    /^\[program:([\w-]+)\]\s*\n([\s\S]*?)(?=^\[|^EOF|$(?![\s\S]))/gm,
+  )) {
+    if (!/^command=.*\bnode\s+[\w./-]+/m.test(m[2])) continue;
+    const stage = clean.lastIndexOf("\nFROM ", m.index);
+    const workdir = workdirs
+      .filter((w) => w.index > stage && w.index < m.index)
+      .at(-1)?.[1];
+    const directory = m[2].match(/^directory=(\/[\w/.-]+)\s*$/m)?.[1];
+    const port = m[2].match(/^environment=.*\bPORT="(\d+)"/m)?.[1];
+    if (
+      workdir &&
+      directory &&
+      port &&
+      (directory === workdir || directory.startsWith(workdir + "/"))
+    )
+      add(m, "host-binding", {
+        project: path.posix.join(
+          path.posix.relative(workdir, directory),
+          "package.json",
+        ),
+        port: Number(port),
+      });
+  }
+  for (const m of clean.matchAll(
+    /^\s*proxy_pass\s+(https?:\/\/(?:127\.0\.0\.1|localhost):(\d+))(?:\/[\w/.-]*)?\s*;/gm,
+  ))
+    add(m, "proxy-target", {
+      port: Number(m[2]),
+      transport: m[1].startsWith("https:") ? "HTTPS" : "HTTP",
+    });
+  return facts;
 }

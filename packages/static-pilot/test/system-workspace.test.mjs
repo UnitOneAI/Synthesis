@@ -120,7 +120,12 @@ test("system projection preserves unresolved destinations, source evidence and s
   assert.ok(s.actors.every((a) => a.basis === "assumption"));
   assert.equal(s.domains.length, 0);
   assert.ok(
-    s.entities.every((a) => a.type === "external" || a.type === "unknown"),
+    s.entities.every((a) => ["external", "unknown", "store"].includes(a.type)),
+  );
+  assert.ok(
+    s.entities
+      .filter((e) => e.type === "store")
+      .every((e) => e.evidenceIds.length && e.basis === "static resource use"),
   );
   assert.ok(
     s.boundaries.every((b) =>

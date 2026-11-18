@@ -334,3 +334,269 @@ test("HTTP and HTTPS calls retain separate diagram connections and source transp
   assert.match(systemSvg(m), /HTTPS/);
   assert.match(systemMermaid(m), /HTTPS in source URL/);
 });
+
+test("internal workers, imported storage and SDK use retain evidence without claiming process separation", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    app: {
+      "server.py":
+        'from workers import Consumer\nfrom storage import Store\napp.get("/items", handler)\nworker = Consumer()\nstore = Store()\n',
+      "workers.py":
+        "import threading\nfrom storage import Store\nclass Consumer:\n    def run(self):\n        store = Store()\n        threading.Thread(target=self.run)\n",
+      "storage.py":
+        "import sqlite3\nclass Store:\n    def open(self):\n        return sqlite3.connect(self.path)\n",
+      "client.py":
+        "import anthropic\nclient = anthropic.Anthropic(api_key=secret)\n",
+      "tests/test_storage.py":
+        'import sqlite3\nconn = sqlite3.connect("test.db")\n',
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root }),
+    s = systemModel(m),
+    d = diagramModel(s);
+  const worker = s.components.find((n) => n.internalRole === "worker");
+  assert.equal(worker.type, "source-group");
+  assert.ok(worker.classificationEvidenceIds.length);
+  assert.ok(
+    s.flows.some((f) => f.target === worker.id && f.protocol === "in-process"),
+  );
+  assert.ok(
+    s.flows.some((f) => f.source === worker.id && f.protocol === "in-process"),
+  );
+  assert.ok(d.nodes.some((n) => n.name === "SQLite"));
+  assert.ok(d.nodes.some((n) => n.name === "Anthropic client"));
+  assert.ok(!d.nodes.some((n) => n.scope === "test"));
+  assert.ok(d.nodes.every((n) => n.evidenceIds.length));
+  const storage = s.components.find((n) => n.sourceRoot === "storage.py");
+  assert.ok(
+    diagramModel(s, { level: "focus", focus: storage.id }).nodes.some(
+      (n) => n.id === storage.id,
+    ),
+  );
+  assert.match(systemMermaid(m), /SQLite/);
+  assert.match(systemSvg(m), /in-process worker candidate/);
+});
+
+test("Python re-exports resolve unique calls; imports alone, comments and test resources do not become production edges", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    app: {
+      "server.py":
+        "from lib import Worker\nfrom unused import Other\nw = Worker()\n",
+      "lib/__init__.py": "from .worker import Worker\n",
+      "lib/worker.py":
+        "import threading\nclass Worker:\n    def run(self):\n        threading.Thread(target=self.run)\n",
+      "unused.py":
+        "import threading\nclass Other:\n    def run(self):\n        threading.Thread(target=self.run)\n",
+      "comments.py":
+        '"""threading.Thread(target=run)\nsqlite3.connect(secret)"""\n# anthropic.Anthropic(secret)\n',
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root }),
+    s = systemModel(m);
+  const worker = s.components.find((n) => n.sourceRoot === "lib/worker.py"),
+    unused = s.components.find((n) => n.sourceRoot === "unused.py");
+  assert.ok(
+    s.flows.some((f) => f.target === worker.id && f.evidenceIds.length >= 3),
+  );
+  assert.ok(!s.flows.some((f) => f.target === unused.id));
+  assert.ok(!s.components.some((n) => n.sourceRoot === "comments.py"));
+});
+
+test(
+  "twelve .NET repositories include hosted workers, shared SQL, RabbitMQ and WCF dependencies with disk parity",
+  { skip: !sqliteSupported() },
+  async (t) => {
+    const repos = {};
+    for (let n = 0; n < 12; n++)
+      repos["service" + n] = {
+        "Service.csproj": '<Project Sdk="Microsoft.NET.Sdk.Web" />',
+        "Program.cs":
+          "var b = WebApplication.CreateBuilder(args); b.Services.AddHostedService<Worker>();",
+        "Worker.cs":
+          'class Worker : BackgroundService { void Run() { var c = new SqlConnection(configuration["Database"]); } }',
+        "Controller.cs":
+          '[Route("items")] class ItemsController { [HttpGet("{id}")] public string Get(int id) => ""; }',
+        "Client.cs":
+          n < 11
+            ? `client.BaseAddress = new Uri(configuration["Api"]); client.GetAsync("items/1");`
+            : "",
+        "settings.json": JSON.stringify({
+          Urls: `https://host${n}`,
+          Api: `https://host${n + 1}/`,
+          ConnectionStrings: {
+            Main: "Server=db;Database=shared;Password=PRIVATE",
+          },
+          Broker: "amqp://u:PRIVATE@broker/shared",
+        }),
+        "web.config":
+          '<configuration><system.serviceModel><client><endpoint address="https://legacy/service" contract="IService" /></client></system.serviceModel></configuration>',
+      };
+    const { root, manifest } = await fixture(t, repos);
+    const memory = await analyze(manifest, { sourceRoot: root });
+    const disk = await analyze(manifest, {
+      sourceRoot: root,
+      graphDatabase: path.join(root, "graph.sqlite"),
+    });
+    const a = systemModel(memory),
+      b = systemModel(disk);
+    assert.deepEqual(a.flows, b.flows);
+    assert.equal(
+      a.components.filter((c) => c.internalRole === "worker").length,
+      12,
+    );
+    assert.equal(a.flows.filter((f) => f.protocol === "in-process").length, 12);
+    assert.ok(a.entities.some((e) => e.type === "broker"));
+    assert.equal(
+      a.entities.filter((e) => e.name.startsWith("SQL store")).length,
+      1,
+    );
+    assert.equal(
+      a.entities.filter((e) => e.name.startsWith("WCF endpoint")).length,
+      1,
+    );
+    assert.equal(a.flows.filter((f) => f.protocol === "SOAP").length, 12);
+    assert.doesNotMatch(JSON.stringify(a), /PRIVATE/);
+    const repeat = await analyze(manifest, {
+      sourceRoot: root,
+      graphDatabase: path.join(root, "graph.sqlite"),
+    });
+    assert.deepEqual(systemModel(repeat).flows, b.flows);
+  },
+);
+
+test("literal deployment commands connect reverse proxy to collected hosts and retain CLI entry points", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    app: {
+      Dockerfile:
+        'FROM node AS builder\nWORKDIR /web\nFROM python\nWORKDIR /app\nCOPY . .\nserver {\n proxy_pass http://127.0.0.1:8000;\n proxy_pass http://127.0.0.1:3000;\n}\n[program:api]\ncommand=/bin/uvicorn api.server:app --host 127.0.0.1 --port 8000\n[program:web]\ncommand=/bin/node server.js\ndirectory=/app/web\nenvironment=PORT="3000"\nEOF\n',
+      "api/server.py": '@app.get("/items")\ndef items(): return []\n',
+      "web/package.json": '{"scripts":{"start":"next start"}}',
+      "pyproject.toml":
+        '[project.scripts]\nexample = "cli.main:app"\n[project.urls]\n',
+      "cli/main.py": "def app():\n    pass\n",
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root }),
+    s = systemModel(m);
+  const gateway = s.components.find((c) => c.internalRole === "gateway");
+  assert.ok(gateway);
+  assert.equal(gateway.type, "gateway");
+  assert.equal(s.flows.filter((f) => f.source === gateway.id).length, 2);
+  assert.ok(
+    s.flows
+      .filter((f) => f.source === gateway.id)
+      .every((f) => f.evidenceIds.length === 2 && f.transport === "HTTP"),
+  );
+  assert.ok(
+    s.components.some((c) => c.name === "example CLI" && c.type === "process"),
+  );
+});
+
+test("shadowed imported constructors do not create internal connections", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    app: {
+      "server.py":
+        "from worker import Worker\ndef run(Worker):\n    Worker()\n",
+      "worker.py":
+        "import threading\nclass Worker:\n    def run(self):\n        threading.Thread(target=self.run)\n",
+    },
+  });
+  const s = systemModel(await analyze(manifest, { sourceRoot: root }));
+  const w = s.components.find((c) => c.internalRole === "worker");
+  assert.ok(w);
+  assert.ok(!s.flows.some((f) => f.target === w.id));
+});
+
+test("worker resource bindings require a unique same-project configuration key", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    service: {
+      "Service.csproj": '<Project Sdk="Microsoft.NET.Sdk.Web" />',
+      "Worker.cs":
+        'class Worker : BackgroundService { void Run() { new SqlConnection(configuration.GetConnectionString("Main")); } }',
+      "settings.json":
+        '{"ConnectionStrings":{"Main":"Server=db;Database=shared;Password=PRIVATE"}}',
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root }),
+    s = systemModel(m);
+  const worker = s.components.find((c) => c.internalRole === "worker"),
+    store = s.entities.find((e) => e.name.startsWith("SQL store"));
+  assert.ok(
+    s.flows.some(
+      (f) =>
+        f.source === worker.id &&
+        f.target === store.id &&
+        f.evidenceIds.length >= 2,
+    ),
+  );
+  assert.ok(!s.entities.some((e) => e.resourceKind === "Database"));
+  await fs.writeFile(
+    path.join(root, "service", "settings.Production.json"),
+    '{"ConnectionStrings":{"Main":"Server=other;Database=prod"}}',
+  );
+  const conflicting = systemModel(
+    await analyze(manifest, { sourceRoot: root }),
+  );
+  assert.ok(
+    !conflicting.flows.some(
+      (f) => f.source === worker.id && f.target === store.id,
+    ),
+  );
+  assert.ok(
+    conflicting.coverage.connectionGaps.some(
+      (g) => g.reason === "resource-identity-unresolved",
+    ),
+  );
+});
+
+test("Python local endpoint constants resolve within their function and fetch methods are not browser HTTP", async (t) => {
+  const { root, manifest } = await fixture(t, {
+    app: {
+      "client.py":
+        'import requests\ndef first():\n    url = "https://one.example/api"\n    requests.get(url)\ndef second():\n    url = "https://two.example/api"\n    requests.get(url)\ndef dynamic(url):\n    requests.get(url)\nrepository.fetch()\n',
+    },
+  });
+  const m = await analyze(manifest, { sourceRoot: root });
+  assert.equal(m.connectionDiscovery.coverage.httpOutboundCandidates, 3);
+  assert.equal(m.connectionDiscovery.flows.length, 2);
+  assert.ok(
+    m.connectionDiscovery.entities.some(
+      (e) => e.name === "HTTP endpoint one.example",
+    ),
+  );
+  assert.ok(
+    m.connectionDiscovery.entities.some(
+      (e) => e.name === "HTTP endpoint two.example",
+    ),
+  );
+  assert.equal(m.connectionDiscovery.coverage.httpClients, 2);
+});
+
+test("presentation ownership follows adapters through libraries to their candidate host", () => {
+  const s = graphModel();
+  s.components.push(
+    {
+      id: "library",
+      name: "Library",
+      type: "source-group",
+      hostCandidateId: "a",
+      interfaceIds: [],
+      evidenceIds: [],
+    },
+    {
+      id: "adapter",
+      name: "Client",
+      type: "source-group",
+      internalRole: "client-adapter",
+      parentComponentId: "library",
+      interfaceIds: [],
+      evidenceIds: [],
+    },
+  );
+  s.flows = [
+    { ...s.flows[0], id: "adapter-call", source: "adapter", target: "b" },
+  ];
+  const d = diagramModel(s);
+  assert.equal(d.connections.length, 1);
+  assert.equal(d.connections[0].source, "a");
+  assert.ok(d.nodes.find((n) => n.id === "a").memberIds.includes("adapter"));
+});

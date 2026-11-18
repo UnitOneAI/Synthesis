@@ -244,6 +244,15 @@ export function configurationConnection(key, value, pointer, parent) {
   if (key === "@value" && typeof parent?.["@key"] === "string")
     key = parent["@key"];
   const ep = endpoint(value);
+  if (ep && key === "@address" && parent?.["@contract"]) {
+    return {
+      kind: "resource",
+      protocol: "SOAP",
+      identity: sha(ep.origin + ep.path),
+      label: `WCF endpoint ${new URL(ep.origin).host}`,
+      transport: ep.scheme.toUpperCase(),
+    };
+  }
   if (ep && ["http", "https"].includes(ep.scheme)) {
     const role = /kestrel|aspnetcore_urls|\/urls$|\/binding/i.test(pointer)
       ? "listener"
@@ -259,6 +268,7 @@ export function configurationConnection(key, value, pointer, parent) {
   if (ep && !["http", "https"].includes(ep.scheme)) {
     return {
       kind: "resource",
+      key,
       protocol: /^amqp/.test(ep.scheme) ? "messaging" : "database",
       identity: sha(`${ep.origin}${ep.path}`),
       label: `${ep.scheme} resource ${sha(`${ep.origin}${ep.path}`).slice(0, 10)}`,
@@ -277,6 +287,7 @@ export function configurationConnection(key, value, pointer, parent) {
       );
       return {
         kind: "resource",
+        key,
         protocol: "database",
         identity,
         label: `SQL store ${identity.slice(0, 10)}`,
@@ -418,6 +429,45 @@ export function discoverConnections(model, nodes) {
     // Collapse duplicated contracts for one component, but never guess between components.
     const targets = new Set(candidates.map((i) => i.component));
     if (targets.size !== 1) {
+      if (!targets.size && origin) {
+        const target = id("http-endpoint", origin);
+        let entity = entities.find((e) => e.id === target);
+        if (!entity) {
+          entity = {
+            id: target,
+            name: `HTTP endpoint ${new URL(origin).host}`,
+            type: "external",
+            repositories: [],
+            interfaceIds: [],
+            evidenceIds: [],
+            basis: "static endpoint reference",
+            reviewState: "pending",
+            description:
+              "URL identified in source; target implementation, organization ownership and deployment are not established.",
+          };
+          entities.push(entity);
+        }
+        entity.interfaceIds.push(client.id);
+        entity.evidenceIds.push(...client.evidence);
+        flows.push({
+          id: id("endpoint-reference", client.id, target),
+          from: client.id,
+          source: client.component,
+          target,
+          protocol: "HTTP",
+          transport: origin.startsWith("https:") ? "HTTPS" : "HTTP",
+          operation: `${c.method} ${c.path}`,
+          basis: "static endpoint reference",
+          confidence: "medium",
+          reason: entity.description,
+          data: "Unclassified",
+          controls: "Not established",
+          evidence: [
+            ...new Set([...client.evidence, ...(c.resolutionEvidence || [])]),
+          ],
+          graphNodeIds: [client.id],
+        });
+      }
       gaps.push({
         interfaceId: client.id,
         reason: targets.size ? "ambiguous-route" : "no-route-match",
@@ -474,7 +524,12 @@ export function discoverConnections(model, nodes) {
       entity = {
         id: target,
         name: c.label,
-        type: c.protocol === "messaging" ? "broker" : "store",
+        type:
+          c.protocol === "messaging"
+            ? "broker"
+            : c.protocol === "SOAP"
+              ? "external"
+              : "store",
         repositories: [],
         interfaceIds: [],
         evidenceIds: [],

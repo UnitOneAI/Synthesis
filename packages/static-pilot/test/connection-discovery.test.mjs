@@ -132,7 +132,16 @@ test(
       "app.get('/renamed', handler); fetch('https://host2/service2');",
     );
     const third = await analyze(m, { sourceRoot: root, graphDatabase });
-    assert.equal(third.connectionDiscovery.flows.length, 10);
+    assert.equal(
+      third.connectionDiscovery.flows.filter((f) => f.to).length,
+      10,
+    );
+    assert.equal(
+      third.connectionDiscovery.flows.filter(
+        (f) => f.basis === "static endpoint reference",
+      ).length,
+      1,
+    );
   },
 );
 test("unique routes remain hypotheses; ambiguous routes and wrong hosts never fabricate links", async (t) => {
@@ -152,8 +161,17 @@ test("unique routes remain hypotheses; ambiguous routes and wrong hosts never fa
   const m = await analyze(manifest(["web", "a", "b", "c"]), {
     sourceRoot: root,
   });
-  assert.equal(m.connectionDiscovery.flows.length, 1);
+  assert.equal(m.connectionDiscovery.flows.length, 2);
   assert.equal(m.connectionDiscovery.flows[0].basis, "inferred route match");
+  const endpoint = m.connectionDiscovery.flows.find(
+    (f) => f.basis === "static endpoint reference",
+  );
+  assert.ok(
+    m.connectionDiscovery.entities.some(
+      (e) => e.id === endpoint.target && e.name === "HTTP endpoint wrong",
+    ),
+  );
+  assert.ok(!endpoint.to); // Never connect the wrong host to a collected server.
   assert.equal(
     m.connectionDiscovery.gaps.find((g) => g.reason === "ambiguous-route")
       .candidateCount,

@@ -1,3 +1,4 @@
+import { cweTargetCoverage, cweTargetCsv } from "./cwe-targets.mjs";
 import { reviewCweCode } from "./cwe-model.mjs";
 import { redact } from "./model-review.mjs";
 import { scanCwe, cweCsv, cweSarif } from "./cwe-scan.mjs";
@@ -265,6 +266,7 @@ export async function serve({
   };
   const outputModel = () => ({
     ...model,
+    cweTargetCoverage: cweTargetCoverage(model),
     strideMatrix: strideMatrix(model),
     systemModel: systemModel(model),
     diagnosticCoverage: diagnosticCoverage(model),
@@ -969,6 +971,8 @@ export async function serve({
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
+          "cwe-coverage-json": "cwe-target-coverage.json",
+          "cwe-coverage-csv": "cwe-target-coverage.csv",
           "cwe-model-json": "cwe-source-review.json",
           "cwe-json": "cwe-review.json",
           "cwe-csv": "cwe-findings.csv",
@@ -996,6 +1000,14 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
+        if (format === "cwe-coverage-json")
+          return send(200, cweTargetCoverage(model));
+        if (format === "cwe-coverage-csv")
+          return send(
+            200,
+            cweTargetCsv(cweTargetCoverage(model)),
+            "text/csv; charset=utf-8",
+          );
         if (format === "cwe-model-json")
           return model.cweModelReview
             ? send(200, model.cweModelReview)

@@ -1,3 +1,5 @@
+import { cweTargetCoverage } from "./cwe-targets.mjs";
+import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents } from "./architecture.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -308,6 +310,8 @@ export async function errorReport({
   secrets = [],
   roots = [],
 } = {}) {
+  if (model?.components && model?.interfaces && model?.evidence)
+    model = internalTopology(model);
   const text = (v) =>
     typeof v === "string"
       ? v.slice(0, 500)
@@ -401,6 +405,25 @@ export async function errorReport({
           "A request-budget stop is pending work, not a failed model request.",
       },
       cweSourceReview: review(model?.cweModelReview),
+      cweTargets: model
+        ? (() => {
+            const c = cweTargetCoverage(model);
+            return {
+              profile: c.profile,
+              profileHash: c.profileHash,
+              targetCount: c.targetCount,
+              requestedIdentifierCount: c.requestedIdentifierCount,
+              repositoryTargetRows: c.rows.length,
+              modelStatusCounts: Object.fromEntries(
+                [...new Set(c.rows.map((r) => r.modelStatus))].map((status) => [
+                  status,
+                  c.rows.filter((r) => r.modelStatus === status).length,
+                ]),
+              ),
+              additionalFindings: c.additionalFindings.length,
+            };
+          })()
+        : { status: "not-built" },
       semgrep: {
         status: model?.cweReview?.status,
         failure: model?.cweReview?.error
@@ -437,6 +460,14 @@ export async function errorReport({
                 candidateHostAssociations: nodes.filter(
                   (n) => n.hostCandidateId,
                 ).length,
+                internalUnits: nodes.filter((n) => n.internalRole).length,
+                backgroundWorkers: nodes.filter(
+                  (n) => n.internalRole === "worker",
+                ).length,
+                logicalResources:
+                  model.connectionDiscovery?.entities?.filter(
+                    (n) => n.resourceKind,
+                  ).length || 0,
                 diagramNodeLimit: 80,
                 diagramConnectionLimit: 240,
                 unresolvedPeersHiddenByDefault: true,
@@ -447,6 +478,8 @@ export async function errorReport({
           : null,
       connections: {
         coverage: pick(model?.connectionDiscovery?.coverage, [
+          "internalConnections",
+          "internalResolutionGaps",
           "indexedInterfaces",
           "httpClients",
           "httpServers",
@@ -628,12 +661,21 @@ export async function diagnosticBundle({
             status: f.status,
           })),
           batches: model.cweModelReview.batches.map(
-            ({ limitations, ...b }) => b,
+            ({ limitations, targetReviews, ...b }) => ({
+              ...b,
+              targetReviews: (targetReviews || []).map(
+                ({ rationale, ...r }) => r,
+              ),
+            }),
           ),
         }
       : { status: "not-run" },
   );
   json("cwe-review.json", model?.cweReview || { status: "not-run" });
+  json(
+    "cwe-target-coverage.json",
+    model ? cweTargetCoverage(model) : { status: "not-built" },
+  );
   json(
     "connection-discovery.json",
     model?.connectionDiscovery || { status: "not-run" },

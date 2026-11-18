@@ -63,6 +63,68 @@ export function diagramModel(s, options = {}) {
       )
         owners.set(n.id, host.id);
     }
+  // System view groups logical resources by technology and source owner. This is
+  // presentation grouping only, never an assertion of a shared physical database.
+  if (level === "system" && !showSupporting) {
+    const resourceGroups = new Map();
+    for (const n of s.entities.filter(
+      (n) =>
+        n.resourceKind &&
+        usable(n) &&
+        !n.decision &&
+        n.basis !== "reviewer declaration",
+    )) {
+      const key = [
+        n.parentComponentId,
+        n.resourceKind,
+        n.scope,
+        memberships(n.id),
+      ].join(":");
+      if (!resourceGroups.has(key)) resourceGroups.set(key, n.id);
+      if (!n.decision && n.basis !== "reviewer declaration")
+        owners.set(n.id, resourceGroups.get(key));
+    }
+    for (const n of s.components.filter((n) => n.internalRole && usable(n))) {
+      if (
+        n.decision ||
+        n.basis === "reviewer declaration" ||
+        memberships(n.id) !== memberships(n.parentComponentId)
+      )
+        continue;
+      if (n.internalRole === "client-adapter")
+        owners.set(n.id, n.parentComponentId);
+      if (n.internalRole === "storage-adapter") {
+        const destinations = s.flows
+          .filter(
+            (f) => f.source === n.id && f.protocol === "storage" && usable(f),
+          )
+          .map((f) => f.target);
+        const groups = unique(
+          destinations.map((target) => owners.get(target) || target),
+        );
+        if (
+          groups.length === 1 &&
+          !byId.get(groups[0])?.decision &&
+          memberships(n.id) === memberships(groups[0])
+        )
+          owners.set(n.id, groups[0]);
+      }
+    }
+  }
+  // Resolve presentation ownership transitively (adapter -> library -> host).
+  for (const [node, initial] of owners) {
+    const seen = new Set([node]);
+    let owner = initial;
+    while (
+      owner !== owners.get(owner) &&
+      owners.has(owner) &&
+      !seen.has(owner)
+    ) {
+      seen.add(owner);
+      owner = owners.get(owner);
+    }
+    owners.set(node, seen.has(owner) && owner !== node ? node : owner);
+  }
   let nodes = all
     .filter(usable)
     .filter((n) => owners.get(n.id) === n.id)
@@ -70,6 +132,9 @@ export function diagramModel(s, options = {}) {
       const members = all.filter((m) => owners.get(m.id) === n.id);
       return {
         ...n,
+        name: n.resourceKind
+          ? `${n.resourceKind}${members.filter((m) => m.resourceKind).length > 1 ? ` · ${members.filter((m) => m.resourceKind).length} logical resources` : ""}`
+          : n.name,
         memberIds: members.map((m) => m.id),
         evidenceIds: unique(members.flatMap((m) => m.evidenceIds || [])),
         interfaceIds: unique(members.flatMap((m) => m.interfaceIds || [])),
@@ -80,7 +145,15 @@ export function diagramModel(s, options = {}) {
     source: owners.get(f.source) || f.source,
     target: owners.get(f.target) || f.target,
   }));
-  const unresolvedCount = flows.filter((f) => f.basis === "unresolved").length;
+  flows = flows.filter(
+    (f) =>
+      f.source !== f.target ||
+      s.flows.find((original) => original.id === f.id)?.source ===
+        s.flows.find((original) => original.id === f.id)?.target,
+  );
+  const unresolvedCount = s.flows.filter(
+    (f) => f.basis === "unresolved",
+  ).length;
   if (!showUnresolved) {
     flows = flows.filter((f) => f.basis !== "unresolved");
     nodes = nodes.filter((n) => n.basis !== "unresolved");

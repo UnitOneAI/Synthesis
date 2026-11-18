@@ -483,3 +483,28 @@ select:focus-visible,
     margin-left: 0;
   }
 }
+
+.cwe-target-panel {
+  margin: 24px 0;
+  padding: 18px;
+  background: #f8faf6;
+  border: 1px solid #d7dfd4;
+  border-radius: 8px;
+}
+.cwe-target-scroll {
+  max-height: 600px;
+  overflow: auto;
+  margin-top: 12px;
+}
+.cwe-target-scroll th {
+  position: sticky;
+  top: 0;
+  background: #eaf0e5;
+  z-index: 1;
+}
+.cwe-target-scroll td:first-child {
+  width: 42%;
+}
+.cwe-target-scroll details {
+  max-width: 500px;
+}

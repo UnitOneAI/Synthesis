@@ -27,7 +27,7 @@ const excluded = new Set([
   "packages-cache",
 ]);
 const supported =
-  /\.(py|cs|csproj|vbproj|vcxproj|sln|cpp|cc|c|h|hpp|js|mjs|ts|tsx|jsx|json|xml|config|wxs|wxi|wixproj|props|targets|sql|yaml|yml|proto|graphql|ps1|sh|bat|cmd|tf)$/i;
+  /\.(py|cs|csproj|vbproj|vcxproj|sln|cpp|cc|c|h|hpp|js|mjs|ts|tsx|jsx|json|xml|config|wxs|wxi|wixproj|props|targets|sql|yaml|yml|proto|graphql|ps1|sh|bat|cmd|tf|toml|conf|ini)$|(^|\/)Dockerfile(?:\.[\w-]+)?$/i;
 export const excludedPath = (name) =>
   name.split("/").some((x) => excluded.has(x)) ||
   /(^|\/)(\.env(?!\.example$)[^/]*|[^/]*\.(pem|key|pfx|p12|keystore))$/i.test(

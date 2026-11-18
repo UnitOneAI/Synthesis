@@ -75,11 +75,36 @@ function expression(expr, text, before, seen = new Set()) {
     ? { ...next, offsets: [...next.offsets, assignments[0].index] }
     : null;
 }
+function pythonFunctionScope(text, offset) {
+  const definitions = [
+    ...text.matchAll(/^([ \t]*)(?:async\s+)?def\s+\w+\s*\(/gm),
+  ].filter((m) => m.index < offset);
+  for (const def of definitions.reverse()) {
+    const header = text
+      .slice(def.index, Math.min(offset, def.index + 5000))
+      .match(/\)\s*(?:->[^:\n]+)?\s*:\s*\n/);
+    if (!header) continue;
+    const bodyStart = def.index + header.index + header[0].length;
+    let end = text.length;
+    for (const line of text
+      .slice(bodyStart)
+      .matchAll(/^([ \t]*)(\S[^\n]*)/gm)) {
+      if (line[1].length <= def[1].length) {
+        end = bodyStart + line.index;
+        break;
+      }
+    }
+    if (offset < end)
+      return { text: text.slice(def.index, end), offset: def.index };
+  }
+  return { text, offset: 0 };
+}
+
 export function symbolicHttpConnection(item, file, offset) {
   if (item.direction !== "outbound" || item.protocol !== "HTTP") return null;
   const tail = file.text.slice(offset, offset + 2500);
   const op = tail.match(
-    /^(GetAsync|GetStringAsync|PostAsync|PutAsync|DeleteAsync|PatchAsync|SendAsync|fetch|axios\.(?:get|post|put|delete))\s*\(/,
+    /^(GetAsync|GetStringAsync|PostAsync|PutAsync|DeleteAsync|PatchAsync|SendAsync|fetch|axios\.(?:get|post|put|delete)|(?:requests|httpx|session|client)\.(?:get|post|put|delete|patch))\s*\(/,
   );
   if (!op) return null;
   let arg = firstArgument(tail.slice(op[0].length)),
@@ -128,7 +153,23 @@ export function symbolicHttpConnection(item, file, offset) {
           ?.toUpperCase();
   } else method = op[1].match(/get|post|put|delete|patch/i)?.[0].toUpperCase();
   if (!method) return null;
-  const value = expression(arg, file.text, requestOffset ?? offset);
+  const scope = file.path.endsWith(".py")
+    ? pythonFunctionScope(file.text, offset)
+    : { text: file.text, offset: 0 };
+  if (
+    file.path.endsWith(".py") &&
+    /^\w+$/.test(arg?.trim()) &&
+    new RegExp(`def\\s+\\w+\\s*\\([^)]*\\b${escaped(arg.trim())}\\b`).test(
+      scope.text,
+    )
+  )
+    return null;
+  const value = expression(
+    arg,
+    scope.text,
+    (requestOffset ?? offset) - scope.offset,
+  );
+  if (value) value.offsets = value.offsets.map((n) => n + scope.offset);
   if (!value) return null;
   if (requestOffset !== undefined) value.offsets.push(requestOffset);
   const receiver = file.text
