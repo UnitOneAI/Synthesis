@@ -9,6 +9,8 @@
     <script src="/app.js" defer></script>
     <script src="/workspace.js" defer></script>
     <script src="/cwe.js" defer></script>
+    <script src="/exploration.js" defer></script>
+    <link rel="stylesheet" href="/exploration.css" />
   </head>
   <body>
     <header>
@@ -42,9 +44,102 @@
         ><button data-tab="review">Connection declarations</button
         ><button data-tab="stride">4 · STRIDE matrix</button
         ><button data-tab="cwe">5 · CWE code review</button
+        ><button data-tab="exploration">6 · Exploration</button
         ><button data-tab="model">Evidence and details</button>
       </nav>
       <div id="message" role="status" aria-live="polite"></div>
+      <section id="exploration" class="panel" hidden>
+        <p class="eyebrow">STATIC REVIEW EXPLORATION</p>
+        <h2>Follow the evidence</h2>
+        <p id="exploration-summary">Build or open a saved source graph.</p>
+        <p>
+          Trace requested CWE checks and STRIDE reviews through source
+          observations, candidate findings, controls and unresolved questions.
+          Links show review history, not proven attack paths.
+        </p>
+        <div class="exploration-controls">
+          <label
+            >Requests this action
+            <input
+              id="exploration-budget"
+              type="number"
+              min="1"
+              max="100"
+              value="12"
+          /></label>
+          <label class="exploration-consent-label"
+            ><input id="exploration-consent" type="checkbox" /> Send redacted
+            source to the configured provider</label
+          >
+          <button id="exploration-run" disabled>
+            Run or continue exploration</button
+          ><button id="exploration-stop" hidden>Stop exploration</button>
+        </div>
+        <p>
+          Continues STRIDE, then requested CWE review, then candidate
+          assessments. Completed compatible packets are reused. Budget
+          exhaustion and unavailable evidence remain partial.
+        </p>
+        <div class="exploration-controls">
+          <button id="exploration-home" class="secondary">Overview</button
+          ><button id="exploration-back" class="secondary">Back</button>
+          <label
+            >Snapshot
+            <select id="exploration-snapshot"></select></label
+          ><label
+            >Browse
+            <select id="exploration-kind">
+              <option value="phase">Review phases</option>
+              <option value="goal">Requested CWE checks</option>
+              <option value="finding">Findings</option>
+              <option value="step">Review packets</option>
+              <option value="assessment">Assessments</option>
+              <option value="gap">Evidence gaps</option>
+            </select></label
+          >
+          <button id="exploration-refresh" class="secondary">
+            Refresh history
+          </button>
+          <button
+            id="exploration-zoom-in"
+            class="secondary"
+            aria-label="Zoom in"
+          >
+            +</button
+          ><button
+            id="exploration-zoom-out"
+            class="secondary"
+            aria-label="Zoom out"
+          >
+            −</button
+          ><button id="exploration-fit" class="secondary">Fit</button>
+          <button id="exploration-export" class="secondary">
+            Export selected graph</button
+          ><button id="exploration-svg-export" class="secondary">
+            Export SVG
+          </button>
+        </div>
+        <p id="exploration-page" role="status"></p>
+        <button id="exploration-next" class="secondary" disabled>
+          Next records
+        </button>
+        <div id="exploration-breadcrumb" class="exploration-controls"></div>
+        <div class="exploration-layout">
+          <div class="exploration-canvas">
+            <svg
+              id="exploration-svg"
+              xmlns="http://www.w3.org/2000/svg"
+              role="group"
+              aria-label="Static review graph"
+            ></svg
+            ><svg id="exploration-minimap" aria-label="Review minimap"></svg>
+          </div>
+          <aside id="exploration-detail">
+            <h3>Review evidence</h3>
+            <p>Select a review card.</p>
+          </aside>
+        </div>
+      </section>
       <section id="cwe" class="panel" hidden>
         <h2>CWE code review</h2>
         <h3>Local Semgrep scan</h3>
@@ -133,6 +228,35 @@
         </button>
         <p id="cwe-model-status" role="status">No source review has run.</p>
         <div id="cwe-model-results"></div>
+        <hr />
+        <h3>Security investigations</h3>
+        <p>
+          Assess findings from the requested CWE profile and additional concerns
+          such as control gaps, excessive authority and recovery risks.
+          Requested CWE coverage remains available above. Assessment uses saved
+          graph connections and hash-checked source; no target code runs. A
+          source-supported assessment is not verified exploitation.
+        </p>
+        <p>
+          Use the source-sharing checkbox and request budget above. Each request
+          assesses one candidate or retrieves follow-up context. Up to three
+          assessment rounds per candidate; unresolved facts remain visible.
+        </p>
+        <button id="security-run" disabled>
+          Run or continue evidence assessment
+        </button>
+        <button id="security-stop" hidden>Stop evidence assessment</button>
+        <button data-export="security-json" disabled>
+          Export security investigations
+        </button>
+        <label
+          >Filter security investigations
+          <input
+            id="security-filter"
+            placeholder="Type, repository, source scope, CWE or assessment"
+        /></label>
+        <p id="security-status" role="status"></p>
+        <div id="security-results"></div>
       </section>
       <section id="workspace" class="panel" hidden>
         <h2>System model</h2>

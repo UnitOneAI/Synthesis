@@ -94,12 +94,24 @@ export function modelConfig(
       "Set --model to an approved provider model ID (letters, digits, dots, underscores and hyphens)",
     );
   const apiKey = env[PROVIDERS[provider].key];
+  if (
+    env.SYNTHESIS_STRUCTURED_OUTPUTS !== undefined &&
+    !["0", "1"].includes(env.SYNTHESIS_STRUCTURED_OUTPUTS)
+  )
+    throw Error("SYNTHESIS_STRUCTURED_OUTPUTS must be 0 or 1");
+  if (env.SYNTHESIS_STRUCTURED_OUTPUTS === "1" && provider === "gemini")
+    throw Error(
+      "Native JSON response mode currently requires an Anthropic-compatible provider; unset SYNTHESIS_STRUCTURED_OUTPUTS for Gemini",
+    );
   if (typeof apiKey !== "string" || !apiKey.trim() || /[\r\n]/.test(apiKey))
     throw new Error(`Set ${PROVIDERS[provider].key} in the server environment`);
   return {
     provider,
     model,
     apiKey,
+    ...(env.SYNTHESIS_STRUCTURED_OUTPUTS === "1"
+      ? { structuredOutputs: true }
+      : {}),
     ...(provider === "anthropic-gateway"
       ? gatewayOptions(
           options.baseUrl ?? env.SYNTHESIS_LLM_BASE_URL,
@@ -485,6 +497,13 @@ export async function requestReview(
     ? {
         model: config.model,
         max_tokens: REVIEW_LIMITS.outputTokens,
+        ...(config.structuredOutputs && options.responseSchema
+          ? {
+              output_config: {
+                format: { type: "json_schema", schema: options.responseSchema },
+              },
+            }
+          : {}),
         system: requestPrompt,
         messages: [{ role: "user", content: user }],
       }

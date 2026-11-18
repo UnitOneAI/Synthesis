@@ -31,16 +31,15 @@ To preload a prepared inventory selection, append `--manifest "/private/scope.js
 9. Use **Export review package** for HTML, SVG, Mermaid, full JSON, source manifest and CSV registers (actors, boundaries, controls, threats, components, flows, assets and STRIDE). Exports use the complete model regardless of view filters. Open the HTML report and use **Print → Save as PDF**; keep SVG/Mermaid for detailed diagrams. The overview is capped at 80 objects with a visible omission notice; registers and JSON retain the complete scope. Excerpts are omitted from checkpoints and exports, but scenario prose can paraphrase submitted evidence: keep reports private.
 10. Record review decisions with a reviewer, rationale, owner and severity assessment. These are local annotations, not authenticated organizational approvals. Rebuilding retains architecture declarations and marks decisions stale when evidence changes; repair stale references before relying on them. Source changes on disk are inspected only when rebuilding.
 
-
 ## Claude or Gemini underneath
 
 Choose an organization-approved provider and an available model ID. Model IDs are configurable and are never silently replaced. Set the key in the **server environment**, using your normal secret-management process; never put it in a manifest, source URL or browser field.
 
-| Provider | Flag | Key environment variable | Network destination |
-| --- | --- | --- | --- |
-| Claude | `--provider anthropic` | `ANTHROPIC_API_KEY` | `api.anthropic.com` |
-| Claude via APIM gateway | `--provider anthropic-gateway` | `CLAUDE_API_KEY` | Operator-configured HTTPS base URL |
-| Gemini | `--provider gemini` | `GOOGLE_GEMINI_API_KEY` | `generativelanguage.googleapis.com` |
+| Provider                | Flag                           | Key environment variable | Network destination                 |
+| ----------------------- | ------------------------------ | ------------------------ | ----------------------------------- |
+| Claude                  | `--provider anthropic`         | `ANTHROPIC_API_KEY`      | `api.anthropic.com`                 |
+| Claude via APIM gateway | `--provider anthropic-gateway` | `CLAUDE_API_KEY`         | Operator-configured HTTPS base URL  |
+| Gemini                  | `--provider gemini`            | `GOOGLE_GEMINI_API_KEY`  | `generativelanguage.googleapis.com` |
 
 ```sh
 # The key must already be in this process's environment.
@@ -112,10 +111,23 @@ Minimal manifest:
   "title": "Selected services and dependencies",
   "profile": "Server / release",
   "repositories": [
-    {"name":"api","selected":true,"scope":"primary","source":"local","localPath":"api"},
-    {"name":"setup","selected":true,"scope":"supporting","source":"github","url":"https://github.com/example/setup","ref":"main"}
+    {
+      "name": "api",
+      "selected": true,
+      "scope": "primary",
+      "source": "local",
+      "localPath": "api"
+    },
+    {
+      "name": "setup",
+      "selected": true,
+      "scope": "supporting",
+      "source": "github",
+      "url": "https://github.com/example/setup",
+      "ref": "main"
+    }
   ],
-  "declarations":{"bindings":[]}
+  "declarations": { "bindings": [] }
 }
 ```
 
@@ -123,19 +135,19 @@ Exported connection declarations include evidence fingerprints. Reusing them aft
 
 ## Actual coverage
 
-| Surface | Collected | Limit |
-| --- | --- | --- |
-| Portfolio | XLSX/CSV, local/GitHub mapping; 100 selected of up to 1000 entries | No automatic organization crawl or scope expansion |
-| C#/.NET | Route, HTTP, auth, SQL, WCF, certificate and process references | Lexical candidates; no Roslyn, inherited middleware or interprocedural proof |
-| JS/TS | Common Express/Next.js routes, fetch/axios and process references | Dynamic routing/wrappers unresolved |
-| Python | FastAPI/Flask-style route decorators, requests/httpx, Depends/Security and database references | Lexical candidates; dynamic routing, wrappers and effective policy unresolved |
-| OpenAPI JSON | Declared path/method | No YAML contract parsing, remote references or implementation verification |
-| XML/WiX/config | Service, custom-action, permission, SQL, endpoint and certificate declarations | No MSI execution, condition evaluation or effective ACL analysis |
-| Messaging/device/native | Selected API/protocol references | Resource identity, permissions and protocol semantics require review |
-| Dependencies | Package/project names | Repository ownership requires confirmation; no restore/build |
-| YAML, Terraform, other recognized text | File inventory/hashes | Discovery-only; diagnostic emitted |
-| Actors/threats | Interface-specific conditional scenarios and access assumptions | Severity unassessed; no confirmed findings |
-| DFD | Declared connections and unresolved interface sheets | Source groups are not proven processes; trust transitions require declarations |
+| Surface                                | Collected                                                                                      | Limit                                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Portfolio                              | XLSX/CSV, local/GitHub mapping; 100 selected of up to 1000 entries                             | No automatic organization crawl or scope expansion                             |
+| C#/.NET                                | Route, HTTP, auth, SQL, WCF, certificate and process references                                | Lexical candidates; no Roslyn, inherited middleware or interprocedural proof   |
+| JS/TS                                  | Common Express/Next.js routes, fetch/axios and process references                              | Dynamic routing/wrappers unresolved                                            |
+| Python                                 | FastAPI/Flask-style route decorators, requests/httpx, Depends/Security and database references | Lexical candidates; dynamic routing, wrappers and effective policy unresolved  |
+| OpenAPI JSON                           | Declared path/method                                                                           | No YAML contract parsing, remote references or implementation verification     |
+| XML/WiX/config                         | Service, custom-action, permission, SQL, endpoint and certificate declarations                 | No MSI execution, condition evaluation or effective ACL analysis               |
+| Messaging/device/native                | Selected API/protocol references                                                               | Resource identity, permissions and protocol semantics require review           |
+| Dependencies                           | Package/project names                                                                          | Repository ownership requires confirmation; no restore/build                   |
+| YAML, Terraform, other recognized text | File inventory/hashes                                                                          | Discovery-only; diagnostic emitted                                             |
+| Actors/threats                         | Interface-specific conditional scenarios and access assumptions                                | Severity unassessed; no confirmed findings                                     |
+| DFD                                    | Declared connections and unresolved interface sheets                                           | Source groups are not proven processes; trust transitions require declarations |
 
 Local analysis streams eligible files and has no aggregate file-count, inspected-byte or interface-candidate cutoff. The 1 MiB per-file limit remains. GitHub archives retain 20,000-entry and 64 MiB inspected-text bounds. Excluded directories are recorded but not recursively counted. UI worker limit: 768 MiB heap and 30 minutes. GitHub archive limits: 96 MiB compressed, 256 MiB expanded. Large scopes may require separate, explicitly bounded runs. Local digests cover inspected files and the ledger; they are not atomic snapshots or Git commits. Keep source trees stationary during analysis.
 
@@ -165,7 +177,6 @@ See [functional test specification](../../docs/testing/system-threat-workspace.m
 ## Token usage
 
 Version 0.4.1 adds provider-reported token accounting in the STRIDE view, full request-ledger CSV/JSON and HTML summaries. Failed responses and retries are included; local cached batches add no requests. Shared cross-repository requests are counted once. Missing usage and older unmetered history remain explicit. See [accounting contract](../../docs/design/token-usage.md) and the [Windows instructions](../../docs/runbooks/windows-static-workspace.md#inspect-token-consumption-041).
-
 
 ## Recursive coverage and diagnostics (0.5.0)
 
@@ -198,3 +209,33 @@ The architecture view is separate from the disk source graph. Host/project/insta
 The Service DFD uses directional layout and aggregates equivalent calls while preserving flow, interface and evidence IDs. Select a connection to inspect its members and linked threats. Context/component views, trust lenses, actor paths, zoom/pan, unresolved-coverage filtering and selected-view SVG/Mermaid exports are available. The canvas is limited to 80 nodes and 240 grouped connections; full JSON and registers preserve the underlying scope. Updating requires a graph rebuild for new facts; save exports before rebuilding.
 
 See the [implementation plan and limits](../../docs/design/architecture-dfd-plan.md), [acceptance specification](../../docs/testing/architecture-dfd.md), and [Windows upgrade steps](../../docs/runbooks/windows-static-workspace.md#architecture-dfd-upgrade-080).
+
+## Security investigations (0.11.0 review build)
+
+CWE is optional for model-discovered security concerns. Source review can retain control gaps, excessive authority, attack paths, recovery gaps and security-design issues without inventing a CWE mapping.
+
+After building or opening the saved graph, run Semgrep and/or model source review. In **CWE code review → Security investigations**, enable the existing source-sharing checkbox, choose a request budget, and select **Run or continue evidence assessment**. This separate assessment inspects hash-checked source windows, graph-linked code and shared controls. Follow-up reads remain bounded and static. Inspect the evidence path, counterevidence, missing context and remediation fields; then export **Security investigations**. Human finding decisions remain separate.
+
+A source-supported assessment is not verified exploitation. A finished candidate queue is not complete CWE or STRIDE coverage. Source/configuration changes require rebuilding; context changes invalidate prior assessments. Use the same source root and workspace to preserve evidence and token history. No additional runtime, target execution or scanner installation is required for this feature.
+
+See [architecture](../../docs/design/static-security-intelligence.md) and [verification](../../docs/testing/static-security-intelligence.md). This review build must be validated before release; do not assume it is on main.
+
+### Optional native JSON response mode
+
+For an Anthropic endpoint that supports `output_config.format`, set this before starting Synthesis:
+
+```powershell
+$env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'
+```
+
+This applies native JSON schemas to source-review and security-assessment requests. The source-location, CWE-eligibility and evidence checks still run locally. It does not change the approved model/deployment name. Gateway compatibility must be checked in that environment; HTTP failures remain visible and there is no silent fallback. Unset it, or set it to `0`, to retain the default prompt-based JSON protocol. The default gateway payload is unchanged.
+
+## Static review exploration
+
+**6 · Exploration** links requested CWE checks and STRIDE packets to candidate findings, assessment rounds, source references, controls and unresolved questions. Expand a branch, trace a finding's lineage, inspect its evidence or return to the associated system DFD. Requested CWE checks remain mandatory; additional security concerns do not satisfy them.
+
+**Run or continue exploration** uses one explicit request budget across STRIDE, CWE source review and candidate assessment. Compatible completed requests are reused. STRIDE uses saved interface metadata in this coordinator; source windows are inspected by the CWE and evidence-assessment phases. Missing context and parser/planner limits remain visible. This is static review, not target execution or proof of exploitability.
+
+With workspace persistence enabled, `exploration.sqlite` retains review history separately from `graph.sqlite`. The graph API paginates and reports omissions; the UI groups requested checks without deleting their outcomes. Selected JSON/SVG exports are capped at 3 MiB. Use the existing focused graph packages when transferring surrounding source and controls.
+
+See [the ARTEX comparison and implemented architecture](../../docs/design/static-exploration-graph.md) and [the Windows runbook](../../docs/runbooks/windows-static-workspace.md). This remains a review branch until release approval; do not infer main availability from the version string.

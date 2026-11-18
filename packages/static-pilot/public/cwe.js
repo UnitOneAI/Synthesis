@@ -13,6 +13,59 @@
         })[c],
     );
   let model, actions, current;
+  const remediationLabels = {
+    codeFix: "Durable code fix",
+    interimControl: "Interim control",
+    residualRisk: "Residual exposure",
+    recovery: "Recovery considerations",
+    owner: "Owner",
+    approval: "Approval",
+    validation: "Proposed validation",
+    rollback: "Rollback plan",
+  };
+  function investigations() {
+    const register = model?.securityRegister;
+    const term = $("security-filter").value.toLowerCase();
+    const issues = (register?.issues || []).filter((i) =>
+      JSON.stringify([
+        i.kind,
+        i.cwe,
+        i.title,
+        i.assessment,
+        i.locations.map((l) => l.repository),
+        i.locations.map((l) => l.sourceScope),
+      ])
+        .toLowerCase()
+        .includes(term),
+    );
+    $("security-status").textContent = register
+      ? `${register.executionStatus} · ${register.issues.length} candidates · ${register.counts["static-supported"]} source-supported · ${register.counts["ruled-out"]} ruled out · ${register.counts["needs-context"]} need context · ${register.counts["not-assessed"]} not assessed · ${register.counts["failed"]} failed. Candidate assessment does not establish complete source coverage.${register.staleReview ? " Previous assessments are stale." : ""}`
+      : "Build the source graph, then scan or review source to identify candidates.";
+    $("security-results").innerHTML =
+      `<p>${issues.length} matching candidates; showing up to 200. Export includes all candidates.</p>` +
+      issues
+        .slice(0, 200)
+        .map((i) => {
+          const a = i.investigation;
+          const loc = (l) =>
+            `${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine || l.line}${l.sourceScope ? ` · ${esc(l.sourceScope)}` : ""}`;
+          return `<details><summary>${esc(i.title)} · ${esc(i.kind)} · ${esc(i.cwe || "No CWE mapping")} · ${esc(i.assessment)} · ${esc([...new Set(i.locations.map((l) => l.sourceScope || "unclassified"))].join(", "))}</summary><p>Disposition: ${esc(i.disposition)}${i.stale ? " · Stale source" : ""}. Origin: ${esc(i.origin)}.</p><ul>${i.locations.map((l) => `<li>${loc(l)}</li>`).join("")}</ul>${
+            a
+              ? `<p>Proof basis: static analysis, unexecuted. Human security review required.</p><p>Actor: ${esc(a.actorKind)} · ${esc(a.actor)}. Initial access: ${esc(a.initialAccess)}</p><p>Input: ${esc(a.input)}</p><p>Impact: ${esc(a.impact)}</p><h4>Evidence path</h4><ol>${(a.trace || []).map((t) => `<li>${esc(t.role)} · ${loc(t)} · ${esc(t.reason)}</li>`).join("")}</ol><h4>Controls and counterevidence</h4><p>${esc(a.counterEvidence)}</p><ul>${(a.controls || []).map((c) => `<li>${loc(c)} · ${esc(c.reason)}</li>`).join("")}</ul><h4>Unresolved evidence</h4><ul>${[...(a.missingEvidence || []), ...(a.evidenceGaps || []).map((g) => g.reason)].map((g) => `<li>${esc(g)}</li>`).join("")}</ul><p>${esc(a.error || a.stopReason || "")}</p><h4>Remediation and residual exposure</h4><dl>${Object.entries(
+                  a.remediation || {},
+                )
+                  .map(
+                    ([k, v]) =>
+                      `<dt>${esc(remediationLabels[k] || k)}</dt><dd>${esc(v)}</dd>`,
+                  )
+                  .join(
+                    "",
+                  )}</dl><p>Assessment change conditions: ${esc(a.severityChangeConditions)}</p><p>${a.rounds} assessment rounds. Source windows: ${a.retrieval?.includedWindows || 0}. Recommendations do not authorize production changes.</p>`
+              : "<p>No independent evidence assessment has run.</p>"
+          }</details>`;
+        })
+        .join("");
+  }
   function targetCoverage() {
     const coverage = model?.cweTargetCoverage;
     const selected = $("cwe-target-repository").value;
@@ -78,6 +131,18 @@
     render(value, callbacks) {
       model = value;
       actions = callbacks;
+      $("security-filter").oninput = investigations;
+      $("security-run").onclick = () =>
+        actions
+          .startSecurity(
+            Number($("cwe-model-budget").value),
+            $("cwe-model-consent").checked,
+          )
+          .catch((e) => actions.notify(e.message, true));
+      $("security-stop").onclick = () =>
+        actions.stop().catch((e) => actions.notify(e.message, true));
+      document.querySelector('[data-export="security-json"]').disabled = !model;
+      investigations();
       const r = model?.cweReview;
       const selectedRepository = $("cwe-target-repository").value;
       $("cwe-target-repository").innerHTML =
@@ -124,7 +189,7 @@
             .slice(0, 200)
             .map(
               (f) =>
-                `<details><summary>${esc(f.cwe)} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine} · ${esc(l.sourceScope || "Source scope unclassified")}</li>`).join("")}</ul><form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
+                `<details><summary>${esc(f.cwe || f.kind || "Security concern")} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine} · ${esc(l.sourceScope || "Source scope unclassified")}</li>`).join("")}</ul><form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
             )
             .join("")}`
         : "";
@@ -154,6 +219,14 @@
       detail(current);
     },
     setStatus(s) {
+      $("security-run").disabled =
+        !s.hasModel ||
+        !s.inference ||
+        ["running", "cancelling"].includes(s.status);
+      $("security-stop").hidden =
+        s.status !== "running" || s.mode !== "cwe-security";
+      if (s.status === "running" && s.mode === "cwe-security")
+        $("security-status").textContent = s.message;
       $("cwe-run").disabled =
         !s.hasModel || s.status === "running" || s.status === "cancelling";
       $("cwe-model-run").disabled =

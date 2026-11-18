@@ -50,6 +50,44 @@ const response = (value, packet) =>
       },
     ],
   });
+test("one malformed source-review packet does not hide the rest of the portfolio", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  let calls = 0;
+  const report = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 2,
+    fetchImpl: async (_, options) => {
+      calls++;
+      const packet = JSON.parse(JSON.parse(options.body).messages[0].content);
+      return response(
+        {
+          findings:
+            calls === 1
+              ? [finding({ id: "invented", startLine: 1, endLine: 2 })]
+              : [],
+          limitations: [],
+        },
+        packet,
+      );
+    },
+  });
+  assert.equal(report.callsThisRun, 2);
+  assert.equal(report.completedBatches, 1);
+  assert.equal(report.batches.filter((b) => b.status === "failed").length, 1);
+  assert.equal(report.status, "partial");
+  const continued = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    fetchImpl: async (_, options) => {
+      const packet = JSON.parse(JSON.parse(options.body).messages[0].content);
+      assert.match(packet.previousValidationFailure, /unknown record/);
+      return response({ findings: [], limitations: [] }, packet);
+    },
+  });
+  assert.equal(continued.completedBatches, 2);
+});
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-cwe-model-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -1,4 +1,9 @@
+import { ExplorationStore } from "./exploration.mjs";
+import { exploreStatic } from "./exploration-review.mjs";
+import { sourceWindow } from "./graph-package.mjs";
 import { cweTargetCoverage, cweTargetCsv } from "./cwe-targets.mjs";
+import { securityRegister } from "./security-intelligence.mjs";
+import { reviewSecurityIssues } from "./security-review.mjs";
 import {
   buildGraphPackage,
   graphPackageChoices,
@@ -230,6 +235,10 @@ export async function serve({
           sourceRevision: model.modelRevision,
           priorStatus: model.aiReview?.status,
         });
+        if (model.explorationRun?.status === "running")
+          model.explorationRun.status = "partial";
+        if (model.securityReview?.status === "running")
+          model.securityReview.status = "partial";
         if (model.cweModelReview?.status === "running") {
           model.cweModelReview.status = "partial";
           model.cweModelReview.error =
@@ -259,9 +268,32 @@ export async function serve({
       throw error;
     }
   }
+  let exploration;
+  try {
+    const file = store
+      ? path.join(store.dir, "exploration.sqlite")
+      : ":memory:";
+    if (store) {
+      const stat = await fs.lstat(file).catch((e) => {
+        if (e.code !== "ENOENT") throw e;
+        return null;
+      });
+      if (stat?.isSymbolicLink())
+        throw Error("Exploration database must not be a symbolic link");
+    }
+    exploration = new ExplorationStore(file);
+    if (store) await fs.chmod(file, 0o600);
+    if (model) exploration.sync(model);
+  } catch (error) {
+    await traces.close();
+    await store?.close();
+    throw error;
+  }
   const checkpoint = async () => {
-    if (!store || !model) return;
+    if (!model) return;
     try {
+      exploration.sync(model);
+      if (!store) return;
       await store.save({ manifest, model });
       persistenceError = null;
       await traces.record("checkpoint.saved", {
@@ -277,6 +309,8 @@ export async function serve({
   };
   const outputModel = () => ({
     ...model,
+    exploration: exploration.overview(model.modelRevision),
+    securityRegister: securityRegister(model),
     cweTargetCoverage: cweTargetCoverage(model),
     strideMatrix: strideMatrix(model),
     systemModel: systemModel(model),
@@ -382,6 +416,10 @@ export async function serve({
             m.model.architecture.rebuildNotice =
               "Reviewer declarations retained. Recheck references and stale decisions after rebuilding.";
           }
+          if (model?.explorationRun)
+            m.model.explorationRun = structuredClone(model.explorationRun);
+          if (model?.securityReview)
+            m.model.securityReview = structuredClone(model.securityReview);
           if (model?.cweModelReview) {
             m.model.cweModelReview = structuredClone(model.cweModelReview);
             if (model.cweModelReview.basedOnRevision !== m.model.modelRevision)
@@ -476,6 +514,8 @@ export async function serve({
         "workspace.js",
         "workspace.css",
         "cwe.js",
+        "exploration.js",
+        "exploration.css",
       ].map(async (name) => [
         name,
         await fs.readFile(new URL("../public/" + name, import.meta.url)),
@@ -870,6 +910,168 @@ export async function serve({
           });
         return send(202, job);
       }
+      if (req.method === "GET" && url.pathname === "/api/exploration") {
+        if (!model) return send(409, { error: "Build a source graph first" });
+        const revision =
+          url.searchParams.get("revision") || model.modelRevision;
+        const nid = url.searchParams.get("node");
+        if (nid)
+          return send(
+            200,
+            exploration.node(revision, nid) || { error: "Unknown review node" },
+          );
+        return send(
+          200,
+          exploration.query(revision, Object.fromEntries(url.searchParams)),
+        );
+      }
+      if (req.method === "GET" && url.pathname === "/api/exploration/source") {
+        if (!model) return send(409, { error: "Build a source graph first" });
+        const issue = securityRegister(model).issues.find(
+          (i) => i.id === url.searchParams.get("issue"),
+        );
+        const ref = issue?.investigation?.evidence?.find(
+          (r) => r.id === url.searchParams.get("record"),
+        );
+        if (!ref || issue.stale)
+          return send(409, {
+            error: "Current saved source reference required",
+          });
+        const window = await sourceWindow(
+          { ...ref, line: ref.startLine + 20 },
+          manifest,
+          root,
+        );
+        return send(200, window);
+      }
+      if (req.method === "POST" && url.pathname === "/api/exploration/review") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error: "Build a source graph and wait for the current operation",
+          });
+        if (!modelConfig)
+          return send(409, { error: "Configure an approved model provider" });
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, { error: "Refresh the current source snapshot" });
+        if (
+          input.includeSourceCode !== true ||
+          !Number.isInteger(input.budget) ||
+          input.budget < 1 ||
+          input.budget > 100
+        )
+          return send(400, {
+            error: "Enable source sharing and choose 1–100 model requests",
+          });
+        cweController = new AbortController();
+        const jobId = randomBytes(12).toString("hex");
+        job = {
+          status: "running",
+          mode: "exploration",
+          jobId,
+          message: "Preparing static exploration",
+        };
+        cweTask = withGraph(() =>
+          exploreStatic(manifest, model, {
+            sourceRoot: root,
+            config: modelConfig,
+            budget: input.budget,
+            signal: cweController.signal,
+            fetchImpl: cweModelFetch,
+            trace: (event, data) => traces.record(event, { ...data, jobId }),
+            progress: (message) => {
+              job.message = message;
+            },
+            checkpoint: async () => {
+              await checkpoint();
+              if (persistenceError)
+                throw Error("Exploration checkpoint failed");
+            },
+          }),
+        )
+          .then((report) => {
+            job = {
+              status: "ready",
+              mode: "exploration",
+              jobId,
+              message: `Static exploration ${report.status}; ${report.callsThisRun} requests this action.`,
+            };
+          })
+          .catch(() => {
+            job = {
+              status: "failed",
+              mode: "exploration",
+              jobId,
+              message: "Exploration failed; inspect saved errors and traces",
+            };
+          });
+        return send(202, job);
+      }
+      if (req.method === "POST" && url.pathname === "/api/security/review") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error: "Build a source graph and wait for the current operation",
+          });
+        if (!modelConfig)
+          return send(409, { error: "Configure an approved model provider" });
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, { error: "Refresh the current source snapshot" });
+        if (
+          input.includeSourceCode !== true ||
+          !Number.isInteger(input.budget) ||
+          input.budget < 1 ||
+          input.budget > 100
+        )
+          return send(400, {
+            error:
+              "Enable source sharing and choose a request budget from 1 to 100",
+          });
+        cweController = new AbortController();
+        const jobId = randomBytes(12).toString("hex");
+        job = {
+          status: "running",
+          mode: "cwe-security",
+          jobId,
+          message: "Preparing static security assessment",
+        };
+        cweTask = withGraph(() =>
+          reviewSecurityIssues(manifest, model, {
+            sourceRoot,
+            config: modelConfig,
+            budget: input.budget,
+            signal: cweController.signal,
+            fetchImpl: cweModelFetch,
+            trace: (event, data) => traces.record(event, { ...data, jobId }),
+            progress: (message) => {
+              job.message = message;
+            },
+            checkpoint: async () => {
+              await checkpoint();
+              if (persistenceError)
+                throw Error("Security assessment checkpoint failed");
+            },
+          }),
+        )
+          .then((report) => {
+            job = {
+              status: "ready",
+              mode: "cwe-security",
+              jobId,
+              message: `Security assessment ${report.status}; ${report.pending || 0} candidates remain unresolved.`,
+            };
+          })
+          .catch(() => {
+            job = {
+              status: "failed",
+              mode: "cwe-security",
+              jobId,
+              message:
+                "Security assessment failed; inspect saved errors and traces",
+            };
+          });
+        return send(202, job);
+      }
       if (req.method === "POST" && url.pathname === "/api/cwe/decision") {
         if (!model || ["running", "cancelling"].includes(job.status))
           return send(409, { error: "Wait for the scan to finish" });
@@ -1080,6 +1282,7 @@ export async function serve({
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
+          "security-json": "security-investigations.json",
           "cwe-coverage-json": "cwe-target-coverage.json",
           "cwe-coverage-csv": "cwe-target-coverage.csv",
           "cwe-model-json": "cwe-source-review.json",
@@ -1109,6 +1312,8 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
+        if (format === "security-json")
+          return send(200, securityRegister(model));
         if (format === "cwe-coverage-json")
           return send(200, cweTargetCoverage(model));
         if (format === "cwe-coverage-csv")
@@ -1253,6 +1458,7 @@ export async function serve({
       await traces
         .record("session.closed", { status: previousStatus })
         .catch(() => {});
+      exploration.close();
       await store?.close();
       await traces.close();
     })();

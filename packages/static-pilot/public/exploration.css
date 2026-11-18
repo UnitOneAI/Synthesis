@@ -1,0 +1,125 @@
+.exploration-layout {
+  display: grid;
+  grid-template-columns: minmax(500px, 1fr) 340px;
+  gap: 18px;
+  margin-top: 16px;
+}
+.exploration-canvas {
+  border: 1px solid #d4dfed;
+  border-radius: 12px;
+  background: #f5f8fc;
+  position: relative;
+  overflow: hidden;
+}
+#exploration-svg {
+  width: 100%;
+  height: 620px;
+  touch-action: none;
+  cursor: grab;
+  font-family: system-ui, sans-serif;
+}
+#exploration-svg text {
+  font-size: 11px;
+  fill: #46617c;
+}
+#exploration-svg .eg-label {
+  font-size: 13px;
+  font-weight: 650;
+  fill: #193653;
+}
+#exploration-svg .eg-kind {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+#exploration-svg .eg-cards g {
+  cursor: pointer;
+}
+#exploration-svg .eg-cards rect:first-of-type {
+  fill: #fff;
+  stroke: #bbcddd;
+}
+#exploration-svg .eg-cards g:focus rect:first-of-type,
+#exploration-svg .eg-cards g:hover rect:first-of-type {
+  stroke: #275fa7;
+  stroke-width: 2;
+}
+#exploration-svg .eg-edges path {
+  fill: none;
+  stroke: #95abc0;
+  stroke-width: 1.4;
+}
+#exploration-minimap {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 160px;
+  height: 90px;
+  background: #fff;
+  border: 1px solid #ccd7e4;
+  border-radius: 7px;
+  cursor: crosshair;
+}
+#exploration-detail {
+  max-height: 720px;
+  overflow: auto;
+  border: 1px solid #d4dfed;
+  border-radius: 12px;
+  padding: 18px;
+  font-size: 13px;
+}
+#exploration-detail h3 {
+  line-height: 1.5;
+}
+#exploration-detail pre {
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f5f8fc;
+  padding: 10px;
+}
+.exploration-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.exploration-controls input[type="number"] {
+  width: 80px;
+}
+@media (max-width: 1000px) {
+  .exploration-layout {
+    grid-template-columns: 1fr;
+  }
+  #exploration-detail {
+    max-height: none;
+  }
+}
+
+#exploration-svg.focused-lineage {
+  height: 380px;
+}
+#exploration-breadcrumb {
+  margin-top: 14px;
+}
+.exploration-consent-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+}
+.exploration-consent-label input {
+  flex: 0 0 auto;
+}
+
+#exploration .exploration-consent-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+#exploration .exploration-consent-label input {
+  width: auto;
+  margin: 0;
+}
+.exploration-layout {
+  align-items: start;
+}

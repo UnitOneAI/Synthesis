@@ -405,6 +405,31 @@ export async function errorReport({
           "A request-budget stop is pending work, not a failed model request.",
       },
       cweSourceReview: review(model?.cweModelReview),
+      exploration: {
+        ...pick(model?.explorationRun, [
+          "status",
+          "phase",
+          "callsThisRun",
+          "budget",
+        ]),
+        failure: model?.explorationRun?.error
+          ? failureDetail(model.explorationRun.error)
+          : null,
+        phases: model?.explorationRun?.phases || [],
+      },
+      securityInvestigations: {
+        status: model?.securityReview?.status || "not-run",
+        callsThisRun: model?.securityReview?.callsThisRun,
+        pending: model?.securityReview?.pending,
+        entries: sample(model?.securityReview?.entries, (e) => ({
+          issueId: e.issueId,
+          assessment: e.assessment,
+          rounds: e.rounds,
+          stopReason: e.stopReason,
+          retrieval: e.retrieval,
+          failure: e.error ? failureDetail(e.error) : null,
+        })),
+      },
       cweTargets: model
         ? (() => {
             const c = cweTargetCoverage(model);
@@ -672,6 +697,10 @@ export async function diagnosticBundle({
       : { status: "not-run" },
   );
   json("cwe-review.json", model?.cweReview || { status: "not-run" });
+  json(
+    "security-investigations.json",
+    model?.securityReview || { status: "not-run" },
+  );
   json(
     "cwe-target-coverage.json",
     model ? cweTargetCoverage(model) : { status: "not-built" },

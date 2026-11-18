@@ -20,6 +20,7 @@
     s,
     startReview,
     stopReview,
+    openExploration,
     providerAvailable = false,
     jobState = { status: "idle" },
     requestBudget = 12,
@@ -513,9 +514,25 @@
       r.kind === "cell" || linked.length > 0
         ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
         : "";
+    const investigations = (model.securityRegister?.issues || []).filter(
+      (i) =>
+        i.interfaceIds.some((id) => r.interfaceIds?.includes(id)) ||
+        i.evidenceIds.some((id) => r.evidenceIds?.includes(id)),
+    );
+    const investigationSection = investigations.length
+      ? `<section><h4>Related security investigations</h4><p>Source association; this does not prove reachability along this flow.</p>${investigations
+          .slice(0, 20)
+          .map(
+            (i) =>
+              `<p><strong>${e(i.title)}</strong><br>${e(i.cwe || i.kind)} · ${e(i.assessment)}<br>${e(i.investigation?.counterEvidence || "Evidence assessment pending")}<br><button data-explore-issue="${e(i.id)}">Explore review history</button></p>`,
+          )
+          .join(
+            "",
+          )}<p>Open CWE code review → Security investigations for full evidence and exports.</p></section>`
+      : "";
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
-    out.innerHTML = `${
+    out.innerHTML = `${investigationSection}${
       bundleIds.length > 1
         ? `<section><h3>Grouped connection · ${bundleIds.length} flows</h3><p>Each member retains its interfaces, source evidence and review decision.</p><div class="ws-bundle">${bundleIds
             .map((id) => s.flows.find((f) => f.id === id))
@@ -888,6 +905,13 @@
       await save({ action: "upsert", kind: form.dataset.kind, record });
     }
   });
+  root.addEventListener("click", (event) => {
+    const b = event.target.closest("[data-explore-issue]");
+    if (b)
+      openExploration?.(b.dataset.exploreIssue).catch((error) =>
+        notify(error.message, true),
+      );
+  });
   window.SynthesisWorkspace = {
     render(value, callbacks) {
       model = value;
@@ -900,6 +924,7 @@
         update,
         startReview,
         stopReview,
+        openExploration,
         providerAvailable,
       } = callbacks);
       if (s) render();
@@ -925,6 +950,20 @@
       if (run) run.disabled = !value.inference || value.status === "running";
       if (stop)
         stop.hidden = !(value.status === "running" && value.mode === "review");
+    },
+    showReferences(anchors = []) {
+      const interfaceIds = new Set(
+        anchors.filter((a) => a.kind === "interface").map((a) => a.id),
+      );
+      const component = s?.components.find(
+        (c) =>
+          (c.interfaceIds || []).some((i) => interfaceIds.has(i)) ||
+          anchors.some((a) => a.kind === "component" && a.id === c.id),
+      );
+      view = "system";
+      selected = component?.id || "";
+      focus = component?.id || "";
+      render();
     },
     showMatrix() {
       view = "matrix";

@@ -4,6 +4,7 @@ import path from "node:path";
 import { zipSync, strToU8 } from "fflate";
 import { graphReader, EXTRACTOR_KEY } from "./graph-store.mjs";
 import { systemModel } from "./system-model.mjs";
+import { securityRegister } from "./security-intelligence.mjs";
 import { redact } from "./model-review.mjs";
 import { sha, within, excludedPath, LIMITS } from "./sources.mjs";
 
@@ -60,7 +61,13 @@ export function graphPackageChoices(model) {
         id: s.id,
         name: s.title || s.name || s.id,
       })),
-      cwe: [...new Set(findings(model).map((f) => f.cwe))]
+      cwe: [
+        ...new Set(
+          findings(model)
+            .map((f) => f.cwe)
+            .filter(Boolean),
+        ),
+      ]
         .sort()
         .map((id) => ({ id, name: id })),
     },
@@ -90,7 +97,7 @@ function scrub(value, secrets, roots) {
 }
 
 // Read only the explicitly selected local file, never recollect or parse repositories.
-async function sourceWindow(ref, manifest, root) {
+export async function sourceWindow(ref, manifest, root) {
   const source = manifest.repositories.find(
     (s) => s.name === ref.repository && s.selected !== false,
   );
@@ -208,6 +215,11 @@ export async function buildGraphPackage(model, manifest, options = {}) {
     interfaces = new Set(),
     components = new Set(),
     flowIds = new Set();
+  const currentInvestigations = new Map(
+    (securityRegister(model)?.issues || [])
+      .filter((i) => i.investigation && !i.stale)
+      .map((i) => [i.id, i.investigation.issueHash]),
+  );
   const selectedFindings = findings(model).filter((f) =>
     kind === "finding"
       ? f.id === value
@@ -415,8 +427,21 @@ export async function buildGraphPackage(model, manifest, options = {}) {
       selectedFindings.includes(f) ||
       inScope(f) ||
       f.locations?.some(inScope)
-    )
-      context("cwe-finding", f);
+    ) {
+      context(f.cwe ? "cwe-finding" : "security-finding", f);
+      for (const review of model.securityReview?.entries || [])
+        if (review.sourceId === f.id) {
+          context("security-investigation", {
+            ...review,
+            basedOnRevision: model.securityReview.basedOnRevision,
+            contextKey: model.securityReview.contextKey,
+            stale:
+              currentInvestigations.get(review.issueId) !== review.issueHash,
+          });
+          for (const ref of review.evidence || [])
+            addRef({ ...ref, line: (ref.startLine || 1) + 20 });
+        }
+    }
   for (const e of model.evidence)
     if (inScope(e) || evidenceIds.has(e.id)) {
       context("evidence", { ...e, excerpt: undefined });

@@ -137,7 +137,6 @@ Rejected responses and retries count when the provider returns usage. Unknown us
 
 Old reviews cannot be backfilled: an unmetered-history notice means totals cover only newly recorded requests. Keep the same workspace to retain the history through restart and source rebuilds. Customer gateway usage/billing logs are the reconciliation source for requests whose usage was not returned. No change to the configured model deployment or key is needed for this feature.
 
-
 ## Collect portable diagnostics (0.5.0)
 
 Update Synthesis, then restart using the same source root, workspace and configured provider/deployment. Rebuild the source graph once to use streamed local extraction. This version changes the planner and source identities: previous request results may need review again, while their token history remains in the workspace.
@@ -245,3 +244,36 @@ After updating and installing Synthesis dependencies, rebuild the graph once. Ru
 Keep `--trace-dir` pointed outside the clones. Traces are automatic; report downloads are explicit. For compact troubleshooting export **errors**, **coverage JSON**, and **token usage CSV** first. Full model-review exports include assessment rationale and can be much larger. The diagnostic ZIP includes target coverage but omits model rationale prose.
 
 See [design and limitations](../design/requested-cwe-coverage.md) and [verification](../testing/requested-cwe-coverage.md). No findings is not a pass, and graph/model completion does not demonstrate runtime exploitability.
+
+## Security-investigation review build
+
+The 0.11.0 investigation feature adds optional CWE mappings and a separate static evidence assessment. It introduces no new VM dependency. Use the already approved provider, exact gateway deployment, source root, workspace and scanner settings. Deployment to main is a separate release step; verify the approved branch/commit before updating a VM.
+
+1. Open the saved graph when the clones and extractor are unchanged.
+2. Run Semgrep and/or continue model source review to produce candidates. Existing source sharing sends redacted excerpts to the configured provider.
+3. Under **CWE code review → Security investigations**, select **Run or continue evidence assessment**. The existing request budget applies to the assessment and its bounded follow-ups.
+4. Inspect findings without CWE mappings alongside mapped weaknesses. Read source evidence, controls, gaps and residual-risk recommendations. Source-supported means a static argument requiring human review.
+5. Download **Export security investigations** to the existing exports folder. The browser controls the download destination; server trace persistence remains controlled by the existing trace-directory setting. Focused graph packages include related investigation records within their existing size limits.
+6. Export small troubleshooting errors for failures and token usage for cost analysis. Rebuild when source/configuration changes; merely reopening the browser does not detect every working-tree change.
+
+### Optional native JSON response mode
+
+For an Anthropic endpoint that supports `output_config.format`, set this before starting Synthesis:
+
+```powershell
+$env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'
+```
+
+This applies native JSON schemas to source-review and security-assessment requests. The source-location, CWE-eligibility and evidence checks still run locally. It does not change the approved model/deployment name. Gateway compatibility must be checked in that environment; HTTP failures remain visible and there is no silent fallback. Unset it, or set it to `0`, to retain the default prompt-based JSON protocol. The default gateway payload is unchanged.
+
+### Static exploration (0.11.0 review build)
+
+Use the same VM, source root, gateway, exact model deployment and state directory. No target runtime, browser automation against applications or network scanning is introduced. This increment has not been released to main merely because the runbook exists.
+
+1. Stop Synthesis and back up the workspace, then install the approved review commit using the existing update procedure. Start with the same `--workspace` and `--trace-dir` arguments. **Open saved graph** reuses the existing source graph; this exploration increment does not require a graph rebuild.
+2. Open **6 · Exploration**. The overview branches into STRIDE, requested CWE checks and candidate assessment. **Browse** filters review records; double-click a card or choose **Open branch** to expand its children. **Show lineage** follows the records that led to the selected finding or observation. Grouped CWE obligations retain each individual outcome.
+3. Choose **Run or continue exploration** only after checking the source-sharing box and request budget. One budget covers STRIDE first, then CWE source review, then evidence assessment. Compatible completed requests are retained. Finishing STRIDE first avoids invalidating source reviews when shared architectural context changes. You may still run CWE review or assessments independently from their existing tab.
+4. Unfinished requests, missing evidence, failed responses and additional-evidence targets remain visible. A budget of two means two model calls, not two repositories. Continue within an approved budget. No result promises complete vulnerability detection or runtime exploitability.
+5. Use zoom, pan, fit and the minimap. Select an observation and **Read cited source** to read a redacted local window whose hash still matches. Changed or unavailable files are rejected. **Open system DFD** follows available interface/component references. The DFD inspector also links associated findings back to exploration.
+6. Export the selected review graph as JSON or SVG. Each download is capped at **3 MiB**; expand/narrow the branch if necessary. These exports contain review metadata, not the full source graph. For source and controls, use the existing focused graph package export. Inspect all exports before sharing and save under `C:/SynthesisState/Exports` through the browser's download settings.
+7. `exploration.sqlite` and its journal live beside `snapshot.json` inside the workspace, independently of `graph.sqlite`. With persistence enabled, reopening preserves review history. The **Snapshot** selector shows retained source revisions. Shut down before copying the workspace databases. Small **Export errors** reports include exploration phase and failure status; configured server traces remain automatic.

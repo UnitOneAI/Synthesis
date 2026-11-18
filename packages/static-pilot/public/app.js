@@ -153,6 +153,7 @@ async function status() {
   $("root").textContent = s.sourceRoot;
   window.SynthesisWorkspace?.setStatus(s);
   window.SynthesisCwe?.setStatus(s);
+  window.SynthesisExploration?.setStatus(s);
   if (!inferenceInitialized) {
     inferenceInitialized = true;
     providerAvailable = Boolean(s.inference);
@@ -335,6 +336,10 @@ function renderModel() {
     download,
     notify: message,
     providerAvailable,
+    openExploration: async (issue) => {
+      tab("exploration");
+      await window.SynthesisExploration.showIssue(issue);
+    },
     startReview: async (budget) => {
       $("review-budget").value = budget;
       await $("run-review").onclick();
@@ -369,6 +374,47 @@ function renderModel() {
     startModel: async (budget, includeSourceCode) => {
       jobNavigationRevision = navigationRevision;
       await api("cwe/model", {
+        modelRevision: model.modelRevision,
+        budget,
+        includeSourceCode,
+      });
+      clearInterval(polling);
+      polling = setInterval(
+        () => status().catch((e) => message(e.message, true)),
+        750,
+      );
+      await status();
+    },
+    startSecurity: async (budget, includeSourceCode) => {
+      jobNavigationRevision = navigationRevision;
+      await api("security/review", {
+        modelRevision: model.modelRevision,
+        budget,
+        includeSourceCode,
+      });
+      clearInterval(polling);
+      polling = setInterval(
+        () => status().catch((e) => message(e.message, true)),
+        750,
+      );
+      await status();
+    },
+    stop: async () => {
+      await api("cancel", {});
+      await refresh();
+      await status();
+    },
+  });
+  window.SynthesisExploration?.render(model, {
+    api,
+    notify: message,
+    openSystem: (anchors) => {
+      tab("workspace");
+      window.SynthesisWorkspace.showReferences(anchors);
+    },
+    start: async (budget, includeSourceCode) => {
+      jobNavigationRevision = navigationRevision;
+      await api("exploration/review", {
         modelRevision: model.modelRevision,
         budget,
         includeSourceCode,
@@ -808,6 +854,7 @@ async function download(format, preview = false, options = {}) {
     json: "model.json",
     usage: "token-usage.csv",
     "cwe-coverage-json": "cwe-target-coverage.json",
+    "security-json": "security-investigations.json",
     "cwe-coverage-csv": "cwe-target-coverage.csv",
     "cwe-model-json": "cwe-source-review.json",
     "cwe-json": "cwe-review.json",

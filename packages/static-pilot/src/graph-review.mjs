@@ -626,6 +626,7 @@ export async function enrichGraphModel(
     );
   };
   for (const batch of plan.batches) {
+    if (options.signal?.aborted) break;
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
       await options.trace?.("review.cache-reused", {
@@ -661,9 +662,9 @@ export async function enrichGraphModel(
       );
       entry.validationRetry = Boolean(
         failed &&
-        /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
-          failed.error || "",
-        ),
+          /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
+            failed.error || "",
+          ),
       );
       attempt = beginAttempt(model, config, batch.packet, {
         batchId: batch.id,
@@ -700,6 +701,7 @@ export async function enrichGraphModel(
       );
       const result = await requestReview(config, batch.packet, fetchImpl, {
         validationRetry: entry.validationRetry,
+        signal: options.signal,
         onResponse: (response) =>
           options.trace?.("model.response-received", {
             runKey,

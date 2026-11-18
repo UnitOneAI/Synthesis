@@ -1,7 +1,7 @@
 import { sha } from "./sources.mjs";
 
 // Reviewed, bundled methodology. Target repository SKILL.md files are never executed or loaded as instructions.
-export const GUIDANCE_VERSION = "static-security-method-1";
+export const GUIDANCE_VERSION = "static-security-method-2";
 export const GUIDANCE_SOURCES = Object.freeze([
   {
     name: "UnitOne threat-modeling skill",
@@ -187,6 +187,7 @@ export function analysisGuidance(records) {
   };
 }
 export const QUALITY_INSTRUCTIONS = `Apply the bundled analysisGuidance checks to the supplied evidence and architecture context. Preserve the prior Synthesis methodology: asset and entry-point identification, realistic actor access, explicit authority transitions, STRIDE per element, control and counterevidence review, conditional multi-step abuse and actionable mitigations. Taxonomy is a classification aid, not an attack checklist or proof. Never fill missing OWASP risk factors with defaults; severity remains unassessed until supported reviewer assessment. Do not automatically infer a vulnerability from an API name, missing excerpt or actor stereotype.
+Also distinguish externally initiated attacks from an authorized agent exceeding its intended task through inherited credentials or excessive tool authority. Trace alternative paths and whether identity, authorization and validation survive gateways, queues, workers and downstream resources. Compare the value a control checks with the value a sink consumes after transformation. A blocked attempt is not resolution of the underlying weakness. Include residual exposure and recovery/credential-revocation assumptions where supported. Changes to production controls require a separate owner, approval, validation and rollback; this static assessment authorizes none.
 For each threat, also provide an analysis object with exactly: attackSteps (1-6 concise nonempty strings), impact (nonempty string), assumptions (array of up to 6 strings), controlEvidenceIds (0-12 evidence IDs from supplied control records), boundaryIds (0-6 IDs from systemContext.boundaries, empty if no supported boundary), mappings (0-4 objects, each exactly framework, id, rationale). Mapping IDs must come from analysisGuidance.taxonomy, with a scenario-specific rationale. Do not invent a mapping or boundary; an empty list is valid. This object supplements the required threat fields. A prose attack path remains conditional and is not an accepted DFD flow. Titles and attack steps must also be conditional when prerequisites are unverified. In metadata-only packets, do not claim that authentication, authorization, tenant filters, pagination or limits are absent: their implementation is not supplied. State the necessary verification instead.`;
 
 export function validateAnalysis(value, packet, text, fail) {
