@@ -22,6 +22,8 @@ let repositories = [],
   diagramUrl,
   inferenceInitialized = false;
 let providerAvailable = false;
+let navigationRevision = 0,
+  jobNavigationRevision = 0;
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -45,6 +47,7 @@ async function api(route, data) {
   return response.json();
 }
 function tab(name) {
+  navigationRevision++;
   const matrixTab = name === "stride" && model && window.SynthesisWorkspace;
   if (matrixTab) {
     name = "workspace";
@@ -178,14 +181,18 @@ async function status() {
   if (s.status === "ready" && polling) {
     clearInterval(polling);
     polling = null;
+    const expectedNavigation = jobNavigationRevision;
     await refresh();
-    tab(s.mode?.startsWith("cwe") ? "cwe" : "workspace");
+    // A completed request must not replace a view chosen while it was running.
+    if (navigationRevision === expectedNavigation)
+      tab(s.mode?.startsWith("cwe") ? "cwe" : "workspace");
     message(s.message);
   }
   return s;
 }
 $("analyze").onclick = async () => {
   try {
+    jobNavigationRevision = navigationRevision;
     await api("analyze", {
       title: $("title").value,
       profile: $("profile").value,
@@ -261,6 +268,7 @@ function renderModel() {
       renderModel();
     },
     start: async () => {
+      jobNavigationRevision = navigationRevision;
       await api("cwe", { modelRevision: model.modelRevision });
       clearInterval(polling);
       polling = setInterval(
@@ -270,6 +278,7 @@ function renderModel() {
       await status();
     },
     startModel: async (budget, includeSourceCode) => {
+      jobNavigationRevision = navigationRevision;
       await api("cwe/model", {
         modelRevision: model.modelRevision,
         budget,
@@ -528,6 +537,7 @@ $("stride-matrix").onclick = (event) => {
 };
 $("run-review").onclick = async () => {
   try {
+    jobNavigationRevision = navigationRevision;
     await api("review", {
       modelRevision: model.modelRevision,
       maxBatches: Number($("review-budget").value),

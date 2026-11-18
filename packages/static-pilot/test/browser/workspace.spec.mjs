@@ -793,3 +793,42 @@ test("small error download includes discovery coverage without the source graph"
   expect(report).not.toHaveProperty("sourceGraph");
   expect(Buffer.byteLength(content)).toBeLessThan(1024 * 1024);
 });
+
+test("late CWE completion preserves the DFD selected while review metadata is loading", async ({
+  page,
+}) => {
+  let release, announce;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const requested = new Promise((resolve) => {
+    announce = resolve;
+  });
+  await page.route("**/api/review-plan", async (route) => {
+    const response = await route.fetch();
+    announce();
+    await gate;
+    await route.fulfill({ response });
+  });
+  try {
+    await page
+      .getByRole("button", { name: "5 · CWE code review", exact: true })
+      .click();
+    await page.locator("#cwe-run").click();
+    await requested;
+    await expect(page.locator("#cwe-status")).toContainText("failed");
+    await page
+      .getByRole("button", { name: "3 · System model", exact: true })
+      .click();
+    await expect(page.locator("#ws-canvas svg")).toBeVisible();
+    const completed = page.waitForResponse((r) =>
+      r.url().endsWith("/api/review-plan"),
+    );
+    release();
+    await completed;
+    await expect(page.locator("#message")).toContainText("CWE review failed");
+    await expect(page.locator("#ws-canvas svg")).toBeVisible();
+  } finally {
+    release();
+  }
+});
