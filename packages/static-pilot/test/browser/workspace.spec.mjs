@@ -42,7 +42,9 @@ test.beforeEach(async ({ page }) => {
   await page
     .getByRole("button", { name: "Build source graph", exact: true })
     .click();
-  await expect(page.locator("#workspace")).toBeVisible();
+  // Source collection runs in a worker and can exceed the default assertion
+  // deadline on loaded Windows runners. Wait for the completed view, bounded.
+  await expect(page.locator("#workspace")).toBeVisible({ timeout: 30000 });
   await expect(page.locator("#ws-canvas svg")).toBeVisible();
 });
 test.afterEach(async ({ page }) => {
