@@ -27,7 +27,16 @@ async function fixture(t, disk = false) {
   const dir = await fs.realpath(
     await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-package-")),
   );
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  let reader;
+  const cleanup = [];
+  t.after(async () => {
+    try {
+      for (const close of cleanup.reverse()) await close();
+    } finally {
+      reader?.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
   const root = path.join(dir, "repos"),
     workspace = path.join(dir, "state");
   await fs.mkdir(path.join(root, "api"), { recursive: true });
@@ -59,13 +68,11 @@ async function fixture(t, disk = false) {
       },
     ],
   };
-  let reader;
   if (disk) {
     reader = new GraphStore(file, { readOnly: true });
     attachGraph(model.sourceGraph, reader);
-    t.after(() => reader.close());
   }
-  return { dir, root, workspace, file, model, manifest, reader, text };
+  return { dir, root, workspace, file, model, manifest, reader, text, cleanup };
 }
 function unpack(result) {
   const records = [];
@@ -379,7 +386,7 @@ test(
       port: 0,
       quiet: true,
     });
-    t.after(() => app.close());
+    f.cleanup.push(() => app.close());
     const url = new URL(app.url),
       headers = {
         "X-Synthesis-Token": url.hash.slice(1),
