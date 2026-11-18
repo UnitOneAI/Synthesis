@@ -964,6 +964,22 @@ export async function serve({
           return send(400, {
             error: "Enable source sharing and choose 1–100 model requests",
           });
+        for (const [name, min, max] of [
+          ["maxTokens", 1000, 10000000],
+          ["maxSteps", 1, 10000],
+          ["maxDepth", 1, 64],
+          ["maxSeconds", 1, 3600],
+        ]) {
+          if (
+            input[name] !== undefined &&
+            (!Number.isInteger(input[name]) ||
+              input[name] < min ||
+              input[name] > max)
+          )
+            return send(400, {
+              error: `Invalid ${name} budget (${min}–${max})`,
+            });
+        }
         cweController = new AbortController();
         const jobId = randomBytes(12).toString("hex");
         job = {
@@ -974,6 +990,14 @@ export async function serve({
         };
         cweTask = withGraph(() =>
           exploreStatic(manifest, model, {
+            explorationStore: exploration,
+            maxTokens: input.maxTokens ?? 1000000,
+            maxSteps: input.maxSteps ?? 1000,
+            maxDepth: input.maxDepth ?? 12,
+            maxSeconds: input.maxSeconds ?? 600,
+            retryFailed: input.retryFailed === true,
+            includeScanner: input.includeScanner === true,
+            scanner: cweScanner,
             sourceRoot: root,
             config: modelConfig,
             budget: input.budget,

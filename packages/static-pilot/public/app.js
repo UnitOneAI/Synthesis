@@ -193,7 +193,13 @@ async function status() {
     await refresh();
     // A completed request must not replace a view chosen while it was running.
     if (navigationRevision === expectedNavigation)
-      tab(s.mode?.startsWith("cwe") ? "cwe" : "workspace");
+      tab(
+        s.mode === "exploration"
+          ? "exploration"
+          : s.mode?.startsWith("cwe")
+            ? "cwe"
+            : "workspace",
+      );
     message(s.message);
   }
   return s;
@@ -412,9 +418,10 @@ function renderModel() {
       tab("workspace");
       window.SynthesisWorkspace.showReferences(anchors);
     },
-    start: async (budget, includeSourceCode) => {
+    start: async (budget, includeSourceCode, limits = {}) => {
       jobNavigationRevision = navigationRevision;
       await api("exploration/review", {
+        ...limits,
         modelRevision: model.modelRevision,
         budget,
         includeSourceCode,

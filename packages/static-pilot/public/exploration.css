@@ -123,3 +123,5 @@
 .exploration-layout {
   align-items: start;
 }
+
+#exploration-tokens { width: 120px; }

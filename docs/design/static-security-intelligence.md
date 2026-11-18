@@ -42,7 +42,7 @@ flowchart LR
 
 ## Mapping ARTEX exploration to Synthesis
 
-ARTEX's actual pair is a shared **asset graph** and a per-task **exploration graph**, joined by anchors. Its interactive canvas records investigation lineage; it is not merely a code graph or findings list. Synthesis currently has the source graph, system model and static investigation ledger. The fully interactive exploration graph is a proposed increment, not a delivered feature of this review build.
+ARTEX's actual pair is a shared **asset graph** and a per-task **exploration graph**, joined by anchors. Its interactive canvas records investigation lineage; it is not merely a code graph or findings list. Synthesis currently has the source graph, system model and static investigation ledger. The interactive exploration graph and durable static investigation frontier are implemented on the review branch. Saved dependency edges now select follow-up work; indexed searches and graph traversal bring verified code windows back to the originating assessment.
 
 The [verified ARTEX comparison and static exploration design](static-exploration-graph.md) documents the README and implementation review, exact mapping, missing capabilities, proposed data model, interface and acceptance cases. Requested CWE targets remain explicit review obligations in that design.
 

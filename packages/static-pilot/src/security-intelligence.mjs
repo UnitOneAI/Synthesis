@@ -57,6 +57,16 @@ export function securityContext(model) {
   return context;
 }
 
+export function sourceSecurityContextKey(model) {
+  return sha(
+    JSON.stringify([
+      SECURITY_VERSION,
+      model.modelRevision,
+      model.sourceGraph?.fingerprint,
+      model.architecture || null,
+    ]),
+  );
+}
 export function securityContextKey(model) {
   return sha(
     JSON.stringify([
@@ -116,8 +126,11 @@ export function securityIssues(model) {
 
 export function securityRegister(model) {
   if (!model) return null;
-  const contextKey = securityContextKey(model);
   const report = model.securityReview;
+  const contextKey =
+    report?.contextPolicy === "source-and-declarations"
+      ? sourceSecurityContextKey(model)
+      : securityContextKey(model);
   const current =
     report?.contextKey === contextKey &&
     report?.promptHash === sha(SECURITY_REVIEW_PROMPT);

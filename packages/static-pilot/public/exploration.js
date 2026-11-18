@@ -247,6 +247,10 @@
     $("exploration-detail").innerHTML =
       `<p class="eyebrow">${esc(n.kind)} · ${esc(n.status)}</p><h3>${esc(n.label)}</h3><div class="toolbar"><button id="eg-open">Open branch</button><button id="eg-lineage" class="secondary">Show lineage</button></div>
       ${n.repository ? `<p>Repository: ${esc(n.repository)}</p>` : ""}
+      ${n.stepKind ? `<p>Step: ${esc(n.stepKind)} · ${n.attempts || 0} model attempts</p>` : ""}
+      ${n.result?.reason || n.result?.error ? `<h4>Outcome</h4><p>${esc(n.result.error || n.result.reason)}</p>` : ""}
+      ${n.result?.traversed ? `<p>${n.result.traversed.length} indexed relationships followed. These are static candidates.</p>` : ""}
+      ${n.result?.matches ? `<p>${n.result.matches.length} indexed evidence matches.</p>` : ""}
       ${n.requestedCwes ? `<p>Requested: ${esc(n.requestedCwes.join(", "))}</p><p>Model: ${esc(n.modelStatus)} · Scanner: ${esc(n.scannerStatus)} · ${n.reviewedPackets}/${n.plannedPackets} packets</p>` : ""}
       ${prose
         .filter((k) => n[k])
@@ -337,6 +341,14 @@
       callbacks.start(
         Number($("exploration-budget").value),
         $("exploration-consent").checked,
+        {
+          maxTokens: Number($("exploration-tokens").value),
+          maxSteps: Number($("exploration-steps").value),
+          maxDepth: Number($("exploration-depth").value),
+          maxSeconds: Number($("exploration-seconds").value),
+          retryFailed: $("exploration-retry").checked,
+          includeScanner: $("exploration-scanner").checked,
+        },
       ),
     );
     $("exploration-stop").onclick = invoke(() => callbacks.stop());
@@ -407,6 +419,12 @@
       const next = JSON.stringify([m.modelRevision, m.exploration]);
       $("exploration-summary").textContent =
         `${m.sources.length} repositories · ${m.cweTargetCoverage?.targetCount || 29} requested weakness targets per repository · ${m.explorationRun?.status || "Ready to explore"}. Review gaps remain visible; no runtime testing.`;
+      if (m.explorationRun?.mode === "graph-driven") {
+        const r = m.explorationRun,
+          f = r.frontier || {};
+        $("exploration-summary").textContent +=
+          ` ${f.done || 0} completed steps · ${f.queued || 0} queued · ${f.waiting || 0} waiting · ${f.blocked || 0} evidence gaps · ${f.failed || 0} failed. Stop: ${r.stopReason || "running"}. Tokens: ${r.reportedTokens || 0} reported / ${r.chargedTokens || 0} charged against this action budget; ${r.unknownUsageRequests || 0} requests with unknown usage.`;
+      }
       if (next !== signature) {
         signature = next;
         if (!graph)

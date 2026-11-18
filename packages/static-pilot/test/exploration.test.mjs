@@ -172,6 +172,7 @@ test("candidate lineage retains packet, exact source reference, controls and con
 test("static planner resumes twelve repositories within one shared request budget without rebuilding graph", async (t) => {
   const { dir, manifest, model } = await fixture(t);
   const fingerprint = model.sourceGraph.fingerprint;
+  const explorationStore=new ExplorationStore();t.after(()=>explorationStore.close());
   let calls = 0;
   const fetchImpl = async (_, options) => {
     calls++;
@@ -209,6 +210,7 @@ test("static planner resumes twelve repositories within one shared request budge
   };
   const first = await exploreStatic(manifest, model, {
     sourceRoot: dir,
+    explorationStore,
     config,
     budget: 1,
     fetchImpl,
@@ -217,6 +219,7 @@ test("static planner resumes twelve repositories within one shared request budge
   assert.equal(first.status, "partial");
   const second = await exploreStatic(manifest, model, {
     sourceRoot: dir,
+    explorationStore,
     config,
     budget: 100,
     fetchImpl,
@@ -230,6 +233,7 @@ test("static planner resumes twelve repositories within one shared request budge
   const before = calls;
   const third = await exploreStatic(manifest, model, {
     sourceRoot: dir,
+    explorationStore,
     config,
     budget: 100,
     fetchImpl,
@@ -240,6 +244,7 @@ test("static planner resumes twelve repositories within one shared request budge
   controller.abort();
   const cancelled = await exploreStatic(manifest, model, {
     sourceRoot: dir,
+    explorationStore,
     config,
     budget: 1,
     fetchImpl,

@@ -431,7 +431,7 @@ export async function enrichGraphModel(
   const maxBatches = options.maxBatches ?? 12;
   if (!Number.isInteger(maxBatches) || maxBatches < 1 || maxBatches > 100)
     throw new Error("Model batch budget must be 1–100 requests");
-  const plan = reviewPlan(model, excerpts);
+  const plan = options.plan || reviewPlan(model, excerpts);
   const provenance = {
     ...publicModelConfig(config),
     promptVersion: GRAPH_REVIEW_VERSION,
@@ -462,7 +462,9 @@ export async function enrichGraphModel(
   const previous =
     model.aiReview?.runKey === runKey ? model.aiReview.batches || [] : [];
   const cached = new Map(
-    previous.filter((b) => b.status === "completed").map((b) => [b.id, b]),
+    [...previous, ...(options.recoveredBatches || [])]
+      .filter((b) => b.status === "completed")
+      .map((b) => [b.id, b]),
   );
   const retained = plan.batches
     .map((b) =>
@@ -636,6 +638,7 @@ export async function enrichGraphModel(
       });
       continue;
     }
+    if (options.batchIds && !options.batchIds.includes(batch.id)) continue;
     if (terminalFailure || calls >= maxBatches || Date.now() > deadline)
       continue;
     options.progress?.(

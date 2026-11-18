@@ -67,6 +67,46 @@
               max="100"
               value="12"
           /></label>
+          <label
+            >Token budget<input
+              id="exploration-tokens"
+              type="number"
+              min="1000"
+              max="10000000"
+              value="1000000"
+          /></label>
+          <label
+            >Graph steps<input
+              id="exploration-steps"
+              type="number"
+              min="1"
+              max="10000"
+              value="1000"
+          /></label>
+          <label
+            >Path depth<input
+              id="exploration-depth"
+              type="number"
+              min="1"
+              max="64"
+              value="12"
+          /></label>
+          <label
+            >Seconds<input
+              id="exploration-seconds"
+              type="number"
+              min="1"
+              max="3600"
+              value="600"
+          /></label>
+          <label
+            ><input id="exploration-retry" type="checkbox" /> Retry failed steps
+            (up to three attempts)</label
+          >
+          <label
+            ><input id="exploration-scanner" type="checkbox" /> Include local
+            Semgrep baseline</label
+          >
           <label class="exploration-consent-label"
             ><input id="exploration-consent" type="checkbox" /> Send redacted
             source to the configured provider</label
@@ -76,9 +116,11 @@
           ><button id="exploration-stop" hidden>Stop exploration</button>
         </div>
         <p>
-          Continues STRIDE, then requested CWE review, then candidate
-          assessments. Completed compatible packets are reused. Budget
-          exhaustion and unavailable evidence remain partial.
+          Follows indexed relationships and missing evidence across selected
+          repositories. Saved steps determine what to inspect next. Completed
+          compatible work is reused. Token reservations are conservative;
+          provider-reported usage is shown separately. Budget stops and
+          unavailable evidence remain visible.
         </p>
         <div class="exploration-controls">
           <button id="exploration-home" class="secondary">Overview</button
@@ -90,6 +132,7 @@
             >Browse
             <select id="exploration-kind">
               <option value="phase">Review phases</option>
+              <option value="investigation-step">Investigation steps</option>
               <option value="goal">Requested CWE checks</option>
               <option value="finding">Findings</option>
               <option value="step">Review packets</option>

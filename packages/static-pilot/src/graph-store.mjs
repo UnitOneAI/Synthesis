@@ -337,6 +337,34 @@ export class GraphStore {
       }
     }
   }
+  incidentPage(generation, nodeId, { after = "", limit = 32 } = {}) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500)
+      throw Error("Invalid edge page size");
+    const rows = this.db
+      .prepare(
+        `SELECT id,data FROM (
+      SELECT e.id,e.data FROM edges e INDEXED BY edges_source JOIN members m ON m.version=e.version WHERE m.generation=? AND e.source=?
+      UNION SELECT e.id,e.data FROM edges e INDEXED BY edges_target JOIN members m ON m.version=e.version WHERE m.generation=? AND e.target=?
+      UNION SELECT id,data FROM links WHERE generation=? AND (source=? OR target=?)
+    ) WHERE id>? ORDER BY id LIMIT ?`,
+      )
+      .all(
+        generation,
+        nodeId,
+        generation,
+        nodeId,
+        generation,
+        nodeId,
+        nodeId,
+        after,
+        limit + 1,
+      )
+      .map(parse);
+    return {
+      items: rows.slice(0, limit),
+      next: rows.length > limit ? rows[limit - 1].id : null,
+    };
+  }
   extractorKeys(generation) {
     return this.db
       .prepare(

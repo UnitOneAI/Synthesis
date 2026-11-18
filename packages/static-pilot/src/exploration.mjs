@@ -65,10 +65,14 @@ export class ExplorationStore {
     this.db.exec("BEGIN");
     try {
       this.db
-        .prepare("UPDATE nodes SET active=0 WHERE revision=?")
+        .prepare(
+          "UPDATE nodes SET active=0 WHERE revision=? AND kind!='investigation-step'",
+        )
         .run(revision);
       this.db
-        .prepare("UPDATE edges SET active=0 WHERE revision=?")
+        .prepare(
+          "UPDATE edges SET active=0 WHERE revision=? AND kind NOT LIKE 'investigation:%'",
+        )
         .run(revision);
       this.db.prepare("DELETE FROM anchors WHERE revision=?").run(revision);
       const root = node(

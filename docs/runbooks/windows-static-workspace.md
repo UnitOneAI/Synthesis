@@ -50,7 +50,7 @@ Run each command only after the preceding command succeeds. The test suite uses 
 
 Disk mode is the CLI default and requires SQLite 3.51.3 or newer embedded in Node. Qualification used Node 24.22.1 / SQLite 3.54.1. The application checks the actual engine at startup. If it rejects the installed runtime, update Node 24. To deliberately use the prior capped backend, append `--graph-storage memory`; there is no automatic fallback.
 
-The workspace contains `graph.sqlite`, its active journal files, `snapshot.json` and `traces`. Back up the **whole workspace after stopping Synthesis** with Ctrl+C. Do not copy only a live database file. Retain both the database and snapshot together; losing the database loses the graph referenced by the snapshot. A rebuild of unchanged clones reuses parsed files after hashing them. Review continuation does not rescan sources.
+The workspace contains `graph.sqlite`, its active journal files, `snapshot.json` and `traces`. Back up the **whole workspace after stopping Synthesis** with Ctrl+C. Do not copy only a live database file. Retain both the database and snapshot together; losing the database loses the graph referenced by the snapshot. A rebuild of unchanged clones reuses parsed files after hashing them. Graph-driven continuation verifies source hashes without rebuilding the parser graph.
 
 Start VM qualification around 4–8 vCPU, 16 GiB RAM and SSD space sufficient for clones, graph, journals, traces and exports; these are planning estimates, not capacity guarantees. The storage guard pauses before disk exhaustion. Existing metadata, parser, traversal and review budgets still apply; inspect coverage and the diagnostic bundle.
 
@@ -272,7 +272,7 @@ Use the same VM, source root, gateway, exact model deployment and state director
 
 1. Stop Synthesis and back up the workspace, then install the approved review commit using the existing update procedure. Start with the same `--workspace` and `--trace-dir` arguments. **Open saved graph** reuses the existing source graph; this exploration increment does not require a graph rebuild.
 2. Open **6 · Exploration**. The overview branches into STRIDE, requested CWE checks and candidate assessment. **Browse** filters review records; double-click a card or choose **Open branch** to expand its children. **Show lineage** follows the records that led to the selected finding or observation. Grouped CWE obligations retain each individual outcome.
-3. Choose **Run or continue exploration** only after checking the source-sharing box and request budget. One budget covers STRIDE first, then CWE source review, then evidence assessment. Compatible completed requests are retained. Finishing STRIDE first avoids invalidating source reviews when shared architectural context changes. You may still run CWE review or assessments independently from their existing tab.
+3. Choose **Run or continue exploration** only after checking the source-sharing box and request budget. Saved investigation steps select code review, STRIDE and candidate assessment work across repositories. Missing evidence creates indexed search or relationship-following steps; retrieved evidence returns to its originating review. Set **Requests**, **Token budget**, **Graph steps**, **Path depth** and **Seconds**. Compatible completed work is retained. The starting architectural context is frozen for this investigation; explicit source/declaration changes create a new scope. You may still run CWE review or assessments independently from their existing tab.
 4. Unfinished requests, missing evidence, failed responses and additional-evidence targets remain visible. A budget of two means two model calls, not two repositories. Continue within an approved budget. No result promises complete vulnerability detection or runtime exploitability.
 5. Use zoom, pan, fit and the minimap. Select an observation and **Read cited source** to read a redacted local window whose hash still matches. Changed or unavailable files are rejected. **Open system DFD** follows available interface/component references. The DFD inspector also links associated findings back to exploration.
 6. Export the selected review graph as JSON or SVG. Each download is capped at **3 MiB**; expand/narrow the branch if necessary. These exports contain review metadata, not the full source graph. For source and controls, use the existing focused graph package export. Inspect all exports before sharing and save under `C:/SynthesisState/Exports` through the browser's download settings.
@@ -283,3 +283,26 @@ Use the same VM, source root, gateway, exact model deployment and state director
 Select a Semgrep finding, expand a model finding, or open a security investigation. Expand **Code evidence** beneath the source locations. Synthesis reads the selected clone on the VM and shows numbered source lines with the cited range highlighted, positioned near the first cited line. Surrounding lines remain available by scrolling; long cited ranges offer **Next cited lines**. Each location in a multi-file finding has its own panel.
 
 Opening code evidence makes no model call and executes no repository code. The file must still match the hash recorded with the finding. Changed, missing, stale or unselected source produces an explicit message instead of showing different code as evidence. **Recheck source** reloads and verifies the file again. Recognized sensitive values are redacted. The cited lines support review of the candidate; highlighting does not confirm a vulnerability. Code windows are fetched locally on demand, not automatically added to existing finding exports; use the focused graph package to transfer bounded code context.
+
+### Graph-driven investigation update
+
+Use `feat/static-security-intelligence` for the reviewed 0.11.0 build until its release is merged. Stop the server before updating and back up the entire existing workspace. Do not change the workspace location or delete its saved graph. From a clean checkout:
+
+```powershell
+Set-Location C:/Tools/Synthesis
+git fetch origin
+git switch feat/static-security-intelligence
+git pull --ff-only origin feat/static-security-intelligence
+Set-Location packages/static-pilot
+npm ci --ignore-scripts
+npm run check
+npm test
+```
+
+Run commands individually and stop on any failure. Restart using the same source root, workspace, scanner and approved gateway arguments. No new dependency or second model is required. Use **Open saved graph**, then **6 · Exploration**. Start with 2 requests, 250000 tokens, 1000 steps, depth 12 and 600 seconds. Enable source sharing and select **Run or continue exploration**. Raise budgets after checking the provider result. A low token budget can stop before any model call; that is an explicit reservation stop.
+
+Choose **Browse → Investigation steps** to inspect queued, waiting, completed, failed and blocked records. Select a step for its outcome and **Show lineage** for the path that created it. Use **Retry failed steps** only after reviewing the failure. At most three model attempts are allowed per failed step. Increasing path depth reopens steps blocked only by the prior depth limit. Additional-evidence gaps cannot be cleared by increasing model-call budgets.
+
+**Include local Semgrep baseline** is optional and runs the bundled rules through the configured local scanner. Existing scanner results can seed investigations without selecting it again. Semgrep still reads staged source, while the investigation follows indexed relationships and cited controls. No target application is run.
+
+Server traces are automatic under `--trace-dir`. They include `investigation.*` task IDs, searches, traversal basis, source hashes, provider outcomes, budget stops and usage. **Export errors** includes the frontier counters and stop reason; it does not include the whole source graph. Download errors and token CSV first. Selected exploration JSON/SVG and focused graph transfer ZIPs remain capped at 3 MiB each. Browser exports must be saved to `C:/SynthesisState/Exports`; `--trace-dir` does not change the browser download directory. Keep complete SQLite files and traces on the VM unless specifically needed.

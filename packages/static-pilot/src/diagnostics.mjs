@@ -407,6 +407,18 @@ export async function errorReport({
       cweSourceReview: review(model?.cweModelReview),
       exploration: {
         ...pick(model?.explorationRun, [
+          "mode",
+          "scope",
+          "stopReason",
+          "maxTokens",
+          "maxSteps",
+          "maxDepth",
+          "maxSeconds",
+          "chargedTokens",
+          "reportedTokens",
+          "unknownUsageRequests",
+          "stepsThisRun",
+          "frontier",
           "status",
           "phase",
           "callsThisRun",
