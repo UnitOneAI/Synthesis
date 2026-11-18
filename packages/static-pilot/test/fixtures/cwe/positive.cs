@@ -10,5 +10,15 @@ class UnsafeExample {
   BinaryFormatter formatter = new BinaryFormatter();
   formatter.Deserialize(stream);
   var cipher = DES.Create();
+  DirectorySearcher searcher = new DirectorySearcher();
+  searcher.Filter = "(cn=" + input + ")";
+  var connection = new SqlConnection($"Server={input};Database=app");
+  XmlReaderSettings settings = new XmlReaderSettings();
+  settings.ValidationType = ValidationType.None;
+  service.IncludeExceptionDetailInFaults = true;
+  var credential = new NetworkCredential("fixture-user", "fixture-only-password");
+  HttpClient client = new HttpClient();
+  client.GetAsync(Request.Query["url"]);
+  Activator.CreateInstance(Type.GetType(Request.Query["class"]));
  }
 }

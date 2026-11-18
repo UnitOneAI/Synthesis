@@ -1,0 +1,299 @@
+{
+  "id": "server-weakness-baseline-v1",
+  "name": "Server weakness baseline",
+  "version": 1,
+  "targets": [
+    {
+      "id": "server-01",
+      "name": "SBOM visibility",
+      "requestedCwes": ["CWE-1104", "CWE-1395"],
+      "findingCwes": ["CWE-1104", "CWE-1395"],
+      "mode": "additional-evidence",
+      "guidance": "Inspect dependency manifests, lockfiles and SBOM generation/configuration. Component completeness, maintenance status and current advisories require inventory and external lifecycle evidence.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-02",
+      "name": "Third-party ingestion",
+      "requestedCwes": ["CWE-1357", "CWE-1395", "CWE-1104"],
+      "findingCwes": ["CWE-1357", "CWE-1395", "CWE-1104"],
+      "mode": "additional-evidence",
+      "guidance": "Inspect dependency pinning, integrity/provenance checks and package sources. Supplier trust and ingestion policy require external evidence.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-03",
+      "name": "Hard-coded passwords",
+      "requestedCwes": ["CWE-259", "CWE-798"],
+      "findingCwes": ["CWE-259", "CWE-798"],
+      "mode": "code-review",
+      "guidance": "Trace password/credential literals into authentication or connection APIs. Exclude placeholders, test fixtures and non-secret identifiers; never reproduce secret values.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-04",
+      "name": "Cryptographic protection and access control",
+      "requestedCwes": ["CWE-311", "CWE-285"],
+      "findingCwes": ["CWE-311", "CWE-285"],
+      "mode": "code-review",
+      "guidance": "Trace sensitive data through transport/storage and authorization decisions. Check encryption and principal/resource access checks; absence in one segment is not proof of missing controls.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-05",
+      "name": "Connection string injection",
+      "requestedCwes": ["CWE-116", "CWE-20"],
+      "findingCwes": ["CWE-116", "CWE-20"],
+      "mode": "code-review",
+      "guidance": "Trace user-controlled values into connection-string construction; inspect builders, escaping, allowed keys and downstream credentials.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-06",
+      "name": "LDAP injection",
+      "requestedCwes": ["CWE-1440", "CWE-90", "CWE-1441"],
+      "findingCwes": ["CWE-90"],
+      "mode": "code-review",
+      "guidance": "Trace external input into LDAP filters and distinguished names. Check context-appropriate LDAP escaping; concatenation alone does not prove taint.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-07",
+      "name": "SSI injection",
+      "requestedCwes": ["CWE-97"],
+      "findingCwes": ["CWE-97"],
+      "mode": "code-review",
+      "guidance": "Check untrusted input entering server-side include directives and generated HTML consumed by an SSI-enabled server; identify configuration and input control.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-08",
+      "name": "JWT use",
+      "requestedCwes": ["CWE-353", "CWE-311"],
+      "findingCwes": ["CWE-353", "CWE-311", "CWE-347", "CWE-1463", "CWE-1464"],
+      "mode": "code-review",
+      "guidance": "Inspect JWT signature, algorithm, issuer, audience and expiry validation. Distinguish decoding from security validation; inspect middleware/callers. Use CWE-347 for supported signature verification failures; use current session-specific mappings where appropriate.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-09",
+      "name": "REST authorization",
+      "requestedCwes": ["CWE-1436", "CWE-862"],
+      "findingCwes": ["CWE-862"],
+      "mode": "code-review",
+      "guidance": "Inspect server-side route authorization, policy registration, middleware ordering and anonymous exceptions across entry points and graph connections.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-10",
+      "name": "User-controlled object keys",
+      "requestedCwes": ["CWE-1436", "CWE-639"],
+      "findingCwes": ["CWE-639"],
+      "mode": "code-review",
+      "guidance": "Trace caller-controlled object identifiers to data access. Check owner/tenant/resource authorization rather than authentication alone.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-11",
+      "name": "Client-side authorization",
+      "requestedCwes": ["CWE-1436", "CWE-602"],
+      "findingCwes": ["CWE-602"],
+      "mode": "code-review",
+      "guidance": "Compare browser permission checks to server enforcement at the corresponding route. UI gating alone is insufficient evidence of a vulnerability.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-12",
+      "name": "Unsafe unmanaged code",
+      "requestedCwes": ["CWE-1440", "CWE-633"],
+      "findingCwes": ["CWE-119", "CWE-120", "CWE-125", "CWE-416", "CWE-787"],
+      "mode": "code-review",
+      "guidance": "Inspect unmanaged/native boundaries and pointer/buffer operations. Cite actual bounds or lifetime mistakes, not merely unsafe blocks or interop declarations.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-13",
+      "name": "Automatic security updates",
+      "requestedCwes": ["CWE-1438"],
+      "findingCwes": [],
+      "mode": "additional-evidence",
+      "guidance": "Inspect update signature/version checks and update configuration. Release notifications, operational patching and support policy require external evidence.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-14",
+      "name": "Insufficient logging",
+      "requestedCwes": ["CWE-778"],
+      "findingCwes": ["CWE-778"],
+      "mode": "code-review",
+      "guidance": "Inspect security-sensitive operations and associated audit paths. Identify the required event and logging call chain; absence in a snippet is not sufficient.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-15",
+      "name": "SSRF",
+      "requestedCwes": ["CWE-1436", "CWE-1437", "CWE-918"],
+      "findingCwes": ["CWE-918"],
+      "mode": "code-review",
+      "guidance": "Trace attacker-controlled destinations, redirect handling and DNS/IP validation into outbound requests. Check allowlists and network assumptions.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-16",
+      "name": "Dynamic code/class loading",
+      "requestedCwes": ["CWE-545", "CWE-1443", "CWE-1444"],
+      "findingCwes": ["CWE-470", "CWE-829"],
+      "mode": "code-review",
+      "guidance": "Trace untrusted class/module names or paths into dynamic loading/reflection. Loading fixed trusted types is not a weakness. Map specific unsafe reflection to CWE-470, not deprecated CWE-545.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-17",
+      "name": "Clickjacking",
+      "requestedCwes": ["CWE-1440", "CWE-451", "CWE-1441"],
+      "findingCwes": ["CWE-451", "CWE-1021"],
+      "mode": "code-review",
+      "guidance": "Inspect frame-ancestors/X-Frame-Options policies and sensitive UI operations. Effective browser/server configuration remains unverified statically; prefer CWE-1021 for framing failures.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-18",
+      "name": "CSRF",
+      "requestedCwes": ["CWE-1436", "CWE-352", "CWE-1441", "CWE-1443"],
+      "findingCwes": ["CWE-352"],
+      "mode": "code-review",
+      "guidance": "Inspect state-changing routes, cookie authentication, anti-forgery validation, SameSite and origin controls. Bearer-only non-cookie APIs are counterevidence.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-19",
+      "name": "SQL injection",
+      "requestedCwes": ["CWE-1440", "CWE-89", "CWE-1441"],
+      "findingCwes": ["CWE-89"],
+      "mode": "code-review",
+      "guidance": "Trace untrusted values into SQL command structure. Check parameter binding, identifier allowlists and ORM query generation.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-20",
+      "name": "IPC handling",
+      "requestedCwes": ["CWE-939", "CWE-940", "CWE-925", "CWE-926"],
+      "findingCwes": ["CWE-939", "CWE-940", "CWE-925", "CWE-926"],
+      "mode": "code-review",
+      "guidance": "Inspect IPC endpoints, peer authentication, message authorization, permissions and payload validation. Android-specific CWE IDs require Android component evidence; do not force them onto Windows IPC.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-21",
+      "name": "Patching and insecure libraries",
+      "requestedCwes": ["CWE-1437", "CWE-1438", "CWE-1395"],
+      "findingCwes": ["CWE-1395"],
+      "mode": "additional-evidence",
+      "guidance": "Inspect package version/lock information and update configuration. Current vulnerability advisories and deployed versions are required to establish vulnerable dependencies.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-22",
+      "name": "Integer wraparound",
+      "requestedCwes": ["CWE-128", "CWE-190", "CWE-191"],
+      "findingCwes": ["CWE-128", "CWE-190", "CWE-191"],
+      "mode": "code-review",
+      "guidance": "Trace integer arithmetic, casts, allocation sizes and bounds; check overflow/underflow guards and signedness. Arithmetic alone is not a finding.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-23",
+      "name": "Unnecessary privileges",
+      "requestedCwes": ["CWE-1438", "CWE-1440", "CWE-1441", "CWE-250"],
+      "findingCwes": ["CWE-250"],
+      "mode": "code-review",
+      "guidance": "Inspect service identities, installer permissions, impersonation and privilege dropping. Required capabilities and effective deployment permissions need contextual evidence.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-24",
+      "name": "Client-side local storage",
+      "requestedCwes": ["CWE-921"],
+      "findingCwes": ["CWE-921"],
+      "mode": "code-review",
+      "guidance": "Trace sensitive data into browser localStorage/sessionStorage and other stores without access control. Establish data sensitivity and exposed principal context.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-25",
+      "name": "Dangerous functions",
+      "requestedCwes": ["CWE-242", "CWE-676"],
+      "findingCwes": ["CWE-242", "CWE-676"],
+      "mode": "code-review",
+      "guidance": "Inspect inherently dangerous APIs and safer alternatives. Identify the operation and applicable exact CWE; presence alone may need call-path review.",
+      "mappingNote": "Use the most precise supported weakness; related checks do not prove full category coverage."
+    },
+    {
+      "id": "server-26",
+      "name": "Unchecked buffer copies",
+      "requestedCwes": [
+        "CWE-1437",
+        "CWE-120",
+        "CWE-121",
+        "CWE-122",
+        "CWE-131",
+        "CWE-124"
+      ],
+      "findingCwes": ["CWE-120", "CWE-121", "CWE-122", "CWE-131", "CWE-124"],
+      "mode": "code-review",
+      "guidance": "Trace source size and destination capacity through native copy/allocation calls, check guards, termination and signed conversions. Resolve bounds before asserting overflow.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-27",
+      "name": "XSS",
+      "requestedCwes": ["CWE-1440", "CWE-79", "CWE-1441"],
+      "findingCwes": ["CWE-79"],
+      "mode": "code-review",
+      "guidance": "Trace untrusted values into HTML/DOM/template sinks. Check output-context encoding, sanitizers and framework default escaping.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-28",
+      "name": "Information exposure",
+      "requestedCwes": [
+        "CWE-1436",
+        "CWE-1439",
+        "CWE-200",
+        "CWE-201",
+        "CWE-526",
+        "CWE-215"
+      ],
+      "findingCwes": ["CWE-200", "CWE-201", "CWE-526", "CWE-215"],
+      "mode": "code-review",
+      "guidance": "Inspect responses, logs, errors, debug flags and environment exposure for sensitive data. Establish sensitivity and unauthorized audience.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    },
+    {
+      "id": "server-29",
+      "name": "XML validation",
+      "requestedCwes": ["CWE-1437", "CWE-112"],
+      "findingCwes": ["CWE-112"],
+      "mode": "code-review",
+      "guidance": "Inspect XML schema validation and parser settings at untrusted boundaries. Missing schema validation (112) and external entity expansion (611) are separate checks.",
+      "mappingNote": "Grouping/deprecated references are retained for traceability, not emitted as vulnerability mappings."
+    }
+  ],
+  "taxonomyVerified": "2026-11-18",
+  "taxonomySources": [
+    "https://cwe.mitre.org/data/definitions/1436.html",
+    "https://cwe.mitre.org/data/definitions/1437.html",
+    "https://cwe.mitre.org/data/definitions/1438.html",
+    "https://cwe.mitre.org/data/definitions/1439.html",
+    "https://cwe.mitre.org/data/definitions/1440.html",
+    "https://cwe.mitre.org/data/definitions/1441.html",
+    "https://cwe.mitre.org/data/definitions/1443.html",
+    "https://cwe.mitre.org/data/definitions/1444.html",
+    "https://cwe.mitre.org/data/definitions/545.html",
+    "https://cwe.mitre.org/data/definitions/633.html",
+    "https://cwe.mitre.org/data/definitions/347.html",
+    "https://cwe.mitre.org/data/definitions/613.html",
+    "https://cwe.mitre.org/data/definitions/1463.html",
+    "https://cwe.mitre.org/data/definitions/1464.html"
+  ]
+}

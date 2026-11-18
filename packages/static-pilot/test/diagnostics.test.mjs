@@ -291,6 +291,27 @@ test("durable traces preserve provider correlation, invalid-output usage and cac
       harmless: config.apiKey,
       endpoint: config.baseUrl,
     });
+    m.cweModelReview = {
+      basedOnRevision: m.modelRevision,
+      findings: [],
+      repositories: [],
+      batches: [
+        {
+          id: "cwe-test",
+          status: "completed",
+          repositories: [],
+          limitations: ["RESPONSE-PROSE-SENTINEL"],
+          targetReviews: [
+            {
+              targetId: "server-19",
+              status: "needs-context",
+              rationale: "RESPONSE-PROSE-SENTINEL",
+              locations: [],
+            },
+          ],
+        },
+      ],
+    };
     const exported = await trace.export();
     const bytes = await diagnosticBundle({
       model: m,

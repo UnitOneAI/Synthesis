@@ -190,6 +190,7 @@ test("CWE source review sends consented code, shows partial results and resumes 
                 findings: [
                   {
                     cwe: "CWE-89",
+                    targetIds: ["server-19"],
                     title: "Formatted SQL",
                     explanation: "Input enters SQL text.",
                     preconditions: "Untrusted value reaches the function.",
@@ -198,6 +199,18 @@ test("CWE source review sends consented code, shows partial results and resumes 
                     locations: [{ recordId: r.id, startLine: 2, endLine: 2 }],
                   },
                 ],
+                targetReviews: packet.targets.map((t) => ({
+                  targetId: t.id,
+                  status: "needs-context",
+                  rationale: "Caller context is unavailable in the fixture.",
+                  locations: [
+                    {
+                      recordId: r.id,
+                      startLine: r.startLine,
+                      endLine: r.startLine,
+                    },
+                  ],
+                })),
                 limitations: [],
               }),
             },
@@ -213,6 +226,11 @@ test("CWE source review sends consented code, shows partial results and resumes 
     await page
       .getByRole("button", { name: "5 · CWE code review", exact: true })
       .click();
+    await expect(page.locator("#cwe-target-summary")).toContainText(
+      "29 requested areas",
+    );
+    await page.locator("#cwe-target-repository").selectOption("a");
+    await expect(page.locator("#cwe-target-coverage tbody tr")).toHaveCount(29);
     await page.locator("#cwe-model-budget").fill("1");
     await page.locator("#cwe-model-run").click();
     await expect(page.locator("#message")).toContainText(
@@ -231,6 +249,26 @@ test("CWE source review sends consented code, shows partial results and resumes 
       "completed-needs-review · 2 / 2 packets completed",
     );
     expect(calls).toBe(2);
+    await expect(page.locator("#cwe-target-coverage")).toContainText(
+      "needs context",
+    );
+    const coverageDownload = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Export coverage JSON", exact: true })
+      .click();
+    const downloadedCoverage = await coverageDownload;
+    expect(downloadedCoverage.suggestedFilename()).toBe(
+      "cwe-target-coverage.json",
+    );
+    const coverage = JSON.parse(
+      await fs.readFile(await downloadedCoverage.path(), "utf8"),
+    );
+    expect(coverage.rows).toHaveLength(58);
+    expect(
+      coverage.rows.find(
+        (r) => r.repository === "a" && r.targetId === "server-19",
+      ).potentialFindings,
+    ).toBe(1);
     const exported = page.waitForEvent("download");
     await page
       .getByRole("button", { name: "Export model CWE review", exact: true })

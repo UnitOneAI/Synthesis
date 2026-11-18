@@ -707,6 +707,8 @@ async function download(format, preview = false, options = {}) {
     stride: "stride-matrix.csv",
     json: "model.json",
     usage: "token-usage.csv",
+    "cwe-coverage-json": "cwe-target-coverage.json",
+    "cwe-coverage-csv": "cwe-target-coverage.csv",
     "cwe-model-json": "cwe-source-review.json",
     "cwe-json": "cwe-review.json",
     "cwe-csv": "cwe-findings.csv",

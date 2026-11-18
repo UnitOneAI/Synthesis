@@ -13,6 +13,20 @@
         })[c],
     );
   let model, actions, current;
+  function targetCoverage() {
+    const coverage = model?.cweTargetCoverage;
+    const selected = $("cwe-target-repository").value;
+    const rows = (coverage?.rows || []).filter(
+      (r) => !selected || r.repository === selected,
+    );
+    const label = (v) => String(v || "").replaceAll("-", " ");
+    $("cwe-target-summary").textContent = coverage
+      ? `${coverage.targetCount} requested areas · ${coverage.requestedIdentifierCount} original CWE identifiers · ${coverage.additionalFindings.length} additional or unassigned findings retained. Four areas require dependency, lifecycle or policy evidence. Model counts are completed assessments / planned packets.`
+      : "Build a source graph to see requested coverage.";
+    $("cwe-target-coverage").innerHTML = coverage
+      ? `<table><thead><tr><th>Repository / requested area</th><th>Local pattern checks</th><th>Model source review</th><th>Findings</th></tr></thead><tbody>${rows.map((r) => `<tr><td><strong>${esc(r.name)}</strong><br>${esc(r.repository)}<br><small>${esc(r.requestedCwes.join(", "))}</small><details><summary>Scope and mapping</summary><p>${esc(r.mappingNote)}</p><p>Finding IDs: ${esc(r.findingCwes.join(", ") || "Requires a specific underlying weakness")}</p><p>${esc(r.limitations)}</p></details></td><td>${esc(label(r.scannerStatus))}<br><small>${r.ruleIds.length} dedicated rules · ${esc(r.scannerLanguages.join(", "))}</small></td><td>${esc(label(r.modelStatus))}<br>${r.reviewedPackets} / ${r.plannedPackets} packets${r.needsContextPackets ? `<br>${r.needsContextPackets} need context` : ""}</td><td>${r.potentialFindings} potential<br>${r.dismissedFindings} dismissed</td></tr>`).join("")}</tbody></table>`
+      : "";
+  }
   function list() {
     const report = model?.cweReview,
       term = $("cwe-filter").value.toLowerCase();
@@ -27,7 +41,7 @@
         .slice(0, 200)
         .map(
           (f) =>
-            `<tr><td><button data-finding="${esc(f.id)}">${esc(f.cwe)}</button></td><td>${esc(f.repository)}<br>${esc(f.path)}:${f.line}</td><td>${esc(f.title)}</td><td>${esc(f.status)}</td></tr>`,
+            `<tr><td><button data-finding="${esc(f.id)}">${esc(f.cwe)}</button></td><td>${esc(f.repository)}<br>${esc(f.path)}:${f.line}<br><small>${esc(f.sourceScope || "Source scope unclassified")}</small></td><td>${esc(f.title)}</td><td>${esc(f.status)}</td></tr>`,
         )
         .join("")}</tbody></table>`;
     $("cwe-findings")
@@ -42,7 +56,7 @@
       return;
     }
     $("cwe-detail").innerHTML =
-      `<h3>${esc(f.cwe)} · ${esc(f.title)}</h3><p>${esc(f.repository)} / ${esc(f.path)}:${f.line}–${f.endLine}</p><p>${esc(f.remediation)}</p><p>${esc(f.association)}. ${f.interfaceIds.length} associated interfaces. File SHA256: <code>${esc(f.blobSha256)}</code></p><form id="cwe-decision"><label>Finding status <select name="status" aria-label="Finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save finding decision</button></form>`;
+      `<h3>${esc(f.cwe)} · ${esc(f.title)}</h3><p>${esc(f.repository)} / ${esc(f.path)}:${f.line}–${f.endLine}</p><p>${esc(f.remediation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>${esc(f.association)}. ${f.interfaceIds.length} associated interfaces. File SHA256: <code>${esc(f.blobSha256)}</code></p><form id="cwe-decision"><label>Finding status <select name="status" aria-label="Finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save finding decision</button></form>`;
     $("cwe-decision").onsubmit = async (event) => {
       event.preventDefault();
       try {
@@ -65,6 +79,17 @@
       model = value;
       actions = callbacks;
       const r = model?.cweReview;
+      const selectedRepository = $("cwe-target-repository").value;
+      $("cwe-target-repository").innerHTML =
+        '<option value="">All repositories</option>' +
+        (model?.sources || [])
+          .map((r) => `<option value="${esc(r.name)}">${esc(r.name)}</option>`)
+          .join("");
+      $("cwe-target-repository").value = selectedRepository;
+      $("cwe-target-repository").onchange = targetCoverage;
+      for (const format of ["cwe-coverage-json", "cwe-coverage-csv"])
+        document.querySelector(`[data-export="${format}"]`).disabled = !model;
+      targetCoverage();
       for (const format of ["cwe-json", "cwe-csv", "cwe-sarif"])
         document.querySelector(`[data-export="${format}"]`).disabled = !r;
       $("cwe-run").disabled = !model;
@@ -92,14 +117,14 @@
       $("cwe-model-stop").onclick = () =>
         actions.stop().catch((e) => actions.notify(e.message, true));
       $("cwe-model-status").textContent = review
-        ? `${review.status} · ${review.completedBatches || 0} / ${review.totalBatches || 0} packets completed · ${review.pendingBatches ?? "Unknown"} pending · ${review.findings.length} potential weaknesses${review.error ? " · " + review.error : ""}`
+        ? `${review.status} · ${review.completedBatches || 0} / ${review.totalBatches || 0} packets completed · ${review.pendingBatches ?? "Unknown"} pending · ${review.findings.length} potential weaknesses${review.error ? " · " + review.error : review.batches?.find((b) => b.status === "failed")?.error ? " · " + review.batches.find((b) => b.status === "failed").error : ""}`
         : "Model CWE source review has not run. Semgrep results are separate: use Export Semgrep JSON, CSV or SARIF above. To add model review, enable source sharing and select Run or continue CWE source review.";
       $("cwe-model-results").innerHTML = review
         ? `<p>${esc(review.provider)} / ${esc(review.model)} · Scanner findings are reviewed first, then graph interactions and remaining source. Token usage is included in the workspace token meter and export.</p><table><thead><tr><th>Repository</th><th>Reviewed / planned segments</th></tr></thead><tbody>${review.repositories.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.reviewedSegments || 0} / ${r.chunks}</td></tr>`).join("")}</tbody></table>${review.gaps.length ? `<p>${review.gaps.length} coverage gaps. Inspect the export before accepting coverage.</p>` : ""}${review.findings
             .slice(0, 200)
             .map(
               (f) =>
-                `<details><summary>${esc(f.cwe)} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine}</li>`).join("")}</ul><form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
+                `<details><summary>${esc(f.cwe)} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine} · ${esc(l.sourceScope || "Source scope unclassified")}</li>`).join("")}</ul><form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
             )
             .join("")}`
         : "";

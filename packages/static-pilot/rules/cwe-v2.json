@@ -1,0 +1,389 @@
+{
+  "rules": [
+    {
+      "id": "synthesis.python-tls-verification",
+      "languages": ["python"],
+      "severity": "WARNING",
+      "message": "Certificate verification is disabled.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Enable certificate and hostname verification with an approved trust store.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern-either": [
+        {
+          "pattern": "requests.$METHOD(..., verify=False, ...)"
+        },
+        {
+          "pattern": "httpx.$METHOD(..., verify=False, ...)"
+        },
+        {
+          "pattern": "ssl._create_unverified_context(...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.javascript-tls-verification",
+      "languages": ["javascript", "typescript"],
+      "severity": "WARNING",
+      "message": "TLS certificate validation is disabled.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Remove rejectUnauthorized: false and configure trusted certificates.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern": "{..., rejectUnauthorized: false, ...}"
+    },
+    {
+      "id": "synthesis.csharp-tls-verification",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "Certificate callback accepts every certificate.",
+      "metadata": {
+        "cwe": "CWE-295",
+        "remediation": "Use platform certificate validation; do not return true for every certificate.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern-either": [
+        {
+          "pattern": "$OBJ.ServerCertificateCustomValidationCallback = (...) => true;"
+        },
+        {
+          "pattern": "$OBJ.ServerCertificateValidationCallback += (...) => true;"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-shell",
+      "languages": ["python"],
+      "severity": "WARNING",
+      "message": "A shell command is constructed with formatted input.",
+      "metadata": {
+        "cwe": "CWE-78",
+        "remediation": "Pass a fixed executable and separate argument list with shell=False; verify input trust.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern-either": [
+        {
+          "pattern": "subprocess.$RUN(f\"...\", ..., shell=True, ...)"
+        },
+        {
+          "pattern": "subprocess.$RUN($X + $Y, ..., shell=True, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.javascript-shell",
+      "languages": ["javascript", "typescript"],
+      "severity": "WARNING",
+      "message": "An interpolated command is passed to a shell.",
+      "metadata": {
+        "cwe": "CWE-78",
+        "remediation": "Use execFile or spawn with a fixed executable and a separate validated argument list.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern": "exec(`...${$INPUT}...`, ...)"
+    },
+    {
+      "id": "synthesis.csharp-sql",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "SQL command text contains interpolation or concatenation.",
+      "metadata": {
+        "cwe": "CWE-89",
+        "remediation": "Use parameterized SQL and verify the origin of each input.",
+        "confidence": "review-required",
+        "targetIds": ["server-19"]
+      },
+      "pattern-either": [
+        {
+          "pattern": "new SqlCommand($\"...\", ...)"
+        },
+        {
+          "pattern": "new SqlCommand($X + $Y, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-sql",
+      "languages": ["python"],
+      "severity": "WARNING",
+      "message": "SQL execution receives formatted command text.",
+      "metadata": {
+        "cwe": "CWE-89",
+        "remediation": "Use driver parameters and keep SQL structure constant.",
+        "confidence": "review-required",
+        "targetIds": ["server-19"]
+      },
+      "pattern-either": [
+        {
+          "pattern": "$CURSOR.execute(f\"...\", ...)"
+        },
+        {
+          "pattern": "$CURSOR.execute($QUERY % $ARGS, ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.python-deserialization",
+      "languages": ["python"],
+      "severity": "WARNING",
+      "message": "Object deserialization requires a trusted input source.",
+      "metadata": {
+        "cwe": "CWE-502",
+        "remediation": "Avoid pickle on untrusted input; use a constrained data format and schema validation.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern-either": [
+        {
+          "pattern": "pickle.loads(...)"
+        },
+        {
+          "pattern": "pickle.load(...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.csharp-deserialization",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "BinaryFormatter deserialization can instantiate unsafe objects.",
+      "metadata": {
+        "cwe": "CWE-502",
+        "remediation": "Replace BinaryFormatter with constrained data serialization and verify trust boundaries.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern": "(BinaryFormatter $FORMATTER).Deserialize(...)"
+    },
+    {
+      "id": "synthesis.python-eval",
+      "languages": ["python"],
+      "severity": "WARNING",
+      "message": "Request data is passed directly to eval.",
+      "metadata": {
+        "cwe": "CWE-94",
+        "remediation": "Replace evaluation with explicit parsing and a constrained set of operations.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern": "eval(request.$SOURCE.get(...), ...)"
+    },
+    {
+      "id": "synthesis.csharp-des",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "DES encryption is obsolete.",
+      "metadata": {
+        "cwe": "CWE-327",
+        "remediation": "Use an approved authenticated encryption scheme appropriate to the protocol.",
+        "confidence": "review-required",
+        "targetIds": []
+      },
+      "pattern": "DES.Create(...)"
+    },
+    {
+      "id": "synthesis.c-gets",
+      "languages": ["c", "cpp"],
+      "severity": "WARNING",
+      "message": "gets cannot bound the number of bytes read.",
+      "metadata": {
+        "cwe": "CWE-242",
+        "remediation": "Use a bounded input operation and validate its return value.",
+        "confidence": "review-required",
+        "targetIds": ["server-25"]
+      },
+      "pattern": "gets(...)"
+    },
+    {
+      "id": "synthesis.csharp-ldap-filter",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "LDAP filter uses concatenation or interpolation; input trust and escaping require review.",
+      "metadata": {
+        "cwe": "CWE-90",
+        "targetIds": ["server-06"],
+        "remediation": "Use context-appropriate LDAP filter escaping and validate the input source.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "(DirectorySearcher $S).Filter = $X + $Y;"
+        },
+        {
+          "pattern": "(DirectorySearcher $S).Filter = $\"...\";"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.csharp-connection-string",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "SQL connection string is interpolated; connection-string injection requires input-control evidence.",
+      "metadata": {
+        "cwe": "CWE-20",
+        "targetIds": ["server-05"],
+        "remediation": "Use a connection-string builder with controlled properties; validate untrusted values.",
+        "confidence": "review-required"
+      },
+      "pattern": "new SqlConnection($\"...\")"
+    },
+    {
+      "id": "synthesis.csharp-xml-validation",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "XML schema validation is explicitly disabled; review the input boundary and validation elsewhere.",
+      "metadata": {
+        "cwe": "CWE-112",
+        "targetIds": ["server-29"],
+        "remediation": "Validate untrusted XML against an appropriate schema before relying on its structure.",
+        "confidence": "review-required"
+      },
+      "pattern": "(XmlReaderSettings $S).ValidationType = ValidationType.None;"
+    },
+    {
+      "id": "synthesis.csharp-debug-faults",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "Detailed exception faults are enabled; check whether sensitive details reach unauthorized callers.",
+      "metadata": {
+        "cwe": "CWE-215",
+        "targetIds": ["server-28"],
+        "remediation": "Disable detailed faults outside development and return controlled error responses.",
+        "confidence": "review-required"
+      },
+      "pattern": "$S.IncludeExceptionDetailInFaults = true;"
+    },
+    {
+      "id": "synthesis.csharp-literal-password",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "A literal password is assigned to a network credential; verify whether it is a real credential.",
+      "metadata": {
+        "cwe": "CWE-259",
+        "targetIds": ["server-03"],
+        "remediation": "Obtain credentials from an approved secret source and exclude test-only fixtures from production findings.",
+        "confidence": "review-required"
+      },
+      "patterns": [
+        {
+          "pattern": "new NetworkCredential($USER, $PASSWORD)"
+        },
+        {
+          "metavariable-regex": {
+            "metavariable": "$PASSWORD",
+            "regex": "^\"[^\"\\n]+\"$"
+          }
+        }
+      ]
+    },
+    {
+      "id": "synthesis.csharp-request-ssrf",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "A request query value directly supplies an HTTP destination.",
+      "metadata": {
+        "cwe": "CWE-918",
+        "targetIds": ["server-15"],
+        "remediation": "Constrain outbound destinations and redirects; inspect endpoint authorization and network controls.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "(HttpClient $C).GetAsync(Request.Query[$KEY], ...)"
+        },
+        {
+          "pattern": "(HttpClient $C).GetStringAsync(Request.Query[$KEY], ...)"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.csharp-request-reflection",
+      "languages": ["csharp"],
+      "severity": "WARNING",
+      "message": "A request query value selects a type for instantiation.",
+      "metadata": {
+        "cwe": "CWE-470",
+        "targetIds": ["server-16"],
+        "remediation": "Use a fixed allowlist of trusted types; do not allow callers to select arbitrary class names.",
+        "confidence": "review-required"
+      },
+      "pattern": "Activator.CreateInstance(Type.GetType(Request.Query[$KEY]))"
+    },
+    {
+      "id": "synthesis.javascript-sensitive-storage",
+      "languages": ["javascript", "typescript"],
+      "severity": "WARNING",
+      "message": "Browser storage receives a value under a sensitive credential key; review data sensitivity and access.",
+      "metadata": {
+        "cwe": "CWE-921",
+        "targetIds": ["server-24"],
+        "remediation": "Avoid persistent script-readable storage of sensitive credentials; use an appropriate protected session mechanism.",
+        "confidence": "review-required"
+      },
+      "patterns": [
+        {
+          "pattern-either": [
+            {
+              "pattern": "localStorage.setItem($KEY, $VALUE)"
+            },
+            {
+              "pattern": "sessionStorage.setItem($KEY, $VALUE)"
+            }
+          ]
+        },
+        {
+          "metavariable-regex": {
+            "metavariable": "$KEY",
+            "regex": "(?i)^['\"](?:password|access_token|refresh_token|auth_token)['\"]$"
+          }
+        }
+      ]
+    },
+    {
+      "id": "synthesis.javascript-url-dom-html",
+      "languages": ["javascript", "typescript"],
+      "severity": "WARNING",
+      "message": "URL-controlled input is inserted directly as HTML.",
+      "metadata": {
+        "cwe": "CWE-79",
+        "targetIds": ["server-27"],
+        "remediation": "Use textContent or appropriate HTML sanitization; review browser decoding and reachability.",
+        "confidence": "review-required"
+      },
+      "pattern-either": [
+        {
+          "pattern": "$EL.innerHTML = location.hash;"
+        },
+        {
+          "pattern": "$EL.innerHTML = location.search;"
+        },
+        {
+          "pattern": "$EL.innerHTML = window.location.hash;"
+        },
+        {
+          "pattern": "$EL.innerHTML = window.location.search;"
+        }
+      ]
+    },
+    {
+      "id": "synthesis.c-unbounded-copy",
+      "languages": ["c", "cpp"],
+      "severity": "WARNING",
+      "message": "strcpy does not receive the destination capacity; verify bounds before treating this as an overflow.",
+      "metadata": {
+        "cwe": "CWE-676",
+        "targetIds": ["server-25"],
+        "remediation": "Use a checked copy with explicit capacity and verify size calculations and termination.",
+        "confidence": "review-required"
+      },
+      "pattern": "strcpy($DEST, $SOURCE)"
+    }
+  ]
+}

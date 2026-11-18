@@ -1,0 +1,544 @@
+{
+  "version": "5.0",
+  "releaseDate": "2026-10-28",
+  "verifiedDate": "2026-11-18",
+  "source": "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip",
+  "sourceXmlSha256": "47165a9593def89c69b9ef50c34d99ac68db55df8373613e85e9cc9ceecefb1d",
+  "entries": {
+    "CWE-20": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-22": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-23": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-59": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-73": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-74": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-78": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-79": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-89": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-90": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-94": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-95": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-97": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-99": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-112": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-113": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-116": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-117": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-119": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-120": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-121": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-122": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-124": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-125": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-128": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-131": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-190": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-191": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-200": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-201": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-209": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-215": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-242": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-250": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-259": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-269": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-276": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-284": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-285": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-287": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-295": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-306": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-307": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-311": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-319": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-321": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-326": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-327": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-328": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-330": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-338": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-347": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-352": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-353": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-362": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-367": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-377": {
+      "kind": "Weakness",
+      "status": "Deprecated",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-384": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-400": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-416": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-434": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-451": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-470": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-476": {
+      "kind": "Weakness",
+      "status": "Stable",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-502": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-526": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-532": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-545": {
+      "kind": "Weakness",
+      "status": "Deprecated",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-601": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-602": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-611": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-613": {
+      "kind": "Weakness",
+      "status": "Deprecated",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-633": {
+      "kind": "Grouping",
+      "status": "Deprecated",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-639": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-668": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Discouraged"
+    },
+    "CWE-676": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-776": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-778": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-787": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-798": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-829": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-862": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-863": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-915": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-918": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-921": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-925": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-926": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-939": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-940": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-1021": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-1104": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-1336": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-1357": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-1395": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed-with-Review"
+    },
+    "CWE-1436": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1437": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1438": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1439": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1440": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1441": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1443": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1444": {
+      "kind": "Grouping",
+      "status": "Incomplete",
+      "mappingUsage": "Prohibited"
+    },
+    "CWE-1463": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-1464": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-378": {
+      "kind": "Weakness",
+      "status": "Draft",
+      "mappingUsage": "Allowed"
+    },
+    "CWE-379": {
+      "kind": "Weakness",
+      "status": "Incomplete",
+      "mappingUsage": "Allowed"
+    }
+  }
+}
