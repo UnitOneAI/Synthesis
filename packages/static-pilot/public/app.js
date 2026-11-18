@@ -167,6 +167,13 @@ async function status() {
     );
   }
   $("analyze").disabled = s.status === "running";
+  $("open-saved-graph").hidden = !s.savedGraph?.available;
+  $("analyze").textContent = s.savedGraph?.available
+    ? "Rebuild source graph"
+    : "Build source graph";
+  $("saved-graph-status").textContent = s.savedGraph?.available
+    ? `${s.savedGraph.message} ${s.savedGraph.extractor === "older" ? "This snapshot uses older extraction rules. Rebuild once to include the updated extraction." : s.savedGraph.extractor === "unknown" ? "Extractor version was not recorded for this snapshot." : "Saved extraction is compatible with this version."}`
+    : "No saved graph yet. Build once, then reuse it for review and exports.";
   $("cancel").hidden = s.status !== "running";
   $("cancel-review").hidden = s.status !== "running" || s.mode !== "review";
   if (s.status === "running") $("run-review").disabled = true;
@@ -219,6 +226,88 @@ $("analyze").onclick = async () => {
     );
   } catch (e) {
     message(e.message, true);
+  }
+};
+$("open-saved-graph").onclick = async () => {
+  try {
+    if (!model) {
+      model = await api("model");
+      renderModel();
+    }
+    tab("graph");
+  } catch (e) {
+    message(e.message, true);
+  }
+};
+let packageChoices;
+async function loadPackageChoices() {
+  packageChoices = await api("graph-package-options");
+  renderPackageSubjects();
+}
+function renderPackageSubjects() {
+  const kind = $("package-kind").value;
+  const choices =
+    kind === "system"
+      ? [{ id: "", name: "System overview (bounded)" }]
+      : packageChoices?.kinds[kind] || [];
+  $("package-value").innerHTML = choices
+    .map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`)
+    .join("");
+  $("prepare-package").disabled = !choices.length;
+}
+$("package-kind").onchange = () =>
+  loadPackageChoices().catch((e) => message(e.message, true));
+$("prepare-package").onclick = async () => {
+  const button = $("prepare-package");
+  button.disabled = true;
+  $("package-result").textContent = "Preparing selected graph evidence…";
+  try {
+    const result = await api("graph-package", {
+      modelRevision: model.modelRevision,
+      kind: $("package-kind").value,
+      value: $("package-value").value,
+      includeSource: $("package-source").checked,
+    });
+    $("package-result").innerHTML =
+      `<p>${result.parts.length} review part(s) in ${result.bundles.length} transfer ZIP(s) · ${(result.bundles.reduce((n, p) => n + p.bytes, 0) / 1024).toFixed(0)} KiB total. Download every transfer ZIP to keep the parts together. Links expire after 10 minutes or when another package is prepared.</p><p>${result.coverage.omissions.length ? "Partial scope. Select a narrower subject to investigate omitted context." : "No export limits reached. Source and parser coverage gaps still apply."}</p><details><summary>Export coverage and omissions</summary><ul>${result.coverage.omissions.map((o) => `<li>${esc(o.reason.replace("context-kind-limit-", "Additional records omitted: ").replace("summarized-references-", "Shortened reference lists: ").replaceAll("-", " "))}: ${o.count}</li>`).join("") || "<li>No additional export omissions.</li>"}</ul></details>`;
+    const details = document.createElement("details");
+    details.innerHTML = "<summary>Individual review parts</summary>";
+    $("package-result").append(details);
+    for (const part of [...result.bundles, ...result.parts]) {
+      const b = document.createElement("button");
+      b.className = "secondary";
+      b.textContent = `${part.bundle ? "Download transfer ZIP " + part.bundle : "Download part " + part.part} · ${(part.bytes / 1024).toFixed(0)} KiB`;
+      b.onclick = async () => {
+        try {
+          const r = await fetch(
+            "/api/graph-package?" +
+              new URLSearchParams({
+                id: result.packageId,
+                ...(part.bundle
+                  ? { bundle: part.bundle }
+                  : { part: part.part }),
+              }),
+            { headers: { "X-Synthesis-Token": token } },
+          );
+          if (!r.ok) throw Error((await r.json()).error);
+          const url = URL.createObjectURL(await r.blob());
+          const a = Object.assign(document.createElement("a"), {
+            href: url,
+            download: part.name,
+          });
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (e) {
+          message(e.message, true);
+        }
+      };
+      if (part.bundle) $("package-result").insertBefore(b, details);
+      else details.append(b);
+    }
+  } catch (e) {
+    $("package-result").textContent = e.message;
+  } finally {
+    button.disabled = false;
   }
 };
 $("cancel").onclick = async () => {
@@ -384,6 +473,7 @@ $("use-model").onchange = () => {
 function renderGraph() {
   const graph = model?.sourceGraph;
   if (!graph) return;
+  loadPackageChoices().catch((e) => message(e.message, true));
   $("graph-summary").innerHTML = [
     [
       graph.counts?.byKind?.function ??
@@ -416,7 +506,7 @@ function renderGraph() {
     `<p>${graph.coverage.parsed} files parsed · ${graph.coverage.syntaxErrors} with syntax errors · ${graph.coverage.failed} failed or timed out · ${graph.coverage.unsupported} without a language parser · ${graph.coverage.limited} limited.</p><p class="hint">Syntax evidence does not resolve dependency injection, overloads, dynamic dispatch or deployed trust. Source collection limits still apply. Full file coverage is in the JSON export.</p>`;
   if (graph.storage === "sqlite") {
     $("graph-coverage").innerHTML +=
-      `<p>Stored graph: ${graph.counts.nodes} nodes · ${graph.counts.edges} relationships. ${graph.reuse?.reusedFiles || 0} unchanged files reused. Full graph export includes every stored record.</p>`;
+      `<p>Stored graph: ${graph.counts.nodes} nodes · ${graph.counts.edges} relationships. Last build reused ${graph.reuse?.reusedFiles || 0} files from the parsing cache. Opening this saved graph does not rebuild it. Full graph export includes every stored record.</p>`;
     renderDiskGraph().catch((e) => message(e.message, true));
     return;
   }

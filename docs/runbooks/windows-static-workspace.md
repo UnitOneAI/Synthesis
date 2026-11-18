@@ -1,5 +1,15 @@
 # Windows: static system threat modeling
 
+## Current update: 0.10.0 — reuse and focused exports
+
+Keep the same `--source-root`, `--workspace` and `--graph-storage sqlite` when restarting. A saved 0.9.0 graph can be reused by 0.10.0 without rebuilding: this release does not change extraction rules. In Sources, use **Open saved graph**. Rebuild only for changed source, repository scope, older extraction rules or a deliberate extraction refresh. Restart does not verify current file contents. Historical upgrade sections below describe one-time migrations, not an instruction to rebuild on every start.
+
+Open **Source graph → Export graph review package**. Choose repository/component/flow/finding/CWE with findings/system overview. Leave source context off for architecture-only review; enable it when code evidence is needed. Click **Prepare graph package**, then download each numbered transfer ZIP. The transfer ZIPs contain the small review parts. Each ZIP is at most 3 MiB. Its manifest records snapshot IDs, omissions, hashes and scope. Changed source is excluded from optional windows and reported as a gap. This neither rebuilds the graph nor calls a model.
+
+Save downloaded parts under your exports folder outside the clones. Browser downloads use the browser's configured directory; this feature does not silently write them to the trace folder. Inspect the ZIPs before transferring. All numbered parts describe one selected scope; no whole-graph backup is required. The previous full graph and diagnostic exports remain available separately.
+
+Continue STRIDE with metadata from the saved graph. The older optional STRIDE transient-excerpt mode still requires recollection after restart; its excerpts were never persisted. CWE source review reads source again for code validation but reuses the graph. See [export architecture and limits](../design/focused-graph-export.md) and [test specifications](../testing/focused-graph-export.md).
+
 Requires a current Node.js 24 release, Git, a current Edge/Chrome browser, and readable local clones. No target application, build, installer, database, container or runtime service is started. Keep the source root, Synthesis checkout, workspace and exports in separate folders.
 
 This can run inside a Windows VM. Open the browser inside that VM (including through Remote Desktop) using the printed local access link. Model review requires outbound access to the configured provider; static collection and manual review do not. The [disk-backed graph and VM architecture](../design/disk-backed-static-graph.md) documents the 0.6.0 implementation and remaining metadata/parser/planner limits. Local SSD storage is required; keep the workspace off network shares and synchronized folders.

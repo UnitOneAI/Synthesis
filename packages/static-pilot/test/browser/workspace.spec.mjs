@@ -58,6 +58,80 @@ const tab = (page, name) =>
 const field = (page, name) =>
   page.locator("#ws-record-form").getByLabel(name, { exact: true });
 
+test("saved graph opens after restart and exports a small evidence package without rebuilding", async ({
+  page,
+}) => {
+  const url = new URL(app.url);
+  const original = await (
+    await fetch(url.origin + "/api/status", {
+      headers: { "X-Synthesis-Token": url.hash.slice(1) },
+    })
+  ).json();
+  await app.close();
+  app = await serve({
+    sourceRoot: root,
+    workspace: dir,
+    persist: true,
+    graphStorage: sqliteSupported() ? "sqlite" : "memory",
+    port: 0,
+    quiet: true,
+  });
+  let builds = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/analyze") && request.method() === "POST")
+      builds++;
+  });
+  await page.goto(app.url);
+  await expect(
+    page.getByRole("button", { name: "Open saved graph", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("#saved-graph-status")).toContainText(
+    "Saved extraction is compatible",
+  );
+  await page
+    .getByRole("button", { name: "Open saved graph", exact: true })
+    .click();
+  await expect(page.locator("#graph")).toBeVisible();
+  await expect(page.locator("#package-value option")).toHaveCount(3);
+  await expect(
+    page.getByLabel("Include redacted source context"),
+  ).not.toBeChecked();
+  await page
+    .getByRole("button", { name: "Prepare graph package", exact: true })
+    .click();
+  await expect(page.locator("#package-result")).toContainText(
+    "Download every transfer ZIP",
+    { timeout: 15000 },
+  );
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: /Download transfer ZIP 1/ }).click();
+  const download = await downloading;
+  const data = await fs.readFile(await download.path());
+  expect(data.length).toBeLessThanOrEqual(3 * 1024 * 1024);
+  const outer = unzipSync(data);
+  const transfer = JSON.parse(strFromU8(outer["transfer-manifest.json"]));
+  const zip = unzipSync(outer[transfer.parts[0].name]);
+  const descriptor = JSON.parse(strFromU8(zip["manifest.json"]));
+  expect(descriptor.snapshot.modelRevision).toBe(
+    original.savedGraph.modelRevision,
+  );
+  expect(descriptor.snapshot.generation).toBe(original.savedGraph.generation);
+  expect(descriptor.selection.includeSource).toBe(false);
+  expect(strFromU8(zip["records.ndjson"])).toContain('"graph-node"');
+  expect(builds).toBe(0);
+  await page
+    .getByLabel("Export scope", { exact: true })
+    .selectOption("component");
+  await expect(page.locator("#package-value option").first()).toBeAttached();
+  await page.getByLabel("Include redacted source context").check();
+  await page
+    .getByRole("button", { name: "Prepare graph package", exact: true })
+    .click();
+  await expect(page.locator("#package-result")).toContainText(
+    "Download every transfer ZIP",
+  );
+});
+
 test("DFD context, focus, trust lenses and actor selection show real source evidence", async ({
   page,
 }) => {

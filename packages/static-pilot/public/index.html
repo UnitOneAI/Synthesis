@@ -243,6 +243,10 @@
             model review from the STRIDE matrix. Building the graph makes no
             model calls.
           </p>
+          <p id="saved-graph-status" class="hint"></p>
+          <button id="open-saved-graph" class="secondary" hidden>
+            Open saved graph
+          </button>
           <button id="analyze">Build source graph</button
           ><button id="cancel" class="secondary" hidden>Cancel</button>
         </div>
@@ -261,6 +265,44 @@
         </div>
         <div id="graph-summary" class="stats"></div>
         <div id="graph-coverage"></div>
+        <div class="card">
+          <h3>Export graph review package</h3>
+          <p>
+            Choose a scope for deeper review. Uses the saved graph without
+            rebuilding or making model calls. Each ZIP is at most 3 MiB; larger
+            selections are split into numbered parts. Limits and omitted context
+            are listed in every manifest.
+          </p>
+          <div class="toolbar">
+            <label
+              >Export scope<select id="package-kind" aria-label="Export scope">
+                <option value="repository">Repository</option>
+                <option value="component">Component</option>
+                <option value="flow">Flow</option>
+                <option value="finding">Finding</option>
+                <option value="cwe">CWE with findings</option>
+                <option value="system">System overview</option>
+              </select></label
+            >
+            <label
+              >Export subject<select
+                id="package-value"
+                aria-label="Export subject"
+              ></select
+            ></label>
+          </div>
+          <label
+            ><input id="package-source" type="checkbox" /> Include redacted
+            source context</label
+          >
+          <p class="hint">
+            Source context reads only selected local files and checks their
+            saved hashes. Changed files are reported as gaps. Redaction is best
+            effort; inspect before sharing. Nothing uploads automatically.
+          </p>
+          <button id="prepare-package">Prepare graph package</button>
+          <div id="package-result" aria-live="polite"></div>
+        </div>
         <button data-export="diagnostics" class="secondary">
           Download diagnostic bundle · ZIP
         </button>
