@@ -1,4 +1,9 @@
 import { cweTargetCoverage, cweTargetCsv } from "./cwe-targets.mjs";
+import {
+  buildGraphPackage,
+  graphPackageChoices,
+  graphReuse,
+} from "./graph-package.mjs";
 import { reviewCweCode } from "./cwe-model.mjs";
 import { redact } from "./model-review.mjs";
 import { scanCwe, cweCsv, cweSarif } from "./cwe-scan.mjs";
@@ -80,6 +85,9 @@ export async function serve({
   let cweController, cweTask;
   let reviewExcerpts = [],
     scanPriorManifest;
+  let restoredExtractorKeys = [],
+    graphExport,
+    graphExportBusy = false;
   if (!["memory", "sqlite"].includes(graphStorage))
     throw Error("Graph storage must be memory or sqlite");
   const store = persist ? await workspaceStore(root, workspace) : null;
@@ -202,6 +210,9 @@ export async function serve({
           });
           try {
             reader.validateGeneration(model.sourceGraph);
+            restoredExtractorKeys = reader.extractorKeys(
+              model.sourceGraph.generation,
+            );
           } finally {
             reader.close();
           }
@@ -239,7 +250,7 @@ export async function serve({
         job = {
           status: "ready",
           message:
-            "Saved snapshot restored. Rebuild to inspect source changes.",
+            "Saved graph restored. Continue review without rebuilding when the clones and selected repositories are unchanged.",
         };
       }
     } catch (error) {
@@ -517,6 +528,11 @@ export async function serve({
         return send(401, {
           error: "Open the access link printed by the local server",
         });
+      if (graphExportBusy && req.method === "POST")
+        return send(409, {
+          error:
+            "Wait for the graph package to finish before changing this assessment",
+        });
       if (req.method === "GET" && url.pathname === "/api/status")
         return send(200, {
           ...job,
@@ -534,11 +550,104 @@ export async function serve({
               }
             : { enabled: false },
           graphStorage,
+          savedGraph: graphReuse(model, restoredExtractorKeys),
           sourceRoot: root,
           githubConfigured: Boolean(githubToken),
           inference: publicModelConfig(modelConfig),
           defaultSourceExcerpts: includeSourceExcerpts,
         });
+      if (
+        req.method === "GET" &&
+        url.pathname === "/api/graph-package-options"
+      ) {
+        if (!model)
+          return send(409, { error: "Build or restore a source graph first" });
+        return send(200, await withGraph(() => graphPackageChoices(model)));
+      }
+      if (req.method === "POST" && url.pathname === "/api/graph-package") {
+        if (!model || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error: "Wait for analysis to finish, then export the saved graph",
+          });
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, {
+            error: "Source snapshot changed; refresh before exporting",
+          });
+        if (graphExportBusy || ["running", "cancelling"].includes(job.status))
+          return send(409, {
+            error:
+              "Wait for the active operation before preparing another package",
+          });
+        const snapshot = structuredClone(model),
+          scope = structuredClone(manifest);
+        graphExportBusy = true;
+        try {
+          const result = await withGraph((reader) => {
+            if (reader) attachGraph(snapshot.sourceGraph, reader);
+            return buildGraphPackage(snapshot, scope, {
+              kind: input.kind,
+              value: input.value,
+              includeSource: input.includeSource,
+              sourceRoot: root,
+              secrets: [githubToken, modelConfig?.apiKey, token],
+            });
+          });
+          graphExport = { ...result, expires: Date.now() + 10 * 60 * 1000 };
+          await traces.record("graph-package.created", {
+            packageId: result.packageId,
+            sourceRevision: result.modelRevision,
+            parts: result.parts.length,
+            bytes: result.parts.reduce((n, p) => n + p.bytes, 0),
+            includeSource: input.includeSource === true,
+            omissions: result.coverage.omissions,
+          });
+          return send(200, {
+            ...result,
+            bundles: result.bundles.map(({ buffer, ...bundle }, index) => ({
+              ...bundle,
+              bundle: index + 1,
+            })),
+            parts: result.parts.map(({ buffer, manifest, ...part }, index) => ({
+              ...part,
+              part: index + 1,
+              uncompressedPayloadBytes: manifest.payload.bytes,
+              estimatedTokens: manifest.payload.estimatedTokens,
+            })),
+          });
+        } finally {
+          graphExportBusy = false;
+        }
+      }
+      if (req.method === "GET" && url.pathname === "/api/graph-package") {
+        if (
+          !graphExport ||
+          graphExport.expires < Date.now() ||
+          url.searchParams.get("id") !== graphExport.packageId
+        ) {
+          graphExport = undefined;
+          return send(410, {
+            error:
+              "Graph package expired or replaced. Prepare it again from the saved graph.",
+          });
+        }
+        const collection = url.searchParams.has("bundle")
+          ? graphExport.bundles
+          : graphExport.parts;
+        const part = Number(
+          url.searchParams.get(
+            url.searchParams.has("bundle") ? "bundle" : "part",
+          ),
+        );
+        if (!Number.isInteger(part) || part < 1 || part > collection.length)
+          return send(400, { error: "Invalid graph package part" });
+        const item = collection[part - 1];
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${item.name}"`,
+        );
+        return send(200, item.buffer, "application/zip");
+      }
       if (req.method === "GET" && url.pathname === "/api/manifest")
         return send(200, manifest || null);
       if (req.method === "POST" && url.pathname === "/api/inventory") {
@@ -1094,7 +1203,10 @@ export async function serve({
       }
       return send(404, { error: "Not found" });
     } catch (error) {
-      if (req.url?.startsWith("/api/export"))
+      if (
+        req.url?.startsWith("/api/export") ||
+        req.url?.startsWith("/api/graph-package")
+      )
         await traces
           .record("export.failed", { failure: failureDetail(error.message) })
           .catch(() => {});

@@ -10,7 +10,7 @@ import {
   configurationConnection,
   discoverConnections,
 } from "./connection-discovery.mjs";
-import { GraphStore, attachGraph } from "./graph-store.mjs";
+import { GraphStore, attachGraph, EXTRACTOR_KEY } from "./graph-store.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import path from "node:path";
 import { id, sha, localSource, githubSource } from "./sources.mjs";
@@ -1160,7 +1160,10 @@ export async function analyze(manifest, options = {}) {
         reuse,
         storage: disk.capacity(),
       });
-    } else finishSourceGraph(model.sourceGraph);
+    } else {
+      finishSourceGraph(model.sourceGraph);
+      model.sourceGraph.extractorKey = EXTRACTOR_KEY;
+    }
     model.connectionDiscovery = discoverConnections(
       model,
       disk

@@ -227,6 +227,7 @@ export class GraphStore {
       kind,
       parent,
       repository,
+      path: filePath,
       after = "",
       limit = Number.MAX_SAFE_INTEGER,
     } = {},
@@ -247,6 +248,10 @@ export class GraphStore {
     if (repository) {
       filters.push("m.repository=?");
       args.push(repository);
+    }
+    if (filePath) {
+      filters.push("m.path=?");
+      args.push(filePath);
     }
     const index =
       table === "nodes" && parent !== undefined
@@ -305,6 +310,40 @@ export class GraphStore {
         )
         .get(generation, nodeId),
     );
+  }
+  *incidentEdges(generation, nodeId, limit = 1000) {
+    let remaining = limit;
+    for (const [column, index] of [
+      ["source", "edges_source"],
+      ["target", "edges_target"],
+    ]) {
+      for (const row of this.db
+        .prepare(
+          `SELECT e.data FROM edges e INDEXED BY ${index} CROSS JOIN members m ON m.version=e.version WHERE e.${column}=? AND m.generation=? ORDER BY e.id LIMIT ?`,
+        )
+        .iterate(nodeId, generation, remaining)) {
+        yield parse(row);
+        if (--remaining === 0) return;
+      }
+    }
+    for (const column of ["source", "target"]) {
+      for (const row of this.db
+        .prepare(
+          `SELECT data FROM links WHERE generation=? AND ${column}=? ORDER BY id LIMIT ?`,
+        )
+        .iterate(generation, nodeId, remaining)) {
+        yield parse(row);
+        if (--remaining === 0) return;
+      }
+    }
+  }
+  extractorKeys(generation) {
+    return this.db
+      .prepare(
+        "SELECT DISTINCT v.extractor FROM versions v JOIN members m ON m.version=v.id WHERE m.generation=?",
+      )
+      .all(generation)
+      .map((r) => r.extractor);
   }
   *files(generation) {
     for (const r of this.db
@@ -450,6 +489,7 @@ export class GraphStore {
     const graph = {
       ...sourceGraph,
       storage: "sqlite",
+      extractorKey: EXTRACTOR_KEY,
       generation,
       fingerprint: hash.digest("hex"),
       nodes: [],
