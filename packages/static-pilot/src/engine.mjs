@@ -1,4 +1,5 @@
-import { architectureFacts } from "./architecture.mjs";
+import { internalFacts } from "./internal-topology.mjs";
+import { architectureFacts, deploymentFacts } from "./architecture.mjs";
 import {
   GUIDANCE_VERSION,
   GUIDANCE_HASH,
@@ -370,10 +371,11 @@ export function extract(source, files, options = {}) {
   for (const file of files) {
     const ext = path.posix.extname(file.path).toLowerCase();
     componentFor(file.path);
-    for (const fact of architectureFacts(
-      file.path,
-      stripComments(file.text, ext),
-    )) {
+    for (const fact of [
+      ...architectureFacts(file.path, stripComments(file.text, ext)),
+      ...internalFacts(file.path, stripComments(file.text, ext)),
+      ...deploymentFacts(file.path, file.text),
+    ]) {
       const item = add(
         file,
         null,
@@ -386,8 +388,7 @@ export function extract(source, files, options = {}) {
       );
       item.connection = {
         kind: "architecture",
-        role: fact.role,
-        dimension: fact.dimension,
+        ...fact,
       };
     }
     let tree;
@@ -566,6 +567,7 @@ export function extract(source, files, options = {}) {
       for (const rule of RULES) {
         rule.regex.lastIndex = 0;
         for (const match of text.matchAll(rule.regex)) {
+          if (ext === ".py" && /^fetch\s*\(/.test(match[0])) continue;
           count++;
           add(
             file,

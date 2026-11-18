@@ -61,7 +61,7 @@ test("12 repositories connect automatically and support CWE scan, review, export
       .click();
     await expect(page.locator("#workspace")).toBeVisible();
     await expect(page.locator(".ws-status")).toContainText(
-      "11 discovered connections",
+      "23 discovered connections",
     );
     await page
       .getByRole("button", { name: "5 · CWE code review", exact: true })

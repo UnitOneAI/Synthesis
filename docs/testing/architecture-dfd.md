@@ -31,3 +31,22 @@ The UnitOne validation uses a read-only open-autofix clone and a separate SQLite
 Transport regression: calls with HTTP and HTTPS source URLs must form separate connections even when source, target and route match. SVG, Mermaid and the inspector retain the transport distinction; a source URL does not establish TLS validation or runtime enforcement.
 
 Concurrency regression: eight simultaneous requests for the same disk-backed review plan must all succeed with the same revision and obligations. Pending identical plans share one query; worker slots are released on exit before completion is reported. The start/cancel browser flow must not produce resource errors during overlapping refreshes.
+
+## Internal topology regression specification
+
+The internal topology extension must pass these cases before release:
+
+| Case | Required result |
+|---|---|
+| API imports and invokes a worker; worker invokes storage | Connected source candidates with call and definition evidence; worker remains an internal unit |
+| Import without invocation, comment-only API, shadowed constructor | No fabricated invocation edge |
+| Unique Python re-export | Resolve within the repository, retain import and definition evidence |
+| SQLite/SQLAlchemy/file storage/provider SDK | Logical resources retain evidence; unknown physical identities/endpoints remain explicit gaps |
+| Same-project connection string key | Connect source use to one configured identity; reject conflicting environment values |
+| Twelve .NET repositories | Retain HTTP chain, hosted workers, shared SQL, RabbitMQ and WCF configuration references across disk/restart |
+| Literal supervisor host and reverse proxy declarations | Connect matching loopback ports only; no configuration execution |
+| Project-script declaration | CLI candidate points to a collected module; no name-based deployment guesses |
+| Grouped system view | Hide test resources by default, retain full individual records, avoid merging reviewer decisions/trust memberships |
+| Browser and exports | Worker/store visible; selection shows source locations; coverage shows identity gaps; Mermaid and restart retain topology |
+
+Validate the actual repository separately from fixtures. Store customer-specific screenshots, evidence and reports outside the public checkout. Report source counts, visible and grouped connections, unresolved gaps, parser limits, model-call count and browser errors. A successful graph build or scan is not proof of exhaustive architecture or CWE coverage.

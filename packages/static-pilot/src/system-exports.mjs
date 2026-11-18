@@ -35,6 +35,10 @@ export function systemSvg(model, options = {}) {
     const key = [f.source, f.target].sort().join(":");
     edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
   }
+  const incoming = new Map(),
+    incomingIndex = new Map();
+  for (const f of d.connections)
+    incoming.set(f.target, (incoming.get(f.target) || 0) + 1);
   const flowSvg = d.connections
     .map((f) => {
       const a = positions.get(f.source),
@@ -43,14 +47,21 @@ export function systemSvg(model, options = {}) {
         ordinal = edgeIndices.get(key) || 0;
       edgeIndices.set(key, ordinal + 1);
       const offset = (ordinal - (edgeCounts.get(key) - 1) / 2) * 28;
+      const targetOrdinal = incomingIndex.get(f.target) || 0;
+      incomingIndex.set(f.target, targetOrdinal + 1);
       let path, lx, ly;
       if (b.x > a.x) {
         const x1 = a.x + 260,
           x2 = b.x,
           mid = (x1 + x2) / 2;
-        path = `M${x1} ${a.y + 40} C${mid + offset} ${a.y + 40} ${mid + offset} ${b.y + 40} ${x2} ${b.y + 40}`;
-        lx = mid;
-        ly = (a.y + b.y) / 2 + 30 + offset;
+        if (b.x - a.x > 420) {
+          // Skip-rank edges use row/column gutters rather than crossing boxes.
+          const corridor = Math.max(a.y, b.y) + 110 + ordinal * 12;
+          path = `M${x1} ${a.y + 40} L${x1 + 35} ${a.y + 40} L${x1 + 35} ${corridor} L${x2 - 30} ${corridor} L${x2 - 30} ${b.y + 40} L${x2} ${b.y + 40}`;
+        } else
+          path = `M${x1} ${a.y + 40} C${mid + offset} ${a.y + 40} ${mid + offset} ${b.y + 40} ${x2} ${b.y + 40}`;
+        lx = x2 - 65;
+        ly = b.y + 22 + (targetOrdinal - (incoming.get(f.target) - 1) / 2) * 48;
       } else {
         const x1 = a.x + 260,
           x2 = b.x + 260,
@@ -78,8 +89,20 @@ export function systemSvg(model, options = {}) {
       const p = positions.get(n.id),
         active = d.activeNodeIds.includes(n.id);
       const entry = actor?.entryIds?.some((id) => n.memberIds.includes(id));
-      const chunks = (n.name.match(/.{1,32}/gu) || [""]).slice(0, 2);
-      return `<g class="node" data-component-type="${e(n.type)}" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(`${n.name} · ${n.classification || n.basis} · ${n.memberIds.length} source component(s)`)}</title><rect x="${p.x}" y="${p.y}" width="260" height="85" rx="${n.type === "external" ? 2 : 10}" fill="white" stroke="${active ? "#b56416" : "#a8bfd8"}" stroke-width="${active ? 3 : 1.4}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<path d="M${p.x} ${p.y + 12} Q${p.x + 130} ${p.y + 30} ${p.x + 260} ${p.y + 12}" fill="none" stroke="#a8bfd8"/>` : ""}${n.type === "broker" ? `<path d="M${p.x + 6} ${p.y + 8}V${p.y + 77} M${p.x + 254} ${p.y + 8}V${p.y + 77}" stroke="#61758c"/>` : ""}${entry ? `<circle cx="${p.x + 246}" cy="${p.y + 14}" r="5" fill="#b56416"><title>Actor entry point under stated access assumptions</title></circle>` : ""}${chunks.map((line, i) => text(p.x + 12, p.y + 25 + i * 17, line, 13)).join("")}${text(p.x + 12, p.y + 69, `${n.type}${n.type !== "source-group" && n.classification ? " candidate" : ""}${n.memberIds.length > 1 ? ` · ${n.memberIds.length} source groups` : ""}`, 10)}</g>`;
+      const chunks = [""];
+      for (const word of n.name.split(/\s+/)) {
+        const last = chunks.length - 1;
+        if (chunks[last] && chunks[last].length + word.length + 1 > 32)
+          chunks.push(word);
+        else chunks[last] += (chunks[last] ? " " : "") + word;
+      }
+      if (chunks.length > 2) {
+        chunks.splice(2);
+        chunks[1] += "…";
+      }
+      for (let i = 0; i < chunks.length; i++)
+        if (chunks[i].length > 36) chunks[i] = chunks[i].slice(0, 35) + "…";
+      return `<g class="node" data-component-type="${e(n.type)}" data-select="${e(n.id)}" role="button" tabindex="0" aria-label="${e(n.name)}"><title>${e(`${n.name} · ${n.classification || n.basis} · ${n.memberIds.length} source component(s)`)}</title><rect x="${p.x}" y="${p.y}" width="260" height="85" rx="${n.type === "external" ? 2 : 10}" fill="white" stroke="${active ? "#b56416" : "#a8bfd8"}" stroke-width="${active ? 3 : 1.4}" ${n.type === "unknown" ? 'stroke-dasharray="5 5"' : ""}/>${n.type === "store" ? `<path d="M${p.x} ${p.y + 5} Q${p.x + 130} ${p.y + 19} ${p.x + 260} ${p.y + 5}" fill="none" stroke="#a8bfd8"/>` : ""}${n.type === "broker" ? `<path d="M${p.x + 6} ${p.y + 8}V${p.y + 77} M${p.x + 254} ${p.y + 8}V${p.y + 77}" stroke="#61758c"/>` : ""}${entry ? `<circle cx="${p.x + 246}" cy="${p.y + 14}" r="5" fill="#b56416"><title>Actor entry point under stated access assumptions</title></circle>` : ""}${chunks.map((line, i) => text(p.x + 12, p.y + 25 + i * 17, line, 13)).join("")}${text(p.x + 12, p.y + 69, `${n.internalRole === "worker" ? "in-process worker candidate" : n.type}${n.type !== "source-group" && n.classification ? " candidate" : ""}${n.memberIds.length > 1 ? ` · ${n.memberIds.length} source members` : ""}`, 10)}</g>`;
     })
     .join(
       "",

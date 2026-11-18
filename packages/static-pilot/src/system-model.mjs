@@ -1,3 +1,4 @@
+import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents, sourceScope } from "./architecture.mjs";
 import { assessRisk, RISK_FACTORS } from "./analysis-guidance.mjs";
 import { id, sha } from "./sources.mjs";
@@ -44,6 +45,7 @@ const claim = (basis = "source observation") => ({
 
 // Evidence-backed architecture candidates and reviewer annotations; no runtime claims.
 export function systemModel(model, { matrix = true } = {}) {
+  model = internalTopology(model);
   const w = model.architecture || empty();
   const assignedOwners = new Map();
   for (const c of w.records.components || [])
@@ -398,6 +400,15 @@ export function systemModel(model, { matrix = true } = {}) {
   });
   const sourceEvidence = new Map(model.evidence.map((e) => [e.id, e]));
   const sourceInterfaceMap = new Map(model.interfaces.map((i) => [i.id, i]));
+  for (const entity of result.entities) {
+    const scopes = (entity.evidenceIds || []).map((id) =>
+      sourceScope(sourceEvidence.get(id)?.path),
+    );
+    if (scopes.length)
+      entity.scope = scopes.includes("production-candidate")
+        ? "production-candidate"
+        : scopes[0];
+  }
   for (const f of result.flows) {
     const first = sourceInterfaceMap.get(f.interfaceIds?.[0]);
     f.scope =
@@ -461,6 +472,11 @@ export function systemModel(model, { matrix = true } = {}) {
     }
   result.coverage = {
     architecture: {
+      internalUnits: result.components.filter((c) => c.internalRole).length,
+      backgroundWorkers: result.components.filter(
+        (c) => c.internalRole === "worker",
+      ).length,
+      logicalResources: result.entities.filter((c) => c.resourceKind).length,
       candidateProcesses: result.components.filter(
         (c) => c.type !== "source-group",
       ).length,

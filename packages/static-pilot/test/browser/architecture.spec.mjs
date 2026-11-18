@@ -132,3 +132,80 @@ test("service diagram groups calls, exposes evidence/gaps, exports the selected 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("internal worker and storage evidence, exports and restart", async ({
+  page,
+}, testInfo) => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "synthesis-internal-browser-"),
+  );
+  let app;
+  try {
+    const repo = path.join(root, "repos", "service");
+    await fs.mkdir(repo, { recursive: true });
+    await fs.writeFile(
+      path.join(repo, "server.py"),
+      'from worker import Consumer\nfrom storage import Store\n@app.get("/items")\ndef items():\n    return Store()\nConsumer()\n',
+    );
+    await fs.writeFile(
+      path.join(repo, "worker.py"),
+      "import threading\nfrom storage import Store\nclass Consumer:\n    def run(self):\n        Store()\n        threading.Thread(target=self.run)\n",
+    );
+    await fs.writeFile(
+      path.join(repo, "storage.py"),
+      "import sqlite3\nclass Store:\n    def open(self):\n        return sqlite3.connect(self.path)\n",
+    );
+    const options = {
+      sourceRoot: path.join(root, "repos"),
+      workspace: path.join(root, "state"),
+      persist: true,
+      port: 0,
+      quiet: true,
+      initialManifest: {
+        title: "Internal architecture",
+        profile: "test",
+        repositories: [{ name: "service" }],
+      },
+    };
+    app = await serve(options);
+    await page.goto(app.url);
+    await page
+      .getByRole("button", { name: "Build source graph", exact: true })
+      .click();
+    await expect(page.locator("#ws-canvas svg")).toBeVisible();
+    await expect(page.locator("#ws-canvas")).toContainText("background worker");
+    await expect(page.locator("#ws-canvas")).toContainText("SQLite");
+    await page
+      .locator("#ws-canvas .node")
+      .filter({ hasText: "background worker" })
+      .click();
+    await expect(page.locator("#ws-inspector")).toContainText("worker.py");
+    await page.locator("#ws-unresolved summary").click();
+    await expect(page.locator("#ws-unresolved")).toContainText(
+      "resource-identity-unresolved",
+    );
+    const download = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Export this view · Mermaid", exact: true })
+      .click();
+    const exported = await download,
+      content = await fs.readFile(await exported.path(), "utf8");
+    expect(content).toContain("SQLite");
+    expect(content).toContain("background worker");
+    await page
+      .locator("#ws-canvas")
+      .screenshot({ path: testInfo.outputPath("internal-dfd.png") });
+    await app.close();
+    app = await serve({ ...options, initialManifest: undefined });
+    await page.goto(app.url);
+    await page
+      .getByRole("button", { name: "3 · System model", exact: true })
+      .click();
+    await expect(page.locator("#ws-canvas")).toContainText("SQLite");
+    await expect(page.locator("#ws-canvas")).toContainText("background worker");
+  } finally {
+    await page.close();
+    await app?.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

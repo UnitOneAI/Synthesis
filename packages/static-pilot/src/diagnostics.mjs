@@ -1,3 +1,4 @@
+import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents } from "./architecture.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -308,6 +309,8 @@ export async function errorReport({
   secrets = [],
   roots = [],
 } = {}) {
+  if (model?.components && model?.interfaces && model?.evidence)
+    model = internalTopology(model);
   const text = (v) =>
     typeof v === "string"
       ? v.slice(0, 500)
@@ -437,6 +440,14 @@ export async function errorReport({
                 candidateHostAssociations: nodes.filter(
                   (n) => n.hostCandidateId,
                 ).length,
+                internalUnits: nodes.filter((n) => n.internalRole).length,
+                backgroundWorkers: nodes.filter(
+                  (n) => n.internalRole === "worker",
+                ).length,
+                logicalResources:
+                  model.connectionDiscovery?.entities?.filter(
+                    (n) => n.resourceKind,
+                  ).length || 0,
                 diagramNodeLimit: 80,
                 diagramConnectionLimit: 240,
                 unresolvedPeersHiddenByDefault: true,
@@ -447,6 +458,8 @@ export async function errorReport({
           : null,
       connections: {
         coverage: pick(model?.connectionDiscovery?.coverage, [
+          "internalConnections",
+          "internalResolutionGaps",
           "indexedInterfaces",
           "httpClients",
           "httpServers",
