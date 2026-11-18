@@ -96,6 +96,23 @@ test("saved real-source security output is inspectable and exportable without an
     expect(data.issues).toHaveLength(expected);
     expect(data.staticOnly).toBe(true);
     expect(data.coverageComplete).toBe(false);
+    const evidenceFinding = page
+      .locator("#cwe-model-results > details")
+      .filter({ hasText: "Unvalidated repo_path" })
+      .first();
+    if (await evidenceFinding.count()) {
+      await evidenceFinding.locator(":scope > summary").click();
+      await evidenceFinding
+        .locator(".cwe-code-evidence > summary")
+        .first()
+        .click();
+      await expect(
+        evidenceFinding.locator(".cwe-code-window").first(),
+      ).toBeVisible();
+      await evidenceFinding.screenshot({
+        path: path.join(output, "cwe-code-evidence.png"),
+      });
+    }
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page
       .getByRole("button", { name: "6 · Exploration", exact: true })

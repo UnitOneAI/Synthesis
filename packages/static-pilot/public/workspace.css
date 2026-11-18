@@ -385,3 +385,53 @@ nav[aria-label="Workflow"] button {
   max-height: 350px;
   overflow: auto;
 }
+
+/* Local CWE evidence: preserve whitespace and distinguish cited lines from context. */
+.cwe-code-evidence {
+  margin: 14px 0;
+  border: 1px solid #d5dfeb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.cwe-code-evidence > summary {
+  cursor: pointer;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cwe-code-window {
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px 0;
+  background: #f5f8fc;
+  border: 1px solid #d5dfeb;
+  border-radius: 6px;
+  font:
+    12px/1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  tab-size: 4;
+}
+.cwe-code-line {
+  display: flex;
+  min-width: max-content;
+  padding-right: 16px;
+  white-space: pre;
+}
+.cwe-code-line.cited {
+  background: #fff0cc;
+  box-shadow: inset 3px 0 #aa6c12;
+}
+.cwe-line-number {
+  display: inline-block;
+  min-width: 5em;
+  padding: 0 12px;
+  text-align: right;
+  color: #566b80;
+  user-select: none;
+}
+.cwe-code-unavailable {
+  padding: 12px;
+  color: #863c22;
+  background: #fff5ee;
+}

@@ -17,7 +17,7 @@ test("unmapped security concern: consent, discovery, evidence, export and saved-
   await fs.mkdir(path.join(root, "service"), { recursive: true });
   await fs.writeFile(
     path.join(root, "service", "app.py"),
-    "def run(operator, task):\n    operator.execute(task)\n",
+    "def run(operator, task):\n    operator.execute(task)\n# <img src=x onerror=alert(1)>\n",
   );
   let calls = 0,
     app;
@@ -134,11 +134,23 @@ test("unmapped security concern: consent, discovery, evidence, export and saved-
     await expect(page.locator("#security-results")).toContainText(
       "No CWE mapping",
     );
+    const finding = page.locator("#cwe-model-results > details").first();
+    await finding.locator(":scope > summary").click();
+    await finding.locator(".cwe-code-evidence > summary").first().click();
+    await expect(finding.locator(".cwe-code-window")).toContainText(
+      "operator.execute(task)",
+    );
+    await expect(finding.locator(".cwe-code-line.cited")).toContainText(
+      "def run",
+    );
+    await expect(finding.locator(".cwe-code-window")).toContainText("<img");
+    await expect(finding.locator(".cwe-code-window img")).toHaveCount(0);
+    expect(calls).toBe(1);
     await page.locator("#security-run").click();
     await expect(page.locator("#security-status")).toContainText(
       "1 source-supported",
     );
-    await page.locator("#security-results summary").click();
+    await page.locator("#security-results > details > summary").click();
     await expect(page.locator("#security-results")).toContainText(
       "authorized-agent",
     );
@@ -225,6 +237,16 @@ test("unmapped security concern: consent, discovery, evidence, export and saved-
       .click();
     await page.locator("#eg-source").click();
     await expect(page.locator("#message")).toContainText("source-");
+    await page
+      .getByRole("button", { name: "5 · CWE code review", exact: true })
+      .click();
+    const reopened = page.locator("#cwe-model-results > details").first();
+    await reopened.locator(":scope > summary").click();
+    await reopened.locator(".cwe-code-evidence > summary").first().click();
+    await expect(reopened.locator(".cwe-code-body")).toContainText(
+      "Source has changed",
+    );
+    await expect(reopened.locator(".cwe-code-window")).toHaveCount(0);
     expect(calls).toBe(2);
     expect(errors).toEqual([]);
   } finally {

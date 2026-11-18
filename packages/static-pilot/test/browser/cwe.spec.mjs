@@ -96,6 +96,13 @@ test("12 repositories connect automatically and support CWE scan, review, export
     await page.locator("#cwe-filter").fill("repo0");
     await expect(page.locator("#cwe-findings tbody tr")).toHaveCount(1);
     await page.locator("#cwe-findings button").click();
+    await page.locator("#cwe-detail .cwe-code-evidence > summary").click();
+    await expect(
+      page.locator("#cwe-detail .cwe-code-line.cited"),
+    ).toContainText("verify=False");
+    await expect(page.locator("#cwe-detail .cwe-code-window")).toContainText(
+      "import requests",
+    );
     await page
       .getByLabel("Reviewer", { exact: true })
       .fill("Security champion");

@@ -23,6 +23,76 @@
     validation: "Proposed validation",
     rollback: "Rollback plan",
   };
+  function evidence(origin, id, locations) {
+    return locations
+      .map(
+        (l, index) =>
+          `<details class="cwe-code-evidence" data-origin="${esc(origin)}" data-id="${esc(id)}" data-location="${index}"><summary>Code evidence · ${esc(l.repository)} / ${esc(l.path)}:${esc(l.line)}–${esc(l.endLine || l.line)}</summary><div class="cwe-code-body" aria-live="polite"></div></details>`,
+      )
+      .join("");
+  }
+  async function loadEvidence(panel, page = 0) {
+    if (panel.dataset.loading === "true") return;
+    panel.dataset.loading = "true";
+    const body = panel.querySelector(".cwe-code-body"),
+      revision = model.modelRevision;
+    body.textContent = "Loading local code evidence…";
+    try {
+      const result = await actions.api(
+        "cwe/evidence?" +
+          new URLSearchParams({
+            origin: panel.dataset.origin,
+            id: panel.dataset.id,
+            location: panel.dataset.location,
+            page,
+            modelRevision: revision,
+          }),
+      );
+      if (!panel.isConnected) return;
+      if (model.modelRevision !== revision)
+        throw Error(
+          "Source snapshot changed. Reopen the finding to inspect current evidence.",
+        );
+      body.innerHTML = `<p>${esc(result.note)}</p><p>Lines ${result.startLine}–${result.endLine} · Cited range ${result.citedStart}–${result.citedEnd} · Read locally; no model call</p><pre class="cwe-code-window" tabindex="0" aria-label="Source code with cited lines highlighted"><code>${result.lines.map((l) => `<span class="cwe-code-line${l.line >= result.citedStart && l.line <= result.citedEnd ? " cited" : ""}"><span class="cwe-line-number">${l.line}</span><span>${esc(l.text)}</span></span>`).join("")}</code></pre><div class="toolbar">${page ? '<button type="button" data-code-prev>Previous cited lines</button>' : ""}${result.hasMore ? '<button type="button" data-code-next>Next cited lines</button>' : ""}<button type="button" data-code-reload>Recheck source</button></div>`;
+      const codeWindow = body.querySelector(".cwe-code-window");
+      const firstCited = codeWindow.querySelector(".cited");
+      if (firstCited)
+        codeWindow.scrollTop = Math.max(
+          0,
+          firstCited.getBoundingClientRect().top -
+            codeWindow.getBoundingClientRect().top -
+            60,
+        );
+      body
+        .querySelector("[data-code-prev]")
+        ?.addEventListener("click", () => loadEvidence(panel, page - 1));
+      body
+        .querySelector("[data-code-next]")
+        ?.addEventListener("click", () => loadEvidence(panel, page + 1));
+      body.querySelector("[data-code-reload]").onclick = () =>
+        loadEvidence(panel, page);
+    } catch (error) {
+      if (panel.isConnected) {
+        body.textContent = error.message;
+        body.classList.add("cwe-code-unavailable");
+      }
+    } finally {
+      panel.dataset.loading = "false";
+    }
+  }
+  $("cwe").addEventListener(
+    "toggle",
+    (event) => {
+      const panel = event.target;
+      if (panel.matches(".cwe-code-evidence") && panel.open) {
+        panel
+          .querySelector(".cwe-code-body")
+          .classList.remove("cwe-code-unavailable");
+        void loadEvidence(panel);
+      }
+    },
+    true,
+  );
   function investigations() {
     const register = model?.securityRegister;
     const term = $("security-filter").value.toLowerCase();
@@ -49,7 +119,7 @@
           const a = i.investigation;
           const loc = (l) =>
             `${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine || l.line}${l.sourceScope ? ` · ${esc(l.sourceScope)}` : ""}`;
-          return `<details><summary>${esc(i.title)} · ${esc(i.kind)} · ${esc(i.cwe || "No CWE mapping")} · ${esc(i.assessment)} · ${esc([...new Set(i.locations.map((l) => l.sourceScope || "unclassified"))].join(", "))}</summary><p>Disposition: ${esc(i.disposition)}${i.stale ? " · Stale source" : ""}. Origin: ${esc(i.origin)}.</p><ul>${i.locations.map((l) => `<li>${loc(l)}</li>`).join("")}</ul>${
+          return `<details><summary>${esc(i.title)} · ${esc(i.kind)} · ${esc(i.cwe || "No CWE mapping")} · ${esc(i.assessment)} · ${esc([...new Set(i.locations.map((l) => l.sourceScope || "unclassified"))].join(", "))}</summary><p>Disposition: ${esc(i.disposition)}${i.stale ? " · Stale source" : ""}. Origin: ${esc(i.origin)}.</p><ul>${i.locations.map((l) => `<li>${loc(l)}</li>`).join("")}</ul>${evidence(i.origin, i.sourceId, i.locations)}${
             a
               ? `<p>Proof basis: static analysis, unexecuted. Human security review required.</p><p>Actor: ${esc(a.actorKind)} · ${esc(a.actor)}. Initial access: ${esc(a.initialAccess)}</p><p>Input: ${esc(a.input)}</p><p>Impact: ${esc(a.impact)}</p><h4>Evidence path</h4><ol>${(a.trace || []).map((t) => `<li>${esc(t.role)} · ${loc(t)} · ${esc(t.reason)}</li>`).join("")}</ol><h4>Controls and counterevidence</h4><p>${esc(a.counterEvidence)}</p><ul>${(a.controls || []).map((c) => `<li>${loc(c)} · ${esc(c.reason)}</li>`).join("")}</ul><h4>Unresolved evidence</h4><ul>${[...(a.missingEvidence || []), ...(a.evidenceGaps || []).map((g) => g.reason)].map((g) => `<li>${esc(g)}</li>`).join("")}</ul><p>${esc(a.error || a.stopReason || "")}</p><h4>Remediation and residual exposure</h4><dl>${Object.entries(
                   a.remediation || {},
@@ -109,7 +179,7 @@
       return;
     }
     $("cwe-detail").innerHTML =
-      `<h3>${esc(f.cwe)} · ${esc(f.title)}</h3><p>${esc(f.repository)} / ${esc(f.path)}:${f.line}–${f.endLine}</p><p>${esc(f.remediation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>${esc(f.association)}. ${f.interfaceIds.length} associated interfaces. File SHA256: <code>${esc(f.blobSha256)}</code></p><form id="cwe-decision"><label>Finding status <select name="status" aria-label="Finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save finding decision</button></form>`;
+      `<h3>${esc(f.cwe)} · ${esc(f.title)}</h3><p>${esc(f.repository)} / ${esc(f.path)}:${f.line}–${f.endLine}</p><p>${esc(f.remediation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>${esc(f.association)}. ${f.interfaceIds.length} associated interfaces. File SHA256: <code>${esc(f.blobSha256)}</code></p>${evidence("scanner", f.id, [f])}<form id="cwe-decision"><label>Finding status <select name="status" aria-label="Finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save finding decision</button></form>`;
     $("cwe-decision").onsubmit = async (event) => {
       event.preventDefault();
       try {
@@ -189,7 +259,7 @@
             .slice(0, 200)
             .map(
               (f) =>
-                `<details><summary>${esc(f.cwe || f.kind || "Security concern")} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine} · ${esc(l.sourceScope || "Source scope unclassified")}</li>`).join("")}</ul><form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
+                `<details><summary>${esc(f.cwe || f.kind || "Security concern")} · ${esc(f.title)} · ${esc(f.status)}</summary><p>${esc(f.explanation)}</p><p>Mapping: ${esc(f.mappingStatus || "requires review")}</p><p>Prerequisites: ${esc(f.preconditions)}</p><p>Counterevidence: ${esc(f.counterEvidence)}</p><p>Remediation: ${esc(f.remediation)}</p><ul>${f.locations.map((l) => `<li>${esc(l.repository)} / ${esc(l.path)}:${l.line}–${l.endLine} · ${esc(l.sourceScope || "Source scope unclassified")}</li>`).join("")}</ul>${evidence("model", f.id, f.locations)}<form data-model-decision="${esc(f.id)}"><label>Disposition <select name="status" aria-label="CWE source finding status">${["needs-review", "confirmed", "false-positive", "accepted-risk"].map((v) => `<option ${v === f.status ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Reviewer <input name="reviewer" required maxlength="200" value="${esc(f.review?.reviewer)}"></label><label>Rationale <textarea name="reason" required maxlength="2000">${esc(f.review?.reason)}</textarea></label><button>Save CWE source decision</button></form></details>`,
             )
             .join("")}`
         : "";

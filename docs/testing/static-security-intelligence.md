@@ -35,3 +35,7 @@ The delivery record must state test results, actual scanner findings, model cand
 `test/exploration.test.mjs` covers all 348 requested target obligations over twelve repositories, the 72 STRIDE category obligations, pagination with explicit omissions, ancestor lineage, source/control/gap relationships, append-only state changes, retained source revisions, reopening SQLite, a shared provider-call budget, completed packet reuse, source-graph fingerprint stability and cancellation.
 
 The browser investigation test also covers source-sharing consent, typed graph navigation, group folding, candidate lineage, redacted hash-checked source retrieval, rejection after a file changes, export and restart. The saved open-autofix browser test renders actual retained model/scanner output, captures the exploration graph and exports its selected lineage without additional model calls. These are static tests; real JCI repositories and gateway must be validated inside JCI.
+
+## Inline CWE code evidence
+
+`test/cwe-evidence.test.mjs` checks scanner/model locations, context limits and pagination, all locations in a multi-file finding, source hashes and stale revisions, selected-source containment and symlink rejection, secret redaction, authenticated access, and rejection of arbitrary client-selected paths. Browser checks exercise both Semgrep and model code panels, highlighted citations, source text escaping, changed-file rejection, and zero additional model calls. The saved open-autofix test captures `cwe-code-evidence.png` from a real candidate's source.

@@ -1,3 +1,4 @@
+import { cweEvidence } from "./cwe-evidence.mjs";
 import { ExplorationStore } from "./exploration.mjs";
 import { exploreStatic } from "./exploration-review.mjs";
 import { sourceWindow } from "./graph-package.mjs";
@@ -1071,6 +1072,21 @@ export async function serve({
             };
           });
         return send(202, job);
+      }
+      if (req.method === "GET" && url.pathname === "/api/cwe/evidence") {
+        try {
+          return send(
+            200,
+            await cweEvidence(
+              model,
+              manifest,
+              root,
+              Object.fromEntries(url.searchParams),
+            ),
+          );
+        } catch (error) {
+          return send(409, { error: error.message });
+        }
       }
       if (req.method === "POST" && url.pathname === "/api/cwe/decision") {
         if (!model || ["running", "cancelling"].includes(job.status))
