@@ -1203,7 +1203,10 @@ export async function serve({
       }
       return send(404, { error: "Not found" });
     } catch (error) {
-      if (req.url?.startsWith("/api/export"))
+      if (
+        req.url?.startsWith("/api/export") ||
+        req.url?.startsWith("/api/graph-package")
+      )
         await traces
           .record("export.failed", { failure: failureDetail(error.message) })
           .catch(() => {});
