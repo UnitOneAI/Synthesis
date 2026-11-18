@@ -244,3 +244,22 @@ test("current JWT signature mapping is accepted and broad mappings require refin
     "needs-more-specific-mapping",
   );
 });
+
+test("valid additional weaknesses outside both the requested profile and curated families are accepted", () => {
+  const r = response();
+  r.findings = [
+    {
+      cwe: "CWE-732",
+      targetIds: [],
+      title: "Resource permissions",
+      explanation: "The resource is created with permissive access.",
+      preconditions: "An unauthorized principal can access this resource.",
+      counterEvidence: "Effective deployment permissions remain unresolved.",
+      remediation: "Restrict permissions to intended principals.",
+      locations: [{ recordId: "a", startLine: 2, endLine: 3 }],
+    },
+  ];
+  assert.equal(validateCweModel(r, packet).findings[0].cwe, "CWE-732");
+  r.findings[0].cwe = "CWE-999999";
+  assert.throws(() => validateCweModel(r, packet), /validation/);
+});

@@ -12,7 +12,14 @@ export const CWE_MAPPING = JSON.parse(
     "utf8",
   ),
 );
-export const cweMapping = (cwe) => CWE_MAPPING.entries[cwe];
+const catalogEntries = Object.fromEntries(
+  Object.entries(CWE_MAPPING.eligibleWeaknessesByUsage).flatMap(
+    ([mappingUsage, ids]) =>
+      ids.map((id) => [id, { kind: "Weakness", mappingUsage }]),
+  ),
+);
+export const cweMapping = (cwe) =>
+  CWE_MAPPING.entries[cwe] || catalogEntries[cwe];
 export const cweFindingAllowed = (cwe) => {
   const entry = cweMapping(cwe);
   return (

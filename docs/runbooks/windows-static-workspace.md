@@ -226,9 +226,9 @@ The version must be **0.8.0 or later** once this change is merged. Restart with 
 
 The new resolver supports bounded same-file literal assignments, configuration-key references, `HttpClient.BaseAddress` plus relative paths, and explicit `HttpRequestMessage` method/URI assignments. Configuration lookup crosses files within the same source project, then matches endpoints across repositories. Conflicting configuration values remain gaps; Synthesis does not choose a deployment environment. Existing attribute-route, same-file JavaScript-wrapper, store and default-exchange queue adapters remain available. General cross-file symbol/DI binding, arbitrary wrappers, proxy rewrites and non-default broker routing remain limitations.
 
-## Requested weakness coverage (review build)
+## Internal DFD and requested weakness coverage (0.9.0)
 
-The `codex/connected-internal-dfd` review branch adds internal worker/storage DFD extraction and the requested CWE coverage baseline. Use the reviewed commit for qualification; the features are not implied by the existing `0.8.0` package version on main. Save prior exports and back up the stopped workspace first.
+Version 0.9.0 adds internal worker/storage DFD extraction and the requested CWE coverage baseline. Save prior exports and back up the stopped workspace. Update main with `git pull --ff-only origin main`, install tool dependencies with `npm ci --ignore-scripts`, and verify the package version is 0.9.0 or later before restarting with the existing workspace.
 
 After updating and installing Synthesis dependencies, rebuild the graph once. Run **CWE code review → Scan selected repositories** to use the 22-rule local pack. Then enable source sharing and run **CWE source review** with a small initial request budget. Model review uses the existing provider configuration. Each submitted packet must assess the 25 code-review areas; 4 other areas require additional evidence. The **Requested weakness coverage** panel preserves all 29 areas / 52 original identifiers, offers a repository filter, and exports JSON/CSV even before review runs. Old completed model packets do not count toward the new profile. Additional findings remain available.
 

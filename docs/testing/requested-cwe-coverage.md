@@ -5,7 +5,7 @@
 1. Catalog preserves 29 requested areas and 52 original identifiers, with 25 explicit code-review targets and four additional-evidence areas. Grouping/deprecated IDs cannot be returned as vulnerability mappings.
 2. Every bundled Semgrep rule matches its positive fixture and none matches the safe alternatives. All original detections remain; 12-repository scanner coverage and evidence hashes remain valid.
 3. Model responses missing any target assessment, duplicating targets, using unknown status/IDs or citing absent/out-of-range evidence fail validation. Cross-repository packets require citations from each repository.
-4. Model findings must map to precise allowed CWEs and compatible explicit targets. Additional findings remain valid. A broad shared CWE must not inflate unrelated target counts.
+4. Model findings must map to precise allowed CWEs and compatible explicit targets. Additional findings remain valid, including a current CWE outside both the requested profile and curated families. Unknown/grouping/deprecated mappings remain rejected. A broad shared CWE must not inflate unrelated target counts.
 5. Budget continuation retains completed assessments, findings and token usage. A new profile invalidates previous packet completion while preserving current-source findings. Source changes reject review until rebuilding.
 6. Internal worker/storage evidence appears in model interaction packets. Unresolved graph relationships and source collection gaps keep coverage partial.
 7. Coverage cannot be inferred from scanner success, a prior profile or an empty finding list. It distinguishes unrun, stale, partial, missing context, collected scope and external evidence requirements.

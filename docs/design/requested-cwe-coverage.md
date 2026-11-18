@@ -1,6 +1,6 @@
 # Requested weakness coverage
 
-Status: review build on `codex/connected-internal-dfd`; not a released main-branch feature.
+Implemented in static-pilot 0.9.0. See the verification specification for qualification boundaries.
 
 ## Product behavior
 
@@ -20,7 +20,9 @@ Use cases:
 
 `rules/server-weakness-profile.json` stores stable target IDs, original report CWE references, precise permitted finding CWEs, review guidance and mapping notes. OWASP grouping IDs are retained as report references, not emitted as vulnerability mappings. Deprecated CWE-545 and CWE-633 remain traceable but require an appropriate current underlying weakness. This is not a blanket one-to-one replacement: the source evidence determines the correct mapping. CWE-1021 can represent a supported framing weakness; CWE-470 can represent supported unsafe reflection.
 
-Mapping eligibility is checked against a bundled metadata subset of MITRE CWE 5.0 (28 October 2026), verified against the official XML on 18 November 2026. The archive URL and XML hash are recorded in `rules/cwe-mapping-status.json`; VM scans do not contact MITRE. Deprecated existing mappings 377 and 613 are excluded from new findings, with supported current temporary-file and session weaknesses available. Broad mappings marked discouraged remain potential findings with `needs-more-specific-mapping`; they are not silently presented as precise confirmed mappings. JWT review also permits the specific signature-verification CWE-347 when supported.
+Mapping eligibility is checked against bundled mapping eligibility from MITRE CWE 5.0 (28 October 2026), verified against the official XML on 18 November 2026. The archive URL and XML hash are recorded in `rules/cwe-mapping-status.json`; VM scans do not contact MITRE. Deprecated existing mappings 377 and 613 are excluded from new findings, with supported current temporary-file and session weaknesses available. Broad mappings marked discouraged remain potential findings with `needs-more-specific-mapping`; they are not silently presented as precise confirmed mappings. JWT review also permits the specific signature-verification CWE-347 when supported.
+
+Additional model findings may use any of the 899 eligible weakness identifiers in that catalog, including IDs outside both the requested baseline and the curated review families. The prompt's priority list is guidance, not a validator allowlist. This expands valid reporting scope; it does not mean that 899 independent detectors or exhaustive assessments exist. The explicit per-target coverage contract applies to the 25 requested code-review areas. Unknown IDs, groupings and prohibited/deprecated mappings remain rejected.
 
 The target list is a bundled baseline, not an arbitrary PDF import feature. Grouping references do not imply that every member of an entire OWASP category has been exhaustively checked. See the catalog's MITRE source links and the scope guidance for each area.
 
