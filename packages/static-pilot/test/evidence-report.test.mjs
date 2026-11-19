@@ -132,3 +132,22 @@ test("portfolio evidence report includes all twelve repositories and findings wi
   for (let n = 0; n < 12; n++)
     assert.ok(html.includes(`repo${n} / app.py:3-3`));
 });
+
+
+test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and explicit snapshot status", async (t) => {
+  const f = await reportFixture();
+  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  f.model.aiReview = {
+    status: "partial", basedOnRevision: f.model.modelRevision,
+    stopReason: "request-budget", threats: [], connections: [], questions: [], batches: [],
+    coverage: {completedBatches: 2, totalBatches: 450, failedBatches: 1, pendingBatches: 447},
+  };
+  const html = systemPrintReport(f.model);
+  for (const text of ["Partial STRIDE review", "2 / 450 STRIDE packets completed; 1 failed; 447 pending", "Threat actors", "Trust boundaries", "Overall system DFD", "STRIDE matrix", "latest available review checkpoint", "Exporting does not stop or restart analysis"])
+    assert.ok(html.includes(text), text);
+  f.model.aiReview.status = "stale";
+  const stale = systemPrintReport(f.model);
+  assert.match(stale, /Historical STRIDE review/);
+  assert.match(stale, /historical, not current valid coverage/);
+  assert.match(stale, /2 \/ 450 STRIDE packets/);
+});

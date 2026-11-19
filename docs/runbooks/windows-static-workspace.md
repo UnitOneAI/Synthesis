@@ -395,3 +395,12 @@ After updating, stop any active review, restart with the same workspace and prov
 The matrix now distinguishes historical stale results from current coverage and displays a separate latest-attempt failure when a worker fails before review begins. **Export errors** includes the stale cause when known and the failure stage. Genuine source, architecture or methodology changes still invalidate analysis; stale safeguards are not bypassed.
 
 After at least three matching successful timed calls, progress includes a conditional remaining-time estimate based on up to twenty recent calls and the selected worker count. It assumes steady throughput and excludes retries and throttling. Thousands of packets can still take many hours; four workers reduce elapsed waiting but do not reduce total model tokens. A completed pass with unresolved or failed packets remains partial.
+
+
+## Export a partial STRIDE review as PDF
+
+Open **4 · STRIDE matrix → Export STRIDE review · PDF**. It works before the planned scope completes, including while the next packets are running. The export uses the latest available review checkpoint; in-flight responses are not included. Exporting does not stop or restart analysis.
+
+In the new tab select **Print / Save as PDF**, choose **Save as PDF** in Edge/Chrome, and save outside the source clones. The report includes the overall system DFD, threat actors, trust boundaries and crossings, controls, component STRIDE matrix, prioritized threat scenarios with T- references, and supporting evidence. Pending and failed counts remain visible. Inferred actors/boundaries remain labeled; checklist prompts are not reported as threat scenarios. Stale exports are explicitly historical.
+
+The same PDF remains available under **System model → Export review package → Threat model · PDF**. For an offline HTML copy use **Complete HTML report**. Browser popups must be allowed for the local Synthesis page. A partial report does not claim unreviewed areas are safe.

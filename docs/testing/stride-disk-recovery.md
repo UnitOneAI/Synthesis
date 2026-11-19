@@ -10,7 +10,7 @@ The UI also estimates remaining scope from measured successful request durations
 
 ## Scope of diagnosis
 
-The supplied older JCI error export records stale STRIDE analysis with 12 historical completed packets, 438 pending and zero failed packets. It does not prove that the newly reproduced memory regression caused the latest JCI symptom. No literal “stale packet” error exists in the current source. Changed source/architecture revisions or guidance/prompt identity can legitimately invalidate prior results. These guards remain enabled.
+The supplied older customer error export records stale STRIDE analysis with 12 historical completed packets, 438 pending and zero failed packets. It does not prove that the newly reproduced memory regression caused the latest customer symptom. No literal “stale packet” error exists in the current source. Changed source/architecture revisions or guidance/prompt identity can legitimately invalidate prior results. These guards remain enabled.
 
 ## Checks
 
@@ -19,8 +19,8 @@ The supplied older JCI error export records stale STRIDE analysis with 12 histor
 - Early-worker-failure browser regression: retained stale scenario, explicit latest failure, historical/current coverage distinction, safe error export.
 - Timing tests: sparse/invalid/incompatible samples, failed calls, historical/current sampling, worker count and conditional display.
 - Failed-response retry tests: exact allowed control/boundary references, empty reference sets, initial-call behavior unchanged, and rejection of architecture evidence as a security control.
-- Browser suite: 28 passed; one optional saved-output fixture skipped.
-- Full Node suite: 212 passed, zero failed or skipped.
+- Browser suite before the PDF follow-up: 28 passed; one optional saved-output fixture skipped. Both focused PDF browser tests passed after the follow-up; generated partial PDF pages were visually inspected.
+- Full Node suite: 213 passed, zero failed or skipped.
 
 ## Live provider check
 
@@ -28,4 +28,6 @@ Two selected repository packets from the saved open-autofix disk graph were sent
 
 This was saved-graph metadata review, not a full source-code investigation or complete portfolio run. Returned scenarios still require control/counterevidence review. No target application was executed, and direct-provider success does not qualify the customer gateway. Live outputs remain outside the public repository.
 
-Local live-provider and browser validation details are recorded with the release runbook. JCI gateway availability and its latest stale reason require evidence from that environment; local tests do not establish either.
+Local live-provider and browser validation details are recorded with the release runbook. Customer gateway availability and its latest stale reason require evidence from that environment; local tests do not establish either.
+
+The partial PDF follow-up adds a direct matrix export, explicit partial/historical snapshot notices, and coverage/actor/boundary regression checks. Exports remain read-only and do not start provider calls.

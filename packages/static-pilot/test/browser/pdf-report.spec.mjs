@@ -109,3 +109,174 @@ test("CWE and threat model PDF previews show verified evidence and printable reg
     await fs.rm(f.dir, { recursive: true, force: true });
   }
 });
+
+test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incomplete coverage directly from matrix", async ({
+  page,
+  context,
+}, testInfo) => {
+  const { GUIDANCE_HASH } = await import("../../src/analysis-guidance.mjs");
+  const { SYSTEM_PROMPT } = await import("../../src/model-review.mjs");
+  const { sha } = await import("../../src/sources.mjs");
+  const { systemModel, editSystem } = await import(
+    "../../src/system-model.mjs"
+  );
+  const f = await reportFixture();
+  let app;
+  try {
+    delete f.model.cweReview;
+    delete f.model.cweModelReview;
+    const iid = f.model.interfaces[0].id,
+      eid = f.model.evidence[0].id;
+    let s = systemModel(f.model);
+    expect(s.flows.length).toBeGreaterThan(0);
+    f.model = editSystem(f.model, {
+      revision: s.revision,
+      action: "upsert",
+      kind: "boundaries",
+      record: {
+        id: "user-abcdef0123456789",
+        name: "Caller to service identity",
+        dimension: "identity",
+        before: "Untrusted caller",
+        after: "Service principal",
+        enforcement: "Identity checks require validation",
+        flowIds: [s.flows[0].id],
+        evidenceIds: [eid],
+      },
+    });
+    f.model.aiReview = {
+      status: "partial",
+      promptHash: sha(SYSTEM_PROMPT),
+      guidance: { hash: GUIDANCE_HASH },
+      basedOnRevision: f.model.modelRevision,
+      provider: "anthropic-gateway",
+      model: "claude-opus-4-6-1",
+      threats: [
+        {
+          id: "partial-threat-001",
+          title: "Conditional caller identity bypass",
+          category: "Spoofing",
+          actor: "External untrusted caller",
+          startingAccess: "Network access to the service",
+          asset: "Service identity",
+          scenario:
+            "Caller-controlled identity may bypass an incomplete enforcement path.",
+          prerequisites: "Accessible interface and missing identity check",
+          controls: "Verify authentication and caller restrictions",
+          mitigation: "Enforce trusted caller identity at the interface",
+          interfaceIds: [iid],
+          evidenceIds: [eid],
+        },
+      ],
+      questions: [],
+      connections: [],
+      batches: [
+        { id: "saved-packet", status: "completed", interfaceIds: [iid] },
+      ],
+      coverage: {
+        completedBatches: 1,
+        totalBatches: 4,
+        pendingBatches: 3,
+        failedBatches: 0,
+        reviewedInterfaceIds: [iid],
+        submittedInterfaces: 1,
+        totalInterfaces: f.model.interfaces.length,
+        omittedInterfaces: 0,
+        excerptCount: 0,
+        repositories: [],
+      },
+    };
+    s = systemModel(f.model);
+    f.model = editSystem(f.model, {
+      revision: s.revision,
+      action: "decision",
+      subjectId: "partial-threat-001",
+      state: "accepted",
+      reviewer: "Security champion",
+      rationale:
+        "Static evidence and prerequisites reviewed; deployment remains unverified",
+      owner: "Service team",
+      severity: "medium",
+    });
+    s = systemModel(f.model);
+    const threatReference = s.threats.find(
+      (t) => t.id === "partial-threat-001",
+    ).reference;
+    const boundaryReference = s.boundaries.find(
+      (b) => b.id === "user-abcdef0123456789",
+    ).reference;
+    const store = await workspaceStore(f.root, f.workspace);
+    await store.save({ manifest: f.manifest, model: f.model });
+    await store.close();
+    app = await serve({
+      sourceRoot: f.root,
+      workspace: f.workspace,
+      persist: true,
+      port: 0,
+      quiet: true,
+    });
+    await page.goto(app.url);
+    await page
+      .getByRole("button", { name: "Open saved graph", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
+      .click();
+    const button = page.getByRole("button", {
+      name: "Export STRIDE review · PDF",
+      exact: true,
+    });
+    await expect(button).toBeEnabled();
+    await expect(page.locator("#workspace")).toContainText(
+      "latest saved review snapshot",
+    );
+    // Export remains available while another packet is being reviewed; it reads saved state.
+    await page.evaluate(() =>
+      window.SynthesisWorkspace.setStatus({
+        status: "running",
+        mode: "review",
+        inference: true,
+        hasModel: true,
+      }),
+    );
+    await expect(button).toBeEnabled();
+    const opened = context.waitForEvent("page");
+    await button.click();
+    const report = await opened;
+    await expect(
+      report.getByRole("button", { name: "Print / Save as PDF", exact: true }),
+    ).toBeEnabled();
+    for (const name of [
+      "Overall system DFD",
+      "Threat actors",
+      "Trust boundaries",
+      "STRIDE matrix",
+      "Threat register",
+    ])
+      await expect(
+        report.getByRole("heading", { name, exact: true }),
+      ).toBeVisible();
+    const content = report.locator("#report-content");
+    await expect(content).toContainText(
+      "1 / 4 STRIDE packets completed; 0 failed; 3 pending",
+    );
+    await expect(content).toContainText("Status: partial");
+    await expect(content).toContainText("External untrusted caller");
+    await expect(content).toContainText("Caller to service identity");
+    await expect(content).toContainText("Conditional caller identity bypass");
+    await expect(content).toContainText(threatReference);
+    await expect(content).toContainText(boundaryReference);
+    await expect(content).toContainText("accepted");
+    const pdf = await report.pdf({
+      path: testInfo.outputPath("partial-stride-review.pdf"),
+      printBackground: true,
+      preferCSSPageSize: true,
+    });
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(pdf.length).toBeGreaterThan(5000);
+    await report.close();
+  } finally {
+    await app?.close();
+    await fs.rm(f.dir, { recursive: true, force: true });
+  }
+});
