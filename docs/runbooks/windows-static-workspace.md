@@ -46,6 +46,8 @@ npm run test:ui
 
 Run each command only after the preceding command succeeds. The test suite uses synthetic source; it does not execute any customer repository.
 
+If the console title starts with **Select**, press **Esc** to leave text-selection mode and allow output to continue. Wait for the final test summary. On Windows, creating a symbolic-link fixture can fail with `EPERM` when the account lacks that privilege. The code-evidence suite reports only that subtest as skipped; selection, containment, hash and redaction checks still run. This skip means symlink rejection was not verified on that machine, not that production checks were disabled. Other failures must still be investigated. To capture the detailed code-evidence failure, run `node --test --test-reporter=spec test/cwe-evidence.test.mjs 2>&1 | Tee-Object -FilePath C:/SynthesisState/Exports/cwe-evidence-test.txt` from `packages/static-pilot` after creating the export folder.
+
 ## Disk graph requirements and backup
 
 Disk mode is the CLI default and requires SQLite 3.51.3 or newer embedded in Node. Qualification used Node 24.22.1 / SQLite 3.54.1. The application checks the actual engine at startup. If it rejects the installed runtime, update Node 24. To deliberately use the prior capped backend, append `--graph-storage memory`; there is no automatic fallback.

@@ -130,12 +130,22 @@ test("source selection, containment, symlink and redaction checks apply before d
     cweEvidence(f.model, f.manifest, f.root, request()),
     /cannot be verified/,
   );
-  f.model.cweReview.findings[0].path = "link.py";
-  await fs.symlink("app.py", path.join(f.root, "service", "link.py"));
-  await assert.rejects(
-    cweEvidence(f.model, f.manifest, f.root, request()),
-    /cannot be verified/,
-  );
+  await t.test("rejects symbolic-link source", async (symlinkTest) => {
+    try {
+      await fs.symlink("app.py", path.join(f.root, "service", "link.py"), "file");
+    } catch (error) {
+      if (process.platform === "win32" && error.code === "EPERM") {
+        symlinkTest.skip("Windows denied creating the symlink fixture; symlink rejection was not tested on this host");
+        return;
+      }
+      throw error;
+    }
+    f.model.cweReview.findings[0].path = "link.py";
+    await assert.rejects(
+      cweEvidence(f.model, f.manifest, f.root, request()),
+      /cannot be verified/,
+    );
+  });
   const code =
     "# <img src=x onerror=alert(1)>\n-----BEGIN PRIVATE KEY-----\nsensitive-key-material\n-----END PRIVATE KEY-----\n";
   await fs.writeFile(path.join(f.root, "service", "app.py"), code);
