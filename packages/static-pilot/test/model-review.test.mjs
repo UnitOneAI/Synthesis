@@ -619,3 +619,14 @@ test("native STRIDE gateway schema preserves deployment and still rejects invent
     return responseFor("anthropic", result);
   });
 });
+
+
+test("STRIDE validation retry excludes optional connections without relaxing evidence validation",async()=>{
+ const packet=reviewPacket(await fixture());
+ await requestReview(config,packet,async(_,options)=>{
+  assert.match(JSON.parse(options.body).system,/connections as an empty array exactly/);
+  return responseFor("anthropic",{summary:"Review still requires source assessment.",threats:[],connections:[],questions:[]});
+ },{validationRetry:true});
+ const result=suggestion(packet);result.threats[0].evidenceIds=["invented"];
+ await assert.rejects(requestReview(config,packet,async()=>responseFor("anthropic",result),{validationRetry:true}),/evidence/);
+});

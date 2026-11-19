@@ -379,7 +379,7 @@ test("all exports retain stable IDs, dispositions, gaps and escaped labels with 
       systemSvg(m, { level, focus: s.components[0].id }).includes("<svg"),
     );
   assert.ok(systemMermaid(m).includes("Service authority"));
-  assert.ok(systemSvg(m).includes("boundary: pending"));
+  assert.match(systemSvg(m), /TB-[A-Z0-9-]+: pending/);
   const broker = edit(m, "components", {
     name: "Queue broker",
     type: "broker",

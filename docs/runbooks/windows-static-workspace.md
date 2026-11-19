@@ -346,3 +346,12 @@ Update the review branch and restart using the same source root, saved workspace
 4. Verify that the report shows the expected completed/pending counts. An exported candidate is not automatically a confirmed vulnerability. Missing/changed local source appears as an evidence gap; the exporter will not fabricate a snippet from a model description.
 
 PDFs and HTML reports are explicit downloads, not automatic traces. Existing JSON exports continue to omit source snippets. Existing graph and diagram coverage limits remain. See [report scope and tests](../testing/pdf-evidence-reports.md).
+
+### Read threat references, boundaries and STRIDE status
+
+After installing the threat-review presentation update, reopen the saved graph. Existing STRIDE results and reviewer decisions are retained. This display update does not require another graph build or a model call.
+
+- **Threat register** shows T- references and an explained review order. Review priority is separate from severity; test-only applicability and unknown exposure remain visible. Select a threat to inspect impact, prerequisites, controls and evidence, then **Show on DFD** for its conditional path.
+- **Trust boundaries** shows TB- references, trust transition, enforcement and named from/to crossings with F- references. Click a crossing to open its flow. The DFD badge uses the selected trust lens; a pending boundary is not a verified control or deployed trust zone.
+- **STRIDE matrix** separates Not analyzed, Analysis failed, Partially analyzed, Stale analysis, Scenarios identified, and Analyzed — no scenario identified. Reviewer dispositions remain separate. Inspect failure counts and Export errors before increasing a failing request budget.
+- CWE source review and STRIDE are separate actions. Successful CWE calls do not fill the STRIDE matrix. To continue STRIDE, open **4 · STRIDE matrix**, start with one request to verify the gateway, then raise the budget only after reviewing that outcome. Completed compatible packets are retained.

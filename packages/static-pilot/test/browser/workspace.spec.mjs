@@ -851,6 +851,22 @@ test("partial STRIDE results default to component scenarios without requiring de
   await expect(page.locator("#workspace")).toContainText(
     "Repository review progress",
   );
+  await expect(page.locator(".ws-matrix")).toContainText(
+    /Partially analyzed|Scenarios identified/,
+  );
+  await page
+    .locator(".ws-matrix button")
+    .filter({ hasText: "threat scenario" })
+    .first()
+    .click();
+  await expect(page.locator("#ws-inspector")).toContainText("T-SCENARIO");
+  await page
+    .locator('#ws-inspector button[data-select="scenario-fixture"]')
+    .click();
+  await expect(page.locator("#ws-inspector")).toContainText("Review priority");
+  await expect(page.locator("#ws-inspector")).toContainText(
+    "Review order, not",
+  );
 });
 
 test("small error download includes discovery coverage without the source graph", async ({

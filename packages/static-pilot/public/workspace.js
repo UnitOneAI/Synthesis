@@ -216,7 +216,13 @@
     });
   }
   function names(ids) {
-    return (ids || []).map((id) => find(id)?.name || id).join("; ");
+    return (ids || [])
+      .map(
+        (id) =>
+          (find(id)?.reference ? find(id).reference + " · " : "") +
+          (find(id)?.name || id),
+      )
+      .join("; ");
   }
   const option = (id, label, chosen) =>
     `<option value="${e(id)}" ${chosen ? "selected" : ""}>${e(label)}</option>`;
@@ -285,7 +291,7 @@
     if (view === "matrix") {
       const review = model.aiReview,
         c = review?.coverage;
-      body.innerHTML = `<div class="ws-analysis"><div><strong>${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p class="hint">Request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+      body.innerHTML = `<div class="ws-analysis"><div><strong>${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p class="hint">Request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
         .filter((r) => r.rowKind === (window.wsRowKind || "component"))
         .map(
           (r) =>
@@ -298,7 +304,7 @@
                     (t) => t.origin !== "review checklist",
                   ).length,
                   checklist = ts.length - scenarios;
-                return `<td><button data-select="${e(c.id)}" class="${ts.length ? "populated" : ""}"><b>${scenarios || "—"}</b>${scenarios ? `<small>threat scenario${scenarios === 1 ? "" : "s"}</small>` : ""}<small>${e(c.state.replaceAll("-", " "))}</small></button></td>`;
+                return `<td><button data-select="${e(c.id)}" class="${ts.length ? "populated" : ""}"><b>${scenarios || (c.analysisStatus === "analyzed-no-scenario" ? "0" : "—")}</b>${scenarios ? `<small>threat scenario${scenarios === 1 ? "" : "s"}</small>` : ""}<small>${actor && !scenarios && c.scenarioCount ? "No scenarios for selected actor · " : ""}${e(c.analysisLabel || c.state.replaceAll("-", " "))}</small>${c.failedEvidence ? "<small>Failed packets</small>" : ""}${c.decision ? `<small>Review: ${e(c.state)}</small>` : ""}</button></td>`;
               })
               .join("")}</tr>`,
         )
@@ -316,6 +322,12 @@
       return;
     }
     let rows = s[view] || [];
+    if (view === "threats")
+      rows = [...rows].sort(
+        (a, b) =>
+          (a.reviewPriority?.rank ?? 9) - (b.reviewPriority?.rank ?? 9) ||
+          a.id.localeCompare(b.id),
+      );
     const filtered = rows.filter(
       (r) =>
         JSON.stringify(r).toLowerCase().includes(query.toLowerCase()) &&
@@ -327,7 +339,7 @@
             (!categoryFilter || r.categories.includes(categoryFilter)))),
     );
     page = Math.max(0, Math.min(page, Math.ceil(filtered.length / 50) - 1));
-    body.innerHTML = `<div class="toolbar"><h3>${titles[view]}</h3><input id="ws-search" type="search" aria-label="Search register" placeholder="Search names, access, evidence…" value="${e(query)}"><button data-new="${view}">Add ${view === "actors" ? "actor profile" : view === "boundaries" ? "trust boundary" : view === "threats" ? "threat scenario" : "record"}</button></div><div class="toolbar"><label>Disposition<select id="ws-disposition" aria-label="Register disposition">${[["", "All dispositions"], ...[...new Set(rows.map((r) => r.reviewState))].map((v) => [v, v.replaceAll("-", " ")])].map(([k, l]) => option(k, l, k === dispositionFilter)).join("")}</select></label>${
+    body.innerHTML = `<div class="toolbar"><h3>${titles[view]}</h3>${view === "threats" ? "<p>Sorted by explained review priority. Priority is not severity; deployment and exploitability require review.</p>" : ""}<input id="ws-search" type="search" aria-label="Search register" placeholder="Search names, access, evidence…" value="${e(query)}"><button data-new="${view}">Add ${view === "actors" ? "actor profile" : view === "boundaries" ? "trust boundary" : view === "threats" ? "threat scenario" : "record"}</button></div><div class="toolbar"><label>Disposition<select id="ws-disposition" aria-label="Register disposition">${[["", "All dispositions"], ...[...new Set(rows.map((r) => r.reviewState))].map((v) => [v, v.replaceAll("-", " ")])].map(([k, l]) => option(k, l, k === dispositionFilter)).join("")}</select></label>${
       view === "threats"
         ? `<label>Record type<select id="ws-threat-type" aria-label="Threat record type">${[
             ["all", "All records"],
@@ -348,7 +360,7 @@
         .slice(page * 50, page * 50 + 50)
         .map(
           (r) =>
-            `<button class="ws-record" data-select="${e(r.id)}" aria-pressed="${selected === r.id}"><strong>${e(r.name)}</strong><span>${e(r.startingAccess || (r.before && `${r.dimension}: ${r.before} → ${r.after}`) || r.scenario || r.description || r.type || "")}</span><small>${r.origin ? e(r.origin === "review checklist" ? "Review checklist" : "Threat scenario") + " · " : ""}${e(r.basis)} · ${e(r.reviewState)}${r.decision?.owner ? " · Owner: " + e(r.decision.owner) : ""}</small></button>`,
+            `<button class="ws-record" data-select="${e(r.id)}" aria-pressed="${selected === r.id}"><strong>${e(r.reference ? r.reference + " · " + r.name : r.name)}</strong>${r.reviewPriority ? `<small><b>${e(r.reviewPriority.label)}</b> · ${e(r.sourceScopes.join(", "))}</small><small>${e(r.reviewPriority.reasons.join(" "))}</small>` : ""}<span>${e(r.startingAccess || (r.before && `${r.dimension}: ${r.before} → ${r.after}`) || r.scenario || r.description || r.type || "")}</span><small>${r.origin ? e(r.origin === "review checklist" ? "Review checklist" : "Threat scenario") + " · " : ""}${e(r.basis)} · ${e(r.reviewState)}${r.decision?.owner ? " · Owner: " + e(r.decision.owner) : ""}</small></button>`,
         )
         .join("") ||
       "<p>No records. Add an evidence-supported declaration or an explicit assumption.</p>"
@@ -509,10 +521,10 @@
     const scenarios = linked.filter((t) => t.origin !== "review checklist");
     const checklist = linked.filter((t) => t.origin === "review checklist");
     const linkedButton = (t) =>
-      `<button class="ws-linked-record" data-select="${e(t.id)}"><strong>${e(t.name)}</strong><small>${e((refs(t.evidenceIds)[0] || t.id).split(" · ")[0])}</small></button>`;
+      `<button class="ws-linked-record" data-select="${e(t.id)}"><strong>${e(t.reference ? t.reference + " · " + t.name : t.name)}</strong><small>${e((refs(t.evidenceIds)[0] || t.id).split(" · ")[0])}</small></button>`;
     const linkedSection =
       r.kind === "cell" || linked.length > 0
-        ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || "<p>No scenario identified. Record a conclusion and rationale after review.</p>"}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
+        ? `<section><h4>Linked scenarios (${scenarios.length})</h4>${scenarios.map(linkedButton).join("") || `<p>${r.analysisStatus === "analyzed-no-scenario" ? "No scenario identified in analyzed evidence; reviewer assessment is still required." : "No completed scenario for this selection. Check analysis status and pending or failed packets; this is not a clean result."}</p>`}${checklist.length ? `<details class="ws-checklist"><summary>Review checklist (${checklist.length} items)</summary>${checklist.map(linkedButton).join("")}</details>` : ""}</section>`
         : "";
     const investigations = (model.securityRegister?.issues || []).filter(
       (i) =>
@@ -532,7 +544,7 @@
       : "";
     const field = (title, v) =>
       v ? `<section><h4>${e(title)}</h4><p>${e(v)}</p></section>` : "";
-    out.innerHTML = `${investigationSection}${
+    out.innerHTML = `${
       bundleIds.length > 1
         ? `<section><h3>Grouped connection · ${bundleIds.length} flows</h3><p>Each member retains its interfaces, source evidence and review decision.</p><div class="ws-bundle">${bundleIds
             .map((id) => s.flows.find((f) => f.id === id))
@@ -543,7 +555,7 @@
             )
             .join("")}</div></section>`
         : ""
-    }<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.name)}</h3><span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Architecture classification", r.classification)}${field("Source scope", r.scope)}${field("Candidate host", r.hostCandidateId ? names([r.hostCandidateId]) : "")}${
+    }<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.reference ? r.reference + " · " + r.name : r.name)}</h3>${r.reviewPriority ? field("Review priority", r.reviewPriority.label + ": " + r.reviewPriority.reasons.join(" ") + " " + r.reviewPriority.interpretation) : ""}${r.analysisLabel ? field("Analysis status", r.analysisLabel + (r.failedEvidence ? ". Failed packets affect this subject." : "")) : ""}<span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Evidence strength", r.evidenceStatus)}${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${r.crossings?.length ? `<section><h4>Boundary crossings</h4>${r.crossings.map((c) => `<button data-select="${e(c.id)}">${e(c.reference)} · ${e(c.from)} → ${e(c.to)}</button>`).join("")}<p>Candidate crossing; the transition and enforcement require evidence review.</p></section>` : ""}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Architecture classification", r.classification)}${field("Source scope", r.scope)}${field("Candidate host", r.hostCandidateId ? names([r.hostCandidateId]) : "")}${
       s.components.some((c) => c.hostCandidateId === r.id)
         ? `<section><h4>Associated source groups</h4><p>Unique project-reference ownership; deployment requires review.</p>${s.components
             .filter((c) => c.hostCandidateId === r.id)
@@ -552,7 +564,18 @@
             )
             .join("")}</section>`
         : ""
-    }${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${field("Flows", names(r.flowIds))}${field("Trust boundaries", names(r.boundaryIds))}${field("Transport", r.transport ? `${r.transport} in source URL; enforcement requires review` : "")}${field("Data", r.data)}${field("Mitigation", r.mitigation)}${field("Attack steps", r.analysis?.attackSteps?.join(" → "))}${field("Conditional impact", r.analysis?.impact)}${field("Analysis assumptions", r.analysis?.assumptions?.join("; "))}${field("Framework mappings", r.analysis?.mappings?.map((m) => `${m.framework} ${m.id}: ${m.name} — ${m.rationale} (proposed)`).join("; "))}${field("Analysis quality", r.analysisQuality?.gaps?.join("; ") || r.analysisQuality?.semantics)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}<section><h4>Supporting evidence</h4>${
+    }${field("Source repositories", (r.repositories || []).join(", "))}${field("Threat actors", names(r.actorIds))}${field("Entry points", names(r.entryIds))}${[
+      ["Affected flows", r.flowIds],
+      ["Trust boundaries", r.boundaryIds],
+    ]
+      .map(([label, ids]) =>
+        ids?.length
+          ? `<section><h4>${e(label)}</h4>${ids.map((id) => `<button data-select="${e(id)}">${e(names([id]))}</button>`).join("")}</section>`
+          : "",
+      )
+      .join(
+        "",
+      )}${field("Transport", r.transport ? `${r.transport} in source URL; enforcement requires review` : "")}${field("Data", r.data)}${field("Boundary association", r.boundaryLinkBasis)}${field("Mitigation", r.mitigation)}${field("Attack steps", r.analysis?.attackSteps?.join(" → "))}${field("Conditional impact", r.analysis?.impact)}${field("Analysis assumptions", r.analysis?.assumptions?.join("; "))}${field("Framework mappings", r.analysis?.mappings?.map((m) => `${m.framework} ${m.id}: ${m.name} — ${m.rationale} (proposed)`).join("; "))}${field("Analysis quality", r.analysisQuality?.gaps?.join("; ") || r.analysisQuality?.semantics)}${field("Caller identity", r.callerIdentity)}${field("Callee identity", r.calleeIdentity)}${field("Credential type", r.credentialType)}${field("Authorization decision", r.authorization)}${field("Assumptions", r.assumptions)}${field("Linked controls", names(r.controlIds))}${field("Counterevidence", refs(r.counterEvidenceIds).join("; "))}${field("References requiring repair", (r.missingReferences || []).join(", "))}${linkedSection}${investigationSection}<section><h4>Supporting evidence</h4>${
       refs(r.evidenceIds)
         .map((v) => `<p class="evidence">${e(v)}</p>`)
         .join("") ||
@@ -741,6 +764,9 @@
         focus = r.id;
         level = "focus";
       } else if (r.kind === "threats") {
+        lens =
+          s.boundaries.find((b) => r.boundaryIds?.includes(b.id))?.dimension ||
+          lens;
         actor = "";
         focus = "";
         level = "system";

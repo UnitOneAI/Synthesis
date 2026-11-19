@@ -28,6 +28,7 @@ export function systemSvg(model, options = {}) {
     (a) =>
       a.id === options.actor && !["rejected", "stale"].includes(a.reviewState),
   );
+  const selectedThreat = s.threats.find((t) => t.id === options.threat);
   const text = (x, y, value, size = 12) =>
     `<text x="${x}" y="${y}" font-size="${size}" fill="#20344c">${e(value)}</text>`;
   const edgeCounts = new Map(),
@@ -82,10 +83,10 @@ export function systemSvg(model, options = {}) {
         f.basis !== "static endpoint match" &&
         f.basis !== "reviewer declaration";
       const label = `${f.transport && f.transport !== "unknown" ? f.transport : f.protocol || "Data"}${f.flowIds.length > 1 ? ` × ${f.flowIds.length}` : ""}`;
-      return `<g class="dfd-connection" data-select="${e(f.flowIds[0])}" data-flow-ids="${e(f.flowIds.join(" "))}" data-connection-id="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(`${f.name} · ${f.basis} · ${f.reviewState}. Member flows: ${f.flowIds.join(", ")}`)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="18"/><path d="${path}" fill="none" stroke="${f.active ? "#b56416" : "#61758c"}" stroke-width="${f.active ? 3 : 1.7}" ${dashed ? 'stroke-dasharray="6 4"' : ""} marker-end="url(#system-arrow)"/><rect x="${lx - 43}" y="${ly - 14}" width="95" height="20" rx="4" fill="white"/>${text(lx - 38, ly, label, 11)}${boundaries.length ? `<g data-select="${e(boundaries[0].id)}" role="button" tabindex="0" aria-label="${e(boundaries[0].name)}"><title>${e(boundaries.map((b) => `${b.name} · ${b.basis} · ${b.reviewState}`).join("; "))}</title><rect x="${lx - 43}" y="${ly + 9}" width="126" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5" ${state === "pending" ? 'stroke-dasharray="3 3"' : ""}/>${text(lx - 38, ly + 23, `boundary: ${state}`, 10)}</g>` : ""}</g>`;
+      return `<g class="dfd-connection" data-select="${e(f.flowIds[0])}" data-flow-ids="${e(f.flowIds.join(" "))}" data-connection-id="${e(f.id)}" role="button" tabindex="0" aria-label="${e(f.name)}"><title>${e(`${f.name} · ${f.basis} · ${f.reviewState}. Member flows: ${f.flowIds.join(", ")}`)}</title><path d="${path}" fill="none" stroke="transparent" stroke-width="18"/><path d="${path}" fill="none" stroke="${f.active ? "#b56416" : "#61758c"}" stroke-width="${f.active ? 3 : 1.7}" ${dashed ? 'stroke-dasharray="6 4"' : ""} marker-end="url(#system-arrow)"/><rect x="${lx - 43}" y="${ly - 14}" width="95" height="20" rx="4" fill="white"/>${text(lx - 38, ly, label, 11)}${boundaries.length ? `<g data-select="${e(boundaries[0].id)}" role="button" tabindex="0" aria-label="${e(boundaries[0].name)}"><title>${e(boundaries.map((b) => `${b.reference} · ${b.name} · ${b.before} → ${b.after} · ${b.basis} · ${b.reviewState}`).join("; "))}</title><rect x="${lx - 43}" y="${ly + 9}" width="218" height="20" rx="4" fill="#eee8f5" stroke="#8e79a5" ${state === "pending" ? 'stroke-dasharray="3 3"' : ""}/>${text(lx - 38, ly + 23, `${boundaries[0].reference}${boundaries.length > 1 ? " +" + (boundaries.length - 1) : ""}: ${state}`, 10)}</g>` : ""}</g>`;
     })
     .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${e(s.title)} system data flow diagram"><title>${e(s.title)} · ${e(d.level)} · ${e(d.lens)} lens</title><desc>Static evidence and review declarations. Dashed connections are hypotheses or unresolved relationships. Connectivity does not establish exploitability.</desc><rect width="${width}" height="${height}" fill="#fff"/><defs><marker id="system-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6" fill="#61758c"/></marker></defs>${text(24, 26, `${s.title} · ${d.level} · ${d.lens} lens`, 17)}${text(24, 48, `${d.nodes.length} objects · ${d.connections.length} connections representing ${d.coverage.representedFlows} flows · ${d.coverage.unresolvedRelationships} unresolved relationships in coverage`, 11)}${text(24, 67, `${d.coverage.omittedNodes} omitted objects / ${d.coverage.omittedConnections} omitted connections from canvas limit; ${d.coverage.filteredFlows} flows outside view filters. Full registers retain evidence.`, 11)}${actor ? text(24, 87, `Actor profile: ${actor.name} · conditional access: ${actor.startingAccess}`.slice(0, 150), 11) : ""}${boxes.map(({ domain: g, x, y, width: w, height: h }) => `<g data-select="${e(g.id)}" data-domain-parent="${e(g.parentId || "")}" role="button" tabindex="0" aria-label="${e(g.name)}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#f5f8fc" stroke="#8e79a5" ${g.reviewState !== "accepted" ? 'stroke-dasharray="6 5"' : ""}/>${text(x + 12, y + 22, `${g.name} · ${g.basis} · ${g.reviewState}`)}</g>`).join("")}${flowSvg}${d.nodes
+  return `<svg xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${e(s.title)} system data flow diagram"><title>${e(s.title)} · ${e(d.level)} · ${e(d.lens)} lens</title><desc>Static evidence and review declarations. Dashed connections are hypotheses or unresolved relationships. Connectivity does not establish exploitability.</desc><rect width="${width}" height="${height}" fill="#fff"/><defs><marker id="system-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6" fill="#61758c"/></marker></defs>${text(24, 26, `${s.title} · ${d.level} · ${d.lens} lens`, 17)}${text(24, 48, `${d.nodes.length} objects · ${d.connections.length} connections representing ${d.coverage.representedFlows} flows · ${d.coverage.unresolvedRelationships} unresolved relationships in coverage`, 11)}${text(24, 67, `${d.coverage.omittedNodes} omitted objects / ${d.coverage.omittedConnections} omitted connections from canvas limit; ${d.coverage.filteredFlows} flows outside view filters. Full registers retain evidence.`, 11)}${selectedThreat ? text(24, 87, `${selectedThreat.reference}: ${selectedThreat.name} (${selectedThreat.flowIds?.length ? "conditional path" : "no linked flow established"})`.slice(0, 160), 11) : actor ? text(24, 87, `Actor profile: ${actor.name} · conditional access: ${actor.startingAccess}`.slice(0, 150), 11) : ""}${boxes.map(({ domain: g, x, y, width: w, height: h }) => `<g data-select="${e(g.id)}" data-domain-parent="${e(g.parentId || "")}" role="button" tabindex="0" aria-label="${e(g.name)}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#f5f8fc" stroke="#8e79a5" ${g.reviewState !== "accepted" ? 'stroke-dasharray="6 5"' : ""}/>${text(x + 12, y + 22, `${g.name} · ${g.basis} · ${g.reviewState}`)}</g>`).join("")}${flowSvg}${d.nodes
     .map((n) => {
       const p = positions.get(n.id),
         active = d.activeNodeIds.includes(n.id);
@@ -107,7 +108,7 @@ export function systemSvg(model, options = {}) {
     })
     .join(
       "",
-    )}${!d.connections.length ? text(24, height - 50, "No matched connections in this view. Inspect unresolved coverage or choose a component.", 12) : ""}${text(24, height - 18, "Dashed: candidate / unresolved. Boundary badges: selected trust lens. Actor paths are conditional.", 11)}</svg>`;
+    )}${!d.connections.length ? text(24, height - 50, "No matched connections in this view. Inspect unresolved coverage or choose a component.", 12) : ""}${text(24, height - 18, "Dashed: candidate / unresolved. TB: trust boundary in selected lens; pending means unreviewed. Actor and threat paths are conditional.", 11)}</svg>`;
 }
 export function systemMermaid(model, options = {}) {
   const s = systemModel(model, { matrix: false }),
@@ -184,7 +185,7 @@ export function registerCsv(model, kind) {
         r.rowKind,
         ...r.cells.map(
           (c) =>
-            `${c.state}; ${c.scenarioCount} scenarios; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
+            `${c.analysisLabel}; reviewer state: ${c.state}; ${c.scenarioCount} scenarios; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
         ),
       ]),
     ];
@@ -208,6 +209,8 @@ export function registerCsv(model, kind) {
       ],
       boundaries: [
         "id",
+        "reference",
+        "crossings",
         "name",
         "dimension",
         "before",
@@ -217,6 +220,9 @@ export function registerCsv(model, kind) {
       ],
       threats: [
         "id",
+        "reference",
+        "reviewPriority",
+        "sourceScopes",
         "name",
         "scenario",
         "origin",
@@ -233,6 +239,7 @@ export function registerCsv(model, kind) {
       ],
       flows: [
         "id",
+        "reference",
         "name",
         "source",
         "target",
@@ -353,7 +360,9 @@ export function systemReport(model) {
         `<h2>${e(fieldName(k))} register</h2>${table(
           ["ID / name", "Basis / disposition", "Properties", "Evidence"],
           s[k].map((r) => [
-            r.id + " / " + r.name,
+            (r.reference ? r.reference + " (" + r.id + ")" : r.id) +
+              " / " +
+              r.name,
             r.basis + " / " + r.reviewState,
             display(
               Object.fromEntries(
@@ -380,17 +389,23 @@ export function systemReport(model) {
       r.name,
       ...r.cells.map(
         (c) =>
-          `${c.state}: ${c.scenarioCount} scenarios, ${c.checklistCount} checklist items`,
+          `${c.analysisLabel}; reviewer state ${c.state}: ${c.scenarioCount} scenarios, ${c.checklistCount} checklist items`,
       ),
     ]),
   )}<h2>Threat register</h2><p>${s.threats.filter((t) => t.origin !== "review checklist").length} threat scenarios and ${s.threats.filter((t) => t.origin === "review checklist").length} checklist items. These are conditional review records, not confirmed vulnerabilities.</p>${s.threats
+    .slice()
+    .sort(
+      (a, b) => (a.reviewPriority?.rank ?? 9) - (b.reviewPriority?.rank ?? 9),
+    )
     .map(
       (t) =>
-        `<article><h3>${e(t.name)}</h3><p>${e(t.id)} · ${t.origin === "review checklist" ? "Review checklist" : "Threat scenario"} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${table(
+        `<article><h3>${e(t.reference || t.id)} · ${e(t.name)}</h3><p>${e(t.id)} · ${t.origin === "review checklist" ? "Review checklist" : "Threat scenario"} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${table(
           ["Field", "Value"],
           [
             "actorIds",
             "asset",
+            "reviewPriority",
+            "boundaryLinkBasis",
             "prerequisites",
             "flowIds",
             "boundaryIds",
@@ -419,7 +434,13 @@ export function systemReport(model) {
 // HTML/JSON/CSV exports; checklist prompts never become threat scenarios.
 export function systemPrintReport(model) {
   const s = systemModel(model);
-  const scenarios = s.threats.filter((t) => t.origin !== "review checklist");
+  const scenarios = s.threats
+    .filter((t) => t.origin !== "review checklist")
+    .sort(
+      (a, b) =>
+        a.reviewPriority.rank - b.reviewPriority.rank ||
+        a.id.localeCompare(b.id),
+    );
   const table = (headers, rows) =>
     `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   const boundaryGroups = new Map();
@@ -435,7 +456,14 @@ export function systemPrintReport(model) {
     ]);
     if (!boundaryGroups.has(key))
       boundaryGroups.set(key, { ...b, members: [] });
-    boundaryGroups.get(key).members.push(b.id);
+    boundaryGroups.get(key).members.push(b.reference);
+    boundaryGroups.get(key).crossingDetails = [
+      ...(boundaryGroups.get(key).crossingDetails || []),
+      ...(b.crossings || []).map(
+        (c) =>
+          `${b.reference} / ${c.reference}: ${c.from} → ${c.to} (${c.basis}; ${c.reviewState})`,
+      ),
+    ];
   }
   const d = diagramModel(s, {});
   const nodes = new Map(d.nodes.map((n) => [n.id, n.name]));
@@ -459,16 +487,18 @@ export function systemPrintReport(model) {
       a.startingAccess || a.description || "Unspecified",
       `${a.basis} / ${a.reviewState}`,
     ]),
-  )}<h2>Trust boundaries</h2><p>${s.boundaries.length} boundary records grouped into ${boundaryGroups.size} equivalent transition descriptions. Grouping preserves every member ID. Inferred boundaries require review; repository boundaries do not establish trust boundaries.</p>${table(
+  )}<h2>Trust boundaries</h2><p>${s.boundaries.length} boundary records grouped into ${boundaryGroups.size} equivalent transition descriptions. Every boundary reference maps to the named flow crossing. TB identifies a change in trust, not a repository or automatically verified enforcement. Inferred boundaries require review; repository boundaries do not establish trust boundaries.</p>${table(
     [
       "Boundary / dimension",
       "Transition / enforcement",
-      "Basis / review / member IDs",
+      "Basis / review / boundary references",
+      "Crossings",
     ],
     [...boundaryGroups.values()].map((b) => [
       `${b.name} (${b.dimension})`,
       `${b.before} → ${b.after}. ${b.enforcement || ""}`,
       `${b.basis} / ${b.reviewState}. Members: ${b.members.join(", ")}`,
+      b.crossingDetails.join("; "),
     ]),
   )}<h2>Components</h2>${table(
     ["Component", "Type", "Basis / review"],
@@ -486,14 +516,28 @@ export function systemPrintReport(model) {
       .filter((r) => r.rowKind === "component")
       .map((r) => [
         r.name,
-        ...r.cells.map((c) => `${c.scenarioCount} / ${c.state}`),
+        ...r.cells.map(
+          (c) =>
+            `${c.analysisLabel}; ${c.scenarioCount} scenarios${c.failedEvidence ? "; failed packets" : ""}${c.decision ? "; reviewer: " + c.state : ""}`,
+        ),
       ]),
+  )}<h2>Prioritized threats</h2><p>Review order is explained for each scenario. It is not a severity score or proof of exploitability. Source scope and reviewer decisions affect ordering.</p>${table(
+    [
+      "Threat reference / scenario",
+      "Review priority / reason",
+      "Impact / source scope / severity",
+    ],
+    scenarios.map((t) => [
+      `${t.reference} - ${t.name}`,
+      `${t.reviewPriority.label}: ${t.reviewPriority.reasons.join(" ")}`,
+      `${t.analysis?.impact || t.asset}. ${(t.sourceScopes || []).join(", ")}. Severity: ${!t.decision?.stale ? t.decision?.severity || "unassessed" : "unassessed (stale decision)"}`,
+    ]),
   )}<h2>Threat register</h2>${
     scenarios.length
       ? scenarios
           .map(
             (t) =>
-              `<article><h3>${e(t.name)}</h3><p>${e(t.id)} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${table(
+              `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p>Record ID: ${e(t.id)} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.reviewPriority.label)}: ${e(t.reviewPriority.reasons.join(" "))}</p><p>${e(t.scenario)}</p>${table(
                 ["Field", "Detail"],
                 [
                   "actorIds",
@@ -505,10 +549,26 @@ export function systemPrintReport(model) {
                   "mitigation",
                   "analysis",
                   "analysisQuality",
+                  "evidenceStatus",
+                  "boundaryLinkBasis",
                   "evidenceIds",
                   "decision",
                   "assumptions",
-                ].map((k) => [fieldName(k), display(t[k])]),
+                ].map((k) => [
+                  fieldName(k),
+                  ["flowIds", "boundaryIds", "actorIds"].includes(k)
+                    ? (t[k] || [])
+                        .map((id) => {
+                          const r = [
+                            ...s.flows,
+                            ...s.boundaries,
+                            ...s.actors,
+                          ].find((r) => r.id === id);
+                          return r ? `${r.reference || r.id}: ${r.name}` : id;
+                        })
+                        .join("; ")
+                    : display(t[k]),
+                ]),
               )}</article>`,
           )
           .join("")

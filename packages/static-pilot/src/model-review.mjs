@@ -372,7 +372,7 @@ export function validateReview(value, packet) {
           "Elevation of Privilege",
         ].includes(t.category)
       )
-        invalid();
+        invalid("unknown STRIDE category");
       const evidenceIds = refs(t.interfaceIds, t.evidenceIds);
       return {
         ...Object.fromEntries(fields.map((k) => [k, str(t[k])])),
@@ -389,7 +389,7 @@ export function validateReview(value, packet) {
       object(c, ["from", "to", "reason", "evidenceIds", "transition"]);
       const evidenceIds = refs([c.from, c.to], c.evidenceIds, true);
       if ([c.from, c.to].some((k) => records.get(k).direction === "control"))
-        invalid();
+        invalid("connection endpoints cannot be control records");
       let transition = null;
       if (c.transition !== null) {
         object(c.transition, ["dimension", "before", "after", "reason"]);
@@ -403,11 +403,12 @@ export function validateReview(value, packet) {
             "third-party",
           ].includes(c.transition.dimension)
         )
-          invalid();
+          invalid("unsupported trust transition dimension");
         transition = Object.fromEntries(
           Object.entries(c.transition).map(([k, v]) => [k, str(v)]),
         );
-        if (transition.before === transition.after) invalid();
+        if (transition.before === transition.after)
+          invalid("trust transition before and after must differ");
       }
       return {
         id: id(REVIEW_VERSION, "connection", n, c.from, c.to),
@@ -467,7 +468,7 @@ function parseReviewText(text) {
   }
 }
 export const VALIDATION_RETRY_PROMPT =
-  "\nValidation retry: return at most four threat scenarios. Each scenario must reference only one or two interfaceIds and one to four evidenceIds belonging to those exact interfaces; cite each listed interface. All prose fields, including prerequisites and controls, must be JSON strings, never arrays or objects. Return an empty connections array unless a well-supported hypothesis fits the schema. Return at most four questions as strings. Do not invent IDs or relax evidence requirements. Return only the required JSON object.";
+  "\nValidation retry: return at most four threat scenarios. Each scenario must reference only one or two interfaceIds and one to four evidenceIds belonging to those exact interfaces; cite each listed interface. All prose fields, including prerequisites and controls, must be JSON strings, never arrays or objects. On this validation retry, return connections as an empty array exactly; do not propose connections. Continue reporting evidence-supported threat scenarios. Return at most four questions as strings. Do not invent IDs or relax evidence requirements. Return only the required JSON object.";
 export async function requestReview(
   config,
   packet,

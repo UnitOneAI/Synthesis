@@ -1,3 +1,4 @@
+import { addReviewPresentation } from "./review-presentation.mjs";
 import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents, sourceScope } from "./architecture.mjs";
 import { assessRisk, RISK_FACTORS } from "./analysis-guidance.mjs";
@@ -521,7 +522,7 @@ export function systemModel(model, { matrix = true } = {}) {
     model.aiReview?.status,
   ]);
   result.matrix = matrix ? systemMatrix(result, model, w) : [];
-  return result;
+  return addReviewPresentation(result, model);
 }
 
 export function systemMatrix(s, model, w = model.architecture || empty()) {
