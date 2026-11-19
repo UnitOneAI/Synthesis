@@ -1,3 +1,4 @@
+import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import {
   analysisGuidance,
   QUALITY_INSTRUCTIONS,
@@ -486,6 +487,9 @@ export async function requestReview(
       ? gatewayOptions(config.baseUrl, config.apiVersion)
       : null;
   const anthropic = config.provider === "anthropic" || Boolean(gateway);
+  const responseSchema =
+    options.responseSchema ||
+    (!options.validate ? STRIDE_RESPONSE_SCHEMA : undefined);
   const url = gateway
     ? gateway.baseUrl + "/v1/messages"
     : anthropic
@@ -497,10 +501,10 @@ export async function requestReview(
     ? {
         model: config.model,
         max_tokens: REVIEW_LIMITS.outputTokens,
-        ...(config.structuredOutputs && options.responseSchema
+        ...(config.structuredOutputs && responseSchema
           ? {
               output_config: {
-                format: { type: "json_schema", schema: options.responseSchema },
+                format: { type: "json_schema", schema: responseSchema },
               },
             }
           : {}),
@@ -664,6 +668,9 @@ export async function enrichModel(
   const review = {
     ...publicModelConfig(config),
     promptVersion: REVIEW_VERSION,
+    outputContract: config.structuredOutputs
+      ? "native-json-schema"
+      : "prompt-json",
     promptHash: sha(SYSTEM_PROMPT),
     packetHash: sha(JSON.stringify(packet)),
     basedOnRevision: model.modelRevision,
@@ -689,6 +696,10 @@ export async function enrichModel(
   const attempt = beginAttempt(model, config, packet);
   try {
     const result = await requestReview(config, packet, fetchImpl, {
+      onResponseShape: (shape) => {
+        review.responseShape = shape;
+        attempt.responseShape = shape;
+      },
       onUsage: (usage) => {
         attempt.usage = usage;
       },

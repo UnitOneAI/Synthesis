@@ -1,3 +1,4 @@
+import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import {
   GUIDANCE_VERSION,
   GUIDANCE_HASH,
@@ -434,6 +435,12 @@ export async function enrichGraphModel(
   const plan = options.plan || reviewPlan(model, excerpts);
   const provenance = {
     ...publicModelConfig(config),
+    ...(config.structuredOutputs
+      ? {
+          outputContract: "native-json-schema",
+          responseSchemaHash: sha(JSON.stringify(STRIDE_RESPONSE_SCHEMA)),
+        }
+      : {}),
     promptVersion: GRAPH_REVIEW_VERSION,
     promptHash: sha(SYSTEM_PROMPT),
     guidance: {
@@ -475,6 +482,9 @@ export async function enrichGraphModel(
   const review = {
     ...provenance,
     runKey,
+    outputContract: config.structuredOutputs
+      ? "native-json-schema"
+      : "prompt-json",
     status: "pending",
     mode: excerpts.size ? "source-excerpts" : "metadata",
     batches: [...retained],
@@ -506,7 +516,9 @@ export async function enrichGraphModel(
   const submitted = new Set(retained.flatMap((b) => b.interfaceIds)),
     reviewed = new Set(submitted);
   let calls = 0,
-    terminalFailure = false;
+    terminalFailure = false,
+    consecutiveFormatFailures = 0,
+    formatFailureStop = false;
   const deadline = Date.now() + 24 * 60 * 1000;
   const aggregate = () => {
     // Every checkpoint retains compatible successes, including later plan entries.
@@ -639,7 +651,12 @@ export async function enrichGraphModel(
       continue;
     }
     if (options.batchIds && !options.batchIds.includes(batch.id)) continue;
-    if (terminalFailure || calls >= maxBatches || Date.now() > deadline)
+    if (
+      terminalFailure ||
+      formatFailureStop ||
+      calls >= maxBatches ||
+      Date.now() > deadline
+    )
       continue;
     options.progress?.(
       `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
@@ -705,6 +722,16 @@ export async function enrichGraphModel(
       const result = await requestReview(config, batch.packet, fetchImpl, {
         validationRetry: entry.validationRetry,
         signal: options.signal,
+        onResponseShape: (shape) => {
+          entry.responseShape = shape;
+          attempt.responseShape = shape;
+          return options.trace?.("model.response-shape", {
+            runKey,
+            batchId: batch.id,
+            attemptId: attempt.id,
+            ...shape,
+          });
+        },
         onResponse: (response) =>
           options.trace?.("model.response-received", {
             runKey,
@@ -733,6 +760,7 @@ export async function enrichGraphModel(
           );
         },
       });
+      consecutiveFormatFailures = 0;
       finishAttempt(attempt, "succeeded");
       Object.assign(entry, {
         status: "completed",
@@ -755,6 +783,11 @@ export async function enrichGraphModel(
       }
       entry.status = "failed";
       entry.error = error.message;
+      consecutiveFormatFailures =
+        failureDetail(error.message).code === "response-format"
+          ? consecutiveFormatFailures + 1
+          : 0;
+      formatFailureStop = consecutiveFormatFailures >= 3;
       await options.trace?.("model.request-failed", {
         runKey,
         batchId: batch.id,
@@ -788,13 +821,18 @@ export async function enrichGraphModel(
         (!plan.batches.length
           ? "No collected interfaces to review"
           : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
-  review.stopReason = terminalFailure
-    ? "provider-failure"
-    : calls >= maxBatches
-      ? "request-budget"
-      : Date.now() > deadline
-        ? "time-budget"
-        : "plan-exhausted";
+  if (formatFailureStop)
+    review.error =
+      "Stopped after three consecutive response-format failures. Check the provider output contract and export errors before retrying.";
+  review.stopReason = formatFailureStop
+    ? "repeated-response-format-failure"
+    : terminalFailure
+      ? "provider-failure"
+      : calls >= maxBatches
+        ? "request-budget"
+        : Date.now() > deadline
+          ? "time-budget"
+          : "plan-exhausted";
   await options.trace?.("review.finished", {
     runKey,
     status: review.status,
@@ -804,13 +842,7 @@ export async function enrichGraphModel(
       pending: review.coverage.pendingBatches,
       obligations: review.coverage.obligations,
     },
-    stopReason: terminalFailure
-      ? "provider-failure"
-      : calls >= maxBatches
-        ? "request-budget"
-        : Date.now() > deadline
-          ? "time-budget"
-          : "plan-exhausted",
+    stopReason: review.stopReason,
   });
   await options.checkpoint?.(
     structuredClone(review),

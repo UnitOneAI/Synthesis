@@ -634,3 +634,69 @@ test("one STRIDE request returns matrix scenarios before any manual actor or bou
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("STRIDE native contract invalidates prompt cache and resumes compatible completed packets", async () => {
+  const { root, model } = await portfolio();
+  try {
+    const plan = reviewPlan(model);
+    const options = { plan, batchIds: [plan.batches[0].id], maxBatches: 1 };
+    let calls = 0;
+    const transport = async () => {
+      calls++;
+      return response();
+    };
+    await enrichGraphModel(model, config, new Map(), transport, options);
+    const oldKey = model.aiReview.runKey;
+    assert.equal(model.aiReview.outputContract, "prompt-json");
+    const native = { ...config, structuredOutputs: true };
+    await enrichGraphModel(model, native, new Map(), transport, options);
+    assert.notEqual(model.aiReview.runKey, oldKey);
+    assert.equal(model.aiReview.outputContract, "native-json-schema");
+    assert.equal(calls, 2);
+    await enrichGraphModel(model, native, new Map(), transport, options);
+    assert.equal(calls, 2);
+    assert.equal(model.aiReview.coverage.completedBatches, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("STRIDE stops repeated format failures with usage and safe shape diagnostics retained", async () => {
+  const { root, model } = await portfolio();
+  try {
+    let calls = 0;
+    const events = [];
+    await enrichGraphModel(
+      model,
+      { ...config, structuredOutputs: true },
+      new Map(),
+      async () => {
+        calls++;
+        return Response.json({
+          stop_reason: "end_turn",
+          content: [
+            { type: "text", text: "Private prose instead of required JSON" },
+          ],
+          usage: { input_tokens: 20, output_tokens: 10 },
+        });
+      },
+      { maxBatches: 12, trace: (event, data) => events.push({ event, data }) },
+    );
+    assert.equal(calls, 3);
+    assert.equal(model.aiReview.status, "failed");
+    assert.equal(model.aiReview.stopReason, "repeated-response-format-failure");
+    assert.equal(model.aiReview.coverage.completedBatches, 0);
+    assert.equal(model.usageLedger.attempts.reduce((sum, a) => sum + a.usage.totalTokens, 0), 90);
+    assert.equal(model.usageLedger.attempts.length, 3);
+    assert.ok(
+      model.aiReview.batches.every((b) => b.responseShape.textCharacters > 0),
+    );
+    assert.equal(
+      events.filter((e) => e.event === "model.response-shape").length,
+      3,
+    );
+    assert.ok(!JSON.stringify(events).includes("Private prose"));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

@@ -339,6 +339,7 @@ export async function errorReport({
   const review = (r) => ({
     ...pick(r, [
       "status",
+      "outputContract",
       "stopReason",
       "completedBatches",
       "pendingBatches",

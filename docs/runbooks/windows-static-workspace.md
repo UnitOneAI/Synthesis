@@ -322,3 +322,16 @@ $env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'
 Restart with the same workspace, source root, exact approved gateway deployment and key. This requests a structured JSON response via `output_config.format`; gateway support must be established by that test. If the gateway rejects the parameter, stop and export the error instead of increasing the budget. Native JSON does not relax CWE mapping or code-evidence checks. Changing the output contract changes the review-plan key; prior findings remain available, but prior packet completion is not silently credited to the new contract.
 
 Export errors after the test finishes. New exports retain provider-reported usage, failure classifications and response-shape metadata (text length, block count and format category). They exclude response prose, source text and secrets. Historical trace events whose failure was stored as a string now retain a classified error rather than an empty object. Earlier exports cannot reveal response contents that were never recorded. Retain the full workspace and token-usage CSV locally.
+
+
+### STRIDE did not run or returned prose instead of JSON
+
+Earlier builds omitted the STRIDE response schema even with `SYNTHESIS_STRUCTURED_OUTPUTS=1`. Update the review branch using the commands above before retrying. The setting now applies to both STRIDE entry points and graph-driven STRIDE investigations. It requests the required structure; local evidence and threat validation remain mandatory. Gateway acceptance still needs a one-request test in your environment.
+
+1. Stop the server with Ctrl+C and preserve the existing workspace. Update `feat/static-security-intelligence`, then run the checks above.
+2. In the same PowerShell window, set `$env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'` and ensure the approved gateway key is set in `CLAUDE_API_KEY`. Restart with your existing provider, deployment, source root, workspace and trace directory.
+3. Open the new access link and **Open saved graph**. Do not rebuild unchanged clones for this fix.
+4. In **STRIDE matrix**, set **Request budget** to **1**, then select **Run or continue STRIDE analysis**. A completed packet proves that call succeeded; it does not complete all repositories. Inspect returned scenarios and remaining coverage before increasing the budget.
+5. Download **Export errors** after the call. The `stride.outputContract` field should say `native-json-schema`; attempted batches include safe response-format metadata and reported token usage. If the gateway rejects the structured-output parameter, send this small export for diagnosis before spending on further calls.
+
+STRIDE's native schema is part of its cache identity, including the graph-driven investigation scope. Results produced under the earlier contract are not silently counted as completed under the corrected contract. Keep prior exports for comparison. The source graph itself remains reusable. A standalone STRIDE action stops after three consecutive format failures, preserves any successful packets and usage, and reports `repeated-response-format-failure`.

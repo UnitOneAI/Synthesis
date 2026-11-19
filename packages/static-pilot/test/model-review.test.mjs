@@ -560,3 +560,62 @@ test("CLI supports gateway flags and environment configuration end to end", asyn
     assert.ok(!JSON.stringify(model).includes(env.CLAUDE_API_KEY));
   }
 });
+
+test("native STRIDE gateway schema preserves deployment and still rejects invented evidence", async () => {
+  const { STRIDE_RESPONSE_SCHEMA } = await import(
+    "../src/security-schemas.mjs"
+  );
+  const native = {
+    ...gatewayConfig(),
+    model: "claude-opus-4-6-1",
+    structuredOutputs: true,
+  };
+  const model = await fixture();
+  const packet = reviewPacket(model);
+  const result = suggestion(packet);
+  result.threats[0].analysis = {
+    attackSteps: [
+      "Caller reaches an operation whose authorization needs verification.",
+    ],
+    impact: "Potential service authority misuse.",
+    assumptions: ["Caller can reach the operation."],
+    controlEvidenceIds: [],
+    boundaryIds: [],
+    mappings: [],
+  };
+  const transport = async (url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(url, "https://test-gateway.example/anthropic/v1/messages");
+    assert.equal(body.model, "claude-opus-4-6-1");
+    assert.equal(options.headers["anthropic-version"], "2023-06-01");
+    assert.equal(
+      options.headers["Ocp-Apim-Subscription-Key"],
+      "synthetic-gateway-key",
+    );
+    assert.deepEqual(body.output_config.format, {
+      type: "json_schema",
+      schema: STRIDE_RESPONSE_SCHEMA,
+    });
+    assert.ok(
+      body.output_config.format.schema.properties.threats.items.required.includes(
+        "analysis",
+      ),
+    );
+    return responseFor("anthropic", result);
+  };
+  const reviewed = await requestReview(native, packet, transport);
+  assert.equal(reviewed.review.threats.length, 1);
+  result.threats[0].evidenceIds = ["invented-evidence"];
+  await assert.rejects(requestReview(native, packet, transport), /evidence/i);
+  result.threats[0].evidenceIds = suggestion(packet).threats[0].evidenceIds;
+  result.threats[0].analysis.boundaryIds = ["invented-boundary"];
+  await assert.rejects(requestReview(native, packet, transport), /outside the supplied context/i);
+  result.threats[0].analysis.boundaryIds = [];
+  await enrichModel(model, native, new Map(), transport);
+  assert.equal(model.aiReview.outputContract, "native-json-schema");
+  assert.equal(model.aiReview.responseShape.format, "object-prefix");
+  await requestReview(gatewayConfig(), packet, async (_, options) => {
+    assert.equal(JSON.parse(options.body).output_config, undefined);
+    return responseFor("anthropic", result);
+  });
+});

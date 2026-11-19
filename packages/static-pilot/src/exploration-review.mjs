@@ -1,3 +1,4 @@
+import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import { ExplorationStore } from "./exploration.mjs";
 import { InvestigationFrontier } from "./investigation-frontier.mjs";
@@ -85,6 +86,9 @@ export async function exploreStatic(manifest, model, options = {}) {
       config.model,
       config.baseUrl,
       config.structuredOutputs,
+      ...(config.structuredOutputs
+        ? [sha(JSON.stringify(STRIDE_RESPONSE_SCHEMA))]
+        : []),
       DISCOVERY_PROMPT,
       ASSESSMENT_PROMPT,
     ]),

@@ -95,3 +95,65 @@ export const SECURITY_RESPONSE_SCHEMA = object({
   ),
   severityChangeConditions: text,
 });
+
+// STRIDE shape; evidence ownership, boundary IDs and taxonomy are still checked locally.
+export const STRIDE_RESPONSE_SCHEMA = object({
+  summary: text,
+  threats: list(
+    object({
+      title: text,
+      category: enumeration([
+        "Spoofing",
+        "Tampering",
+        "Repudiation",
+        "Information Disclosure",
+        "Denial of Service",
+        "Elevation of Privilege",
+      ]),
+      actor: text,
+      startingAccess: text,
+      asset: text,
+      scenario: text,
+      prerequisites: text,
+      controls: text,
+      mitigation: text,
+      interfaceIds: list(text),
+      evidenceIds: list(text),
+      analysis: object({
+        attackSteps: list(text),
+        impact: text,
+        assumptions: list(text),
+        controlEvidenceIds: list(text),
+        boundaryIds: list(text),
+        mappings: list(object({ framework: text, id: text, rationale: text })),
+      }),
+    }),
+  ),
+  connections: list(
+    object({
+      from: text,
+      to: text,
+      reason: text,
+      evidenceIds: list(text),
+      transition: {
+        anyOf: [
+          { type: "null" },
+          object({
+            dimension: enumeration([
+              "identity",
+              "privilege",
+              "network",
+              "execution",
+              "data-ownership",
+              "third-party",
+            ]),
+            before: text,
+            after: text,
+            reason: text,
+          }),
+        ],
+      },
+    }),
+  ),
+  questions: list(text),
+});
