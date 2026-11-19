@@ -1,3 +1,4 @@
+import { reviewTiming } from "./review-timing.mjs";
 // Advisory token targets never authorize or stop requests; provider and evidence
 // failures still stop continuous runs. These controls are not cache identity.
 export function reviewRunControl(input = {}) {
@@ -35,6 +36,7 @@ export async function updateReviewProgress(model, report, trace, prefix) {
     ).length,
     targetExceeded: target != null && totalTokens >= target,
   };
+  report.timing = reviewTiming(model, report);
   if (report.runProgress.targetExceeded && !priorExceeded)
     await trace?.(`${prefix}.token-target-reached`, {
       runId: report.runId,

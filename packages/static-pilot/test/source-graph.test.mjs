@@ -318,8 +318,8 @@ test("staged API builds a graph without model calls and exports matrix and Merma
     await fs.rm(root, { recursive: true, force: true });
   }
 });
-test("staged worker continues and cancels review without rescanning source", async () => {
-  const { root } = await portfolio();
+test("staged worker continues and cancels disk review without rescanning source", async () => {
+  const { root } = await portfolio(8);
   const harness = await fs.mkdtemp(
     path.join(os.tmpdir(), "synthesis-worker-test-"),
   );
@@ -331,7 +331,7 @@ test("staged worker continues and cancels review without rescanning source", asy
   );
   await fs.writeFile(
     boot,
-    `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,persist:true,workspace:${JSON.stringify(path.join(harness, "state"))},modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
+    `import {serve} from ${JSON.stringify(new URL("../src/server.mjs", import.meta.url).href)}; const app=await serve({sourceRoot:${JSON.stringify(root)},port:0,quiet:true,persist:true,graphStorage:"sqlite",workspace:${JSON.stringify(path.join(harness, "state"))},modelConfig:${JSON.stringify(config)}}); process.stdout.write(JSON.stringify({url:app.url,token:app.token})+"\\n");`,
   );
   const child = spawn(
     process.execPath,
@@ -398,6 +398,8 @@ test("staged worker continues and cancels review without rescanning source", asy
     await wait();
     let model = await (await fetch(base + "/api/model", { headers })).json();
     assert.equal(model.aiReview, undefined);
+    assert.equal(model.sourceGraph.storage, "sqlite");
+    assert.ok(model.sourceGraph.counts.nodes > 0);
     await fs.rm(root, { recursive: true, force: true });
     assert.equal(
       (
@@ -458,7 +460,7 @@ test("staged worker continues and cancels review without rescanning source", asy
     assert.equal(model.aiReview.execution.active, 0);
     assert.equal(model.aiReview.execution.interrupted, 2);
     assert.equal(model.aiReview.execution.stopped, true);
-    assert.ok(model.sourceGraph.nodes.length);
+    assert.ok(model.sourceGraph.counts.nodes > 0);
     assert.equal(model.tokenUsage.totalTokens, 240);
     assert.equal(model.tokenUsage.unknownRequests, 2);
     assert.equal(model.usageLedger.attempts.at(-1).status, "interrupted");
@@ -1088,4 +1090,69 @@ test("STRIDE cancellation during prepared checkpoint does not count undispatched
   });
   assert.equal(calls, 2);
   assert.equal(model.aiReview.coverage.completedBatches, 2);
+});
+
+test("disk STRIDE dispatch retains only active packet payloads instead of the whole pending plan", async (t) => {
+  const harness = await fs.mkdtemp(
+    path.join(os.tmpdir(), "synthesis-lazy-stride-"),
+  );
+  t.after(() => fs.rm(harness, { recursive: true, force: true }));
+  const script = path.join(harness, "retention.mjs");
+  await fs.writeFile(
+    script,
+    `
+import {GraphStore} from ${JSON.stringify(new URL("../src/graph-store.mjs", import.meta.url).href)};
+import {diskPackets} from ${JSON.stringify(new URL("../src/graph-plan-store.mjs", import.meta.url).href)};
+import {enrichGraphModel} from ${JSON.stringify(new URL("../src/graph-review.mjs", import.meta.url).href)};
+import {sha} from ${JSON.stringify(new URL("../src/sources.mjs", import.meta.url).href)};
+const graph=new GraphStore(${JSON.stringify(path.join(harness, "graph.sqlite"))});
+const batches=diskPackets(graph,"retention-fixture");
+for(let i=0;i<450;i++){
+ const packet={records:[{id:"interface-1",repository:"service",direction:"inbound",evidence:[{id:"evidence-1"}]}],context:"static context "+i+"x".repeat(16000)};
+ batches.push({id:"batch-"+i,packetHash:sha(JSON.stringify(packet)),packet,phase:"repository",label:"service"});
+}
+const parse=JSON.parse,seen=[];
+JSON.parse=function(...args){const value=parse.apply(this,args);if(value?.packet?.records)seen.push(new WeakRef(value));return value;};
+const model={modelRevision:"revision",profile:"test",interfaces:[{id:"interface-1",repository:"service",evidence:["evidence-1"]}],sources:[{name:"service",status:"read"}],sourceGraph:{fingerprint:"graph"}};
+let liveAtDispatch=0,calls=0;
+try{
+ await enrichGraphModel(model,${JSON.stringify(config)},new Map(),async()=>{
+  calls++;
+  await new Promise(resolve=>setImmediate(resolve)); global.gc();
+  liveAtDispatch=Math.max(liveAtDispatch,seen.filter(ref=>ref.deref()).length);
+  return Response.json({stop_reason:"end_turn",usage:{input_tokens:100,output_tokens:10},content:[{type:"text",text:JSON.stringify({summary:"Static retention test",threats:[],connections:[],questions:[]})}]});
+ },{maxBatches:2,concurrency:2,plan:{batches,omitted:[],splits:[],refinements:[],obligations:[],gaps:[],limits:{},semantics:"test"}});
+ console.log(JSON.stringify({liveAtDispatch,calls,total:model.aiReview.coverage.totalBatches,completed:model.aiReview.coverage.completedBatches}));
+}finally{JSON.parse=parse;graph.close();}
+`,
+  );
+  const output = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--expose-gc", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "",
+      stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(Error("Lazy packet regression timed out"));
+    }, 20000);
+    child.stdout.on("data", (data) => {
+      stdout += data;
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve(JSON.parse(stdout.trim())) : reject(Error(stderr));
+    });
+  });
+  assert.equal(output.total, 450);
+  assert.equal(output.calls, 2);
+  assert.equal(output.completed, 2);
+  assert.ok(
+    output.liveAtDispatch <= 4,
+    `Only active workers may retain packet payloads; observed ${output.liveAtDispatch}`,
+  );
 });

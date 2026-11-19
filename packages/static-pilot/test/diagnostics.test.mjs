@@ -614,3 +614,36 @@ test("small error export retains historical string failures and current usage wi
   );
   assert.ok(!JSON.stringify(report).includes("PRIVATE_RESPONSE_SENTINEL"));
 });
+
+test("stale review diagnostics preserve reason and a later failed attempt without source prose", async () => {
+  const model = {
+    modelRevision: "current-revision",
+    aiReview: {
+      status: "stale",
+      basedOnRevision: "old-revision",
+      error: "Architecture changed PRIVATE_SOURCE_SENTINEL",
+      staleReason: { causes: ["prompt-changed", "PRIVATE_REASON_SENTINEL"] },
+      batches: [{ id: "prior", status: "completed" }],
+      threats: [{ title: "PRIVATE_THREAT_SENTINEL" }],
+    },
+  };
+  const stale = await errorReport({ model });
+  assert.equal(stale.stride.failure.code, "stale-analysis");
+  assert.deepEqual(stale.stride.staleReason.causes, [
+    "prompt-changed",
+    "source-or-architecture-changed",
+  ]);
+  model.aiReview.lastRunFailure = {
+    code: "worker-resource",
+    action: "Inspect last checkpoint.",
+    stage: "before-review-checkpoint",
+    at: "2026-01-01T00:00:00.000Z",
+    raw: "PRIVATE_FAILURE_SENTINEL",
+  };
+  const failed = await errorReport({ model });
+  assert.equal(failed.stride.status, "stale");
+  assert.equal(failed.stride.failure.code, "worker-resource");
+  assert.equal(failed.stride.lastRunFailure.stage, "before-review-checkpoint");
+  assert.equal(failed.stride.staleReason.code, "stale-analysis");
+  assert.ok(!JSON.stringify([stale, failed]).includes("PRIVATE_"));
+});

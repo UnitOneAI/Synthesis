@@ -379,3 +379,19 @@ The coordinator combines validated results into the existing STRIDE register/mat
 CWE source retrieval now reads only planned files for each transient window, retaining source-hash and path checks. It no longer rescans entire repository trees for every window. The initial source-snapshot verification remains. These optimizations do not remove required CWE checks or claim fewer model tokens. Gateway throttling can constrain throughput; inspect exported errors and reduce workers if necessary.
 
 No new service, Python package or agent-framework installation is needed. The coordinator runs inside the existing local Synthesis server and uses the same configured Claude deployment and key. Static-only restrictions, traces, export locations and explicit resume after restart remain unchanged.
+
+## Saved-graph STRIDE recovery and unattended preflight
+
+The disk scheduler now loads packet payloads only for active workers instead of retaining the entire pending queue. This update does not change extraction, packet identities or successful-result cache keys. Reuse the existing graph. A failed packet receives more explicit allowed-reference instructions when explicitly retried; evidence validation is not relaxed.
+
+After updating, stop any active review, restart with the same workspace and provider, and choose **Open saved graph**. Then:
+
+1. Open **4 · STRIDE matrix**. Leave **Run until complete** unchecked for the preflight. Set **Request budget = 4** and **Parallel review workers = 4** if gateway capacity permits.
+2. Click **Run or continue STRIDE analysis**. Wait for the action to finish. Check that current completed packets increase and that the matrix reports analyzed subjects. Validated analysis may return no scenario; this differs from failed or stale analysis.
+3. If packets fail, use **Export errors**. One explicit continuation retries failed response-format packets with stricter reference instructions. Persistent errors, authentication failures or throttling require attention; do not assume a larger budget will fix them.
+4. Once the preflight succeeds, check **Run until complete**, retain the worker count and start again. Keep the server and VM running and prevent system sleep. Closing the browser does not stop the action. There is no automatic restart after the server stops.
+5. Run CWE source review after STRIDE finishes or is stopped. These remain separate top-level actions; CWE does not populate the STRIDE matrix and neither action automatically starts the other.
+
+The matrix now distinguishes historical stale results from current coverage and displays a separate latest-attempt failure when a worker fails before review begins. **Export errors** includes the stale cause when known and the failure stage. Genuine source, architecture or methodology changes still invalidate analysis; stale safeguards are not bypassed.
+
+After at least three matching successful timed calls, progress includes a conditional remaining-time estimate based on up to twenty recent calls and the selected worker count. It assumes steady throughput and excludes retries and throttling. Thousands of packets can still take many hours; four workers reduce elapsed waiting but do not reduce total model tokens. A completed pass with unresolved or failed packets remains partial.

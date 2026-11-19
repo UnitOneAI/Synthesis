@@ -29,6 +29,7 @@ import {
   errorReport,
   diagnosticCoverage,
   failureDetail,
+  staleReviewDetail,
   buildIdentity,
 } from "./diagnostics.mjs";
 import {
@@ -252,6 +253,16 @@ export async function serve({
           model.aiReview.status = "stale";
           model.aiReview.error =
             "Analysis methodology changed; previous scenarios are retained for reference. Run review with the current guidance.";
+          model.aiReview.staleReason = {
+            causes: [
+              ...(model.aiReview.guidance?.hash !== GUIDANCE_HASH
+                ? ["guidance-changed"]
+                : []),
+              ...(model.aiReview.promptHash !== sha(SYSTEM_PROMPT)
+                ? ["prompt-changed"]
+                : []),
+            ],
+          };
         }
         await traces.record("workspace.restored", {
           sourceRevision: model.modelRevision,
@@ -335,6 +346,14 @@ export async function serve({
   };
   const outputModel = () => ({
     ...model,
+    ...(model.aiReview
+      ? {
+          aiReview: {
+            ...model.aiReview,
+            staleReason: staleReviewDetail(model.aiReview, model.modelRevision),
+          },
+        }
+      : {}),
     exploration: exploration.overview(model.modelRevision),
     securityRegister: securityRegister(model),
     cweTargetCoverage: cweTargetCoverage(model),
@@ -375,7 +394,8 @@ export async function serve({
       resourceLimits: { maxOldGenerationSizeMb: 768 },
     });
     worker = active;
-    let finishing = false;
+    let finishing = false,
+      reviewCheckpointReceived = false;
     const stop = (message) => {
       if (worker !== active || job.status !== "running" || finishing) return;
       if (model?.aiReview?.status === "pending") {
@@ -384,6 +404,14 @@ export async function serve({
       }
       interruptUsage(model?.usageLedger);
       if (mode === "review" && model?.aiReview) {
+        model.aiReview.lastRunFailure = {
+          ...failureDetail(message),
+          stage: reviewCheckpointReceived
+            ? "during-review"
+            : "before-review-checkpoint",
+          jobId,
+          at: new Date().toISOString(),
+        };
         interruptReviewExecution(model.aiReview, "worker-failure");
         void updateReviewProgress(model, model.aiReview);
       }
@@ -475,6 +503,7 @@ export async function serve({
             });
         }
         if (m.type === "checkpoint" && model) {
+          reviewCheckpointReceived = true;
           model.aiReview = m.aiReview;
           model.usageLedger = m.usageLedger;
           await checkpoint();
@@ -628,6 +657,18 @@ export async function serve({
                 ? {
                     runControl: report.runControl,
                     runProgress: report.runProgress,
+                    timing: report.timing
+                      ? {
+                          state: report.timing.state,
+                          sampleSize: report.timing.sampleSize,
+                          sampleScope: report.timing.sampleScope,
+                          meanSeconds: report.timing.meanSeconds,
+                          remainingPackets: report.timing.remainingPackets,
+                          workers: report.timing.workers,
+                          estimatedSeconds: report.timing.estimatedSeconds,
+                          reason: report.timing.reason,
+                        }
+                      : undefined,
                     execution: report.execution
                       ? {
                           kind: report.execution.kind,

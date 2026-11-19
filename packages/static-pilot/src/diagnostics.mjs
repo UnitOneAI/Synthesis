@@ -107,6 +107,42 @@ export function failureDetail(message = "") {
   };
 }
 
+// Explain stale analysis using bounded reason codes, never source/model prose.
+export function staleReviewDetail(review, modelRevision) {
+  if (review?.status !== "stale") return null;
+  const allowed = new Set([
+    "guidance-changed",
+    "prompt-changed",
+    "source-or-architecture-changed",
+    "architecture-changed",
+    "methodology-changed",
+    "reason-not-recorded",
+  ]);
+  const causes = (
+    Array.isArray(review.staleReason?.causes) ? review.staleReason.causes : []
+  ).filter((v) => allowed.has(v));
+  if (
+    review.basedOnRevision &&
+    modelRevision &&
+    review.basedOnRevision !== modelRevision
+  )
+    causes.push("source-or-architecture-changed");
+  if (!causes.length) {
+    if (/architecture changed/i.test(review.error || ""))
+      causes.push("architecture-changed");
+    else if (/methodology changed/i.test(review.error || ""))
+      causes.push("methodology-changed");
+    else causes.push("reason-not-recorded");
+  }
+  return {
+    code: "stale-analysis",
+    causes: [...new Set(causes)],
+    retryable: true,
+    action:
+      "Prior results are historical references, not current coverage. Review changed source or analysis inputs and rerun the affected analysis.",
+  };
+}
+
 export async function traceStore({ directory, sourceRoot, secrets = [] } = {}) {
   let dir;
   if (directory) {
@@ -345,11 +381,25 @@ export async function errorReport({
       "pendingBatches",
       "totalBatches",
     ]),
-    failure:
-      r?.error &&
-      (r.status === "failed" || r.batches?.some((b) => b.status === "failed"))
+    failure: r?.lastRunFailure
+      ? pick(r.lastRunFailure, ["code", "httpStatus", "retryable", "action"])
+      : r?.error &&
+          (r.status === "failed" ||
+            r.batches?.some((b) => b.status === "failed"))
         ? failureDetail(r.error)
-        : null,
+        : staleReviewDetail(r, model?.modelRevision),
+    staleReason: staleReviewDetail(r, model?.modelRevision),
+    lastRunFailure: r?.lastRunFailure
+      ? pick(r.lastRunFailure, [
+          "code",
+          "httpStatus",
+          "retryable",
+          "action",
+          "stage",
+          "jobId",
+          "at",
+        ])
+      : undefined,
     batches: sample(
       (r?.batches || []).filter((b) => b.status !== "completed"),
       batch,

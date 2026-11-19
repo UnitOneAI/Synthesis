@@ -630,3 +630,37 @@ test("STRIDE validation retry excludes optional connections without relaxing evi
  const result=suggestion(packet);result.threats[0].evidenceIds=["invented"];
  await assert.rejects(requestReview(config,packet,async()=>responseFor("anthropic",result),{validationRetry:true}),/evidence/);
 });
+
+test('STRIDE failed retry supplies exact security-control and boundary references without weakening validation',async()=>{
+ const packet=reviewPacket(await fixture());
+ packet.records.push({id:'security-control',kind:'control',direction:'control',evidence:[{id:'control-evidence'}]});
+ packet.records.push({id:'deployment-binding',kind:'architecture',direction:'control',evidence:[{id:'architecture-evidence'}]});
+ packet.systemContext={boundaries:[{id:'boundary-one'}]};
+ const result=suggestion(packet);result.connections=[];
+ result.threats[0].analysis={attackSteps:['If caller access is granted, inspect the privileged operation.'],impact:'Potential service authority misuse.',assumptions:[],controlEvidenceIds:['control-evidence'],boundaryIds:['boundary-one'],mappings:[]};
+ let normal;
+ await requestReview(config,packet,async(_,options)=>{normal=JSON.parse(options.body).system;return responseFor('anthropic',result);});
+ assert.doesNotMatch(normal,/Retry reference contract/);
+ await requestReview(config,packet,async(_,options)=>{
+   const system=JSON.parse(options.body).system;
+   assert.ok(system.startsWith(normal));
+   assert.match(system,/Retry reference contract/);
+   assert.match(system,/"controlEvidenceIds":\[[^\]]*"control-evidence"/);
+   assert.match(system,/"boundaryIds":\["boundary-one"\]/);
+   assert.doesNotMatch(system,/"architecture-evidence"/);
+   assert.match(system,/connections exactly \[\]/);
+   return responseFor('anthropic',result);
+ },{validationRetry:true});
+ for(const bad of ['architecture-evidence','security-control','invented']) {
+   result.threats[0].analysis.controlEvidenceIds=[bad];
+   assert.throws(()=>validateReview(result,packet),/controlEvidenceIds references are outside/);
+ }
+ result.threats[0].analysis.controlEvidenceIds=['control-evidence'];
+ result.threats[0].analysis.boundaryIds=['invented'];
+ assert.throws(()=>validateReview(result,packet),/boundaryIds references are outside/);
+ const empty=structuredClone(packet);empty.records=empty.records.filter(r=>r.kind!=='control');delete empty.systemContext;
+ await requestReview(config,empty,async(_,options)=>{
+   assert.match(JSON.parse(options.body).system,/"controlEvidenceIds":\[\],"boundaryIds":\[\]/);
+   return responseFor('anthropic',{summary:'Context requires review.',threats:[],connections:[],questions:[]});
+ },{validationRetry:true});
+});

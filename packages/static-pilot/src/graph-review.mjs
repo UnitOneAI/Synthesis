@@ -680,8 +680,11 @@ export async function enrichGraphModel(
         .join(""),
     );
   };
+  // The disk plan is a lazy collection. Queue indices, not packet objects, so
+  // only the active workers retain source/graph context in memory.
   const pending = [];
-  for (const batch of plan.batches) {
+  for (let index = 0; index < plan.batches.length; index++) {
+    const batch = plan.batches[index];
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
       await emit("review.cache-reused", {
@@ -690,7 +693,7 @@ export async function enrichGraphModel(
         packetHash: batch.packetHash,
       });
     } else if (!options.batchIds || options.batchIds.includes(batch.id))
-      pending.push(batch);
+      pending.push(index);
   }
   const selected = continuous ? pending : pending.slice(0, maxBatches);
   const shouldStop = () =>
@@ -713,7 +716,8 @@ export async function enrichGraphModel(
       // this state. Avoid two extra full-workspace writes per packet.
       await emit("review.agent-pool", state);
     },
-    run: async (batch, { agentId }) => {
+    run: async (index, { agentId }) => {
+      const batch = plan.batches[index];
       options.progress?.(
         `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
       );

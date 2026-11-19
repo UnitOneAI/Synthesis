@@ -228,13 +228,13 @@ export function validateAnalysis(value, packet, text, fail) {
   const boundaries = new Set(
     (packet.systemContext?.boundaries || []).map((b) => b.id),
   );
-  const checked = (values, allowed, max) => {
+  const checked = (values, allowed, max, field) => {
     const items = list(values, max);
     if (
       new Set(items).size !== items.length ||
       items.some((x) => !allowed.has(x))
     )
-      fail("analysis references are outside the supplied context");
+      fail(`${field} references are outside the supplied context`);
     return [...items];
   };
   const mappings = list(value.mappings, 4).map((m) => {
@@ -255,8 +255,8 @@ export function validateAnalysis(value, packet, text, fail) {
       attackSteps: steps,
       impact: text(value.impact),
       assumptions: list(value.assumptions, 6).map(text),
-      controlEvidenceIds: checked(value.controlEvidenceIds, controls, 12),
-      boundaryIds: checked(value.boundaryIds, boundaries, 6),
+      controlEvidenceIds: checked(value.controlEvidenceIds, controls, 12, "controlEvidenceIds"),
+      boundaryIds: checked(value.boundaryIds, boundaries, 6, "boundaryIds"),
       mappings,
     },
     analysisQuality: {

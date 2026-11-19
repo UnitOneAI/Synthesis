@@ -469,6 +469,16 @@ function parseReviewText(text) {
 }
 export const VALIDATION_RETRY_PROMPT =
   "\nValidation retry: return at most four threat scenarios. Each scenario must reference only one or two interfaceIds and one to four evidenceIds belonging to those exact interfaces; cite each listed interface. All prose fields, including prerequisites and controls, must be JSON strings, never arrays or objects. On this validation retry, return connections as an empty array exactly; do not propose connections. Continue reporting evidence-supported threat scenarios. Return at most four questions as strings. Do not invent IDs or relax evidence requirements. Return only the required JSON object.";
+function retryReferenceInstructions(packet) {
+  const allowed = {
+    controlEvidenceIds: [...new Set((packet.records || [])
+      .filter((r) => r.kind === "control")
+      .flatMap((r) => (r.evidence || []).map((e) => e.id)))],
+    boundaryIds: [...new Set((packet.systemContext?.boundaries || []).map((b) => b.id))],
+  };
+  return "\nRetry reference contract (derived from this packet): " + JSON.stringify(allowed) +
+    ". analysis.controlEvidenceIds may contain ONLY values in the controlEvidenceIds list above; analysis.boundaryIds may contain ONLY values in the boundaryIds list above. If a list is empty, return [] for that field. Empty lists are also correct when the allowed references do not support the scenario. A record with direction control but kind architecture is NOT a security-control record; deployment bindings, imports, owners and sourceGraph node IDs are not control evidence. interfaceIds use record.id; evidenceIds use evidence[].id belonging to the listed records; never interchange interface IDs, evidence IDs, sourceGraph IDs and boundary IDs. Keep connections exactly []; no control record or architecture record may be used to invent a connection. Retain source-supported threat analysis and explicit gaps; never substitute invented IDs to fill these lists.";
+}
 export async function requestReview(
   config,
   packet,
@@ -477,7 +487,9 @@ export async function requestReview(
 ) {
   const requestPrompt =
     (options.systemPrompt || SYSTEM_PROMPT) +
-    (options.validationRetry === true ? VALIDATION_RETRY_PROMPT : "");
+    (options.validationRetry === true
+      ? VALIDATION_RETRY_PROMPT + retryReferenceInstructions(packet)
+      : "");
   // Direct endpoints are fixed; gateway destination comes only from server configuration.
   // Never follow redirects with credentials.
   const provider = PROVIDERS[config.provider];
