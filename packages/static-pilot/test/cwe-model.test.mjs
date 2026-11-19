@@ -578,3 +578,322 @@ test("continuous CWE cancellation and source changes keep saved work without unc
   assert.equal(model.cweModelReview.completedBatches, 1);
   assert.match(model.cweModelReview.error, /Source changed/);
 });
+
+test("parallel CWE equals serial findings and target coverage with serialized checkpoints and bounded resume", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  const parallel = structuredClone(model);
+  let active = 0,
+    peak = 0,
+    saves = 0,
+    peakSaves = 0;
+  const fetchImpl = async (_, o) => {
+    active++;
+    peak = Math.max(peak, active);
+    const packet = JSON.parse(JSON.parse(o.body).messages[0].content);
+    await new Promise((r) =>
+      setTimeout(r, packet.records[0].repository === "one" ? 12 : 2),
+    );
+    active--;
+    return response(
+      { findings: [finding(packet.records[0])], limitations: [] },
+      packet,
+    );
+  };
+  const serial = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    concurrency: 1,
+    runUntilComplete: true,
+    fetchImpl,
+  });
+  peak = 0;
+  const checkpoint = async (report) => {
+    saves++;
+    peakSaves = Math.max(peakSaves, saves);
+    const before = structuredClone(report);
+    await new Promise((r) => setTimeout(r, 1));
+    assert.deepEqual(report, before);
+    saves--;
+  };
+  const partial = await reviewCweCode(manifest, parallel, {
+    sourceRoot: root,
+    config,
+    concurrency: 3,
+    budget: 2,
+    fetchImpl,
+    checkpoint,
+  });
+  assert.equal(partial.callsThisRun, 2);
+  assert.equal(partial.completedBatches, 2);
+  assert.equal(peak, 2);
+  assert.equal(partial.execution.peakActive, 2);
+  assert.equal(peakSaves, 1);
+  const completedIds = partial.batches.map((b) => b.id);
+  const resumed = await reviewCweCode(manifest, parallel, {
+    sourceRoot: root,
+    config,
+    concurrency: 2,
+    runUntilComplete: true,
+    fetchImpl,
+    checkpoint,
+  });
+  assert.equal(resumed.callsThisRun, 1);
+  assert.equal(resumed.completedBatches, 3);
+  assert.deepEqual(resumed.findings, serial.findings);
+  const coverage = (r) =>
+    r.batches.map((b) => ({
+      id: b.id,
+      status: b.status,
+      recordIds: b.recordIds,
+      targetReviews: b.targetReviews,
+    }));
+  assert.deepEqual(coverage(resumed), coverage(serial));
+  assert.equal(new Set(resumed.batches.map((b) => b.id)).size, 3);
+  assert.ok(
+    completedIds.every((id) => resumed.batches.some((b) => b.id === id)),
+  );
+  assert.ok(
+    resumed.batches.every(
+      (b) =>
+        b.packetBytes > 0 &&
+        b.sourceBytes > 0 &&
+        b.durationMs >= 0 &&
+        b.agentId,
+    ),
+  );
+  assert.equal(parallel.usageLedger.attempts.length, 3);
+  assert.equal(
+    parallel.usageLedger.attempts.reduce((n, a) => n + a.usage.totalTokens, 0),
+    360,
+  );
+});
+
+test("parallel CWE provider rejection stops dispatch and drains successful siblings before resume", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  let calls = 0;
+  const r = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    concurrency: 2,
+    runUntilComplete: true,
+    fetchImpl: async (_, o) => {
+      const call = ++calls,
+        packet = JSON.parse(JSON.parse(o.body).messages[0].content);
+      await new Promise((r) => setTimeout(r, call === 1 ? 2 : 20));
+      return call === 1
+        ? new Response("", { status: 403 })
+        : response({ findings: [], limitations: [] }, packet);
+    },
+  });
+  assert.equal(calls, 2);
+  assert.equal(r.stopReason, "provider-failure");
+  assert.equal(r.execution.active, 0);
+  assert.equal(r.completedBatches, 1);
+  assert.equal(r.failedBatches, 1);
+  assert.equal(r.pendingBatches, 2);
+  assert.ok(model.usageLedger.attempts.every((a) => a.status !== "in-flight"));
+  const success = r.batches.find((b) => b.status === "completed").id;
+  const resumed = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    concurrency: 2,
+    runUntilComplete: true,
+    fetchImpl: async (_, o) => {
+      calls++;
+      return response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(o.body).messages[0].content),
+      );
+    },
+  });
+  assert.equal(calls, 4);
+  assert.equal(resumed.completedBatches, 3);
+  assert.equal(resumed.batches.filter((b) => b.id === success).length, 1);
+});
+
+test("parallel CWE checkpoint failure drains active agents and does not dispatch remaining packets", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  let calls = 0;
+  await assert.rejects(
+    reviewCweCode(manifest, model, {
+      sourceRoot: root,
+      config,
+      concurrency: 2,
+      runUntilComplete: true,
+      checkpoint: async (report) => {
+        if (report.batches.some((b) => b.status === "completed"))
+          throw Error("CWE checkpoint failed");
+      },
+      fetchImpl: async (_, o) => {
+        calls++;
+        await new Promise((r) => setTimeout(r, 5));
+        return response(
+          { findings: [], limitations: [] },
+          JSON.parse(JSON.parse(o.body).messages[0].content),
+        );
+      },
+    }),
+    /checkpoint failed/,
+  );
+  assert.equal(calls, 2);
+  assert.equal(model.cweModelReview.status, "failed");
+  assert.equal(model.cweModelReview.execution.active, 0);
+  assert.equal(
+    model.cweModelReview.stopReason,
+    "source-or-persistence-failure",
+  );
+  assert.ok(model.usageLedger.attempts.every((a) => a.status !== "in-flight"));
+});
+
+test("CWE cancellation during prepared checkpoint records no provider attempts", async (t) => {
+  const { root, manifest, model } = await fixture(t),
+    controller = new AbortController();
+  let calls = 0;
+  const report = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    concurrency: 2,
+    runUntilComplete: true,
+    signal: controller.signal,
+    checkpoint: async (report) => {
+      if (report.batches.some((b) => b.status === "queued")) controller.abort();
+    },
+    fetchImpl: async () => {
+      calls++;
+      throw Error("must not dispatch");
+    },
+  });
+  assert.equal(calls, 0);
+  assert.equal(report.callsThisRun, 0);
+  assert.equal(report.runProgress.requests, 0);
+  assert.equal(model.usageLedger.attempts.length, 0);
+  assert.equal(report.execution.started, 0);
+  assert.equal(report.execution.queued, report.totalBatches);
+  assert.equal(report.batches.length, 0);
+  assert.equal(report.stopReason, "cancelled");
+});
+
+test("duplicate CWE findings choose plan priority rather than response completion order", async (t) => {
+  const { root, manifest } = await fixture(t);
+  manifest.repositories = manifest.repositories.slice(0, 1);
+  await fs.writeFile(
+    path.join(root, "one", "server.py"),
+    "from workers import Consumer\nworker = Consumer()\n",
+  );
+  await fs.writeFile(
+    path.join(root, "one", "workers.py"),
+    "from storage import Store\nclass Consumer:\n    def run(self):\n        store = Store()\n",
+  );
+  await fs.writeFile(
+    path.join(root, "one", "storage.py"),
+    "import sqlite3\nclass Store:\n    def open(self):\n        return sqlite3.connect(self.path)\n",
+  );
+  const model = await analyze(manifest, { sourceRoot: root }),
+    parallel = structuredClone(model);
+  const captures = [];
+  const fetchImpl = async (_, o) => {
+    const p = JSON.parse(JSON.parse(o.body).messages[0].content),
+      r = p.records.find((r) => r.path === "storage.py");
+    if (r) captures.push(Boolean(p.connection));
+    await new Promise((resolve) => setTimeout(resolve, p.connection ? 15 : 1));
+    return response(
+      {
+        findings: r
+          ? [
+              {
+                ...finding({ ...r, endLine: r.startLine }),
+                title: p.connection
+                  ? "Graph context finding"
+                  : "File context finding",
+              },
+            ]
+          : [],
+        limitations: [],
+      },
+      p,
+    );
+  };
+  const serial = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    runUntilComplete: true,
+    concurrency: 1,
+    fetchImpl,
+  });
+  const report = await reviewCweCode(manifest, parallel, {
+    sourceRoot: root,
+    config,
+    runUntilComplete: true,
+    concurrency: 4,
+    fetchImpl,
+  });
+  assert.ok(captures.includes(true) && captures.includes(false));
+  assert.equal(report.findings.length, 1);
+  assert.deepEqual(report.findings, serial.findings);
+});
+
+test("parallel CWE checkpoints real in-flight attempts before provider responses arrive", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  let release,
+    observed,
+    calls = 0,
+    snapshot;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const checkpointed = new Promise((resolve) => {
+    observed = resolve;
+  });
+  const task = reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 2,
+    concurrency: 2,
+    checkpoint: async (report) => {
+      if (report.batches.filter((b) => b.status === "running").length === 2) {
+        snapshot = {
+          report: structuredClone(report),
+          ledger: structuredClone(model.usageLedger),
+        };
+        observed();
+      }
+    },
+    fetchImpl: async (_, o) => {
+      calls++;
+      await held;
+      return response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(o.body).messages[0].content),
+      );
+    },
+  });
+  try {
+    await Promise.race([
+      checkpointed,
+      new Promise((_, reject) => {
+        const timer = setTimeout(
+          () => reject(Error("in-flight checkpoint missing")),
+          1000,
+        );
+        timer.unref();
+      }),
+    ]);
+    assert.equal(calls, 2);
+    assert.equal(snapshot.report.callsThisRun, 2);
+    assert.equal(snapshot.report.completedBatches, 0);
+    assert.equal(
+      snapshot.ledger.attempts.filter((a) => a.status === "in-flight").length,
+      2,
+    );
+    assert.equal(snapshot.report.runProgress.unknownRequests, 2);
+    assert.ok(
+      snapshot.report.batches.every((b) =>
+        snapshot.ledger.attempts.some((a) => a.id === b.attemptId),
+      ),
+    );
+  } finally {
+    release();
+    await task;
+  }
+  assert.equal(model.cweModelReview.completedBatches, 2);
+});

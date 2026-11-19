@@ -276,6 +276,22 @@
           review the remaining scope. Completed packets are retained.
         </p>
         <label
+          >Parallel review workers
+          <select id="cwe-model-workers">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <p>
+          Workers review different packets using the same configured model.
+          Parallel review reduces waiting, not total token usage. Use fewer
+          workers if the gateway limits concurrent requests. The selected limit
+          never increases automatically. Stop prevents new work and waits for
+          active requests to settle before resuming.
+        </p>
+        <label
           ><input type="checkbox" id="cwe-model-until-complete" /> Run until
           complete across selected repositories</label
         >
@@ -571,6 +587,14 @@
               step="1"
               placeholder="No target"
           /></label>
+          <label
+            >Parallel review workers<select id="review-workers">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select></label
+          >
           <button id="run-review" disabled>Run STRIDE review</button
           ><button id="cancel-review" class="secondary" hidden>
             Stop review

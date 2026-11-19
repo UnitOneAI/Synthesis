@@ -114,7 +114,16 @@ test("service diagram groups calls, exposes evidence/gaps, exports the selected 
     await page
       .getByLabel("Trust lens", { exact: true })
       .selectOption("identity");
-    await expect(page.locator("#ws-canvas")).toContainText("boundary: pending");
+    const boundaryBadge = page.locator("#ws-canvas").getByRole("button", {
+      name: "Caller-to-service identity boundary candidate",
+      exact: true,
+    });
+    await expect(boundaryBadge.locator("text")).toHaveText(
+      /^TB-[A-F0-9]{8} \+49: pending$/,
+    );
+    await expect(boundaryBadge.locator("title")).toContainText(
+      "Caller identity not established → Application principal (requires confirmation) · inference · pending",
+    );
     await page
       .locator("#ws-canvas")
       .screenshot({ path: testInfo.outputPath("architecture-dfd.png") });

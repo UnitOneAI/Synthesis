@@ -58,6 +58,24 @@ import { reportHtml, diagram } from "./report.mjs";
 import { reviewPlan, strideMatrix } from "./graph-review.mjs";
 import { dfdMermaid, sourceGraphMermaid, strideCsv } from "./graph-exports.mjs";
 
+// A terminated worker cannot publish its final pool state. Preserve unsettled
+// work as retryable without claiming it remains active after a stop or restart.
+function interruptReviewExecution(report, reason) {
+  const execution = report?.execution;
+  if (!execution || !execution.active) return;
+  // A crash between provider dispatch and its next checkpoint can leave only
+  // the prepared packet. Surface uncertainty without inventing a ledger call.
+  execution.dispatchUncertain =
+    (execution.dispatchUncertain || 0) +
+    (report.batches || []).filter((batch) => batch.status === "queued").length;
+  execution.interrupted = (execution.interrupted || 0) + execution.active;
+  execution.queued += execution.active;
+  execution.active = 0;
+  execution.stopped = true;
+  execution.stopReason = reason;
+  report.stopReason = reason;
+}
+
 async function body(req) {
   let size = 0;
   const chunks = [];
@@ -253,6 +271,10 @@ export async function serve({
           model.cweReview.error = "Interrupted scan; run CWE review again.";
         }
         interruptUsage(model.usageLedger);
+        for (const report of [model.aiReview, model.cweModelReview]) {
+          interruptReviewExecution(report, "interrupted");
+          if (report?.runId) await updateReviewProgress(model, report);
+        }
         manifest = saved.manifest;
         validateManifest(manifest);
         if (model.aiReview?.status === "pending") {
@@ -361,6 +383,10 @@ export async function serve({
         model.aiReview.error = message;
       }
       interruptUsage(model?.usageLedger);
+      if (mode === "review" && model?.aiReview) {
+        interruptReviewExecution(model.aiReview, "worker-failure");
+        void updateReviewProgress(model, model.aiReview);
+      }
       traces
         .record("job.failed", { jobId, mode, failure: failureDetail(message) })
         .catch(() => {});
@@ -602,6 +628,22 @@ export async function serve({
                 ? {
                     runControl: report.runControl,
                     runProgress: report.runProgress,
+                    execution: report.execution
+                      ? {
+                          kind: report.execution.kind,
+                          concurrency: report.execution.concurrency,
+                          active: report.execution.active,
+                          queued: report.execution.queued,
+                          started: report.execution.started,
+                          completed: report.execution.completed,
+                          failed: report.execution.failed,
+                          interrupted: report.execution.interrupted,
+                          dispatchUncertain: report.execution.dispatchUncertain,
+                          peakActive: report.execution.peakActive,
+                          stopped: report.execution.stopped,
+                          stopReason: report.execution.stopReason,
+                        }
+                      : undefined,
                     coverage: report.coverage
                       ? {
                           completedBatches: report.coverage.completedBatches,
@@ -803,6 +845,14 @@ export async function serve({
         )
           throw new Error("Choose 1–100 model requests per review action");
         const runControl = reviewRunControl(input);
+        const concurrency =
+          input.concurrency === undefined ? 2 : input.concurrency;
+        if (
+          !Number.isInteger(concurrency) ||
+          concurrency < 1 ||
+          concurrency > 4
+        )
+          throw Error("Choose 1–4 parallel review workers");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
         if (input.includeSourceExcerpts && !reviewExcerpts.length)
@@ -816,6 +866,7 @@ export async function serve({
           options: {
             modelConfig,
             reviewBatches: input.maxBatches,
+            concurrency,
             runUntilComplete: runControl.mode === "until-complete",
             tokenTarget: runControl.tokenTarget,
             graphDatabase:
@@ -913,6 +964,14 @@ export async function serve({
             "Enable source-code review and choose a request budget from 1 to 100",
           );
         const runControl = reviewRunControl(input);
+        const concurrency =
+          input.concurrency === undefined ? 2 : input.concurrency;
+        if (
+          !Number.isInteger(concurrency) ||
+          concurrency < 1 ||
+          concurrency > 4
+        )
+          throw Error("Choose 1–4 parallel review workers");
         cweController = new AbortController();
         const jobId = randomBytes(12).toString("hex");
         job = {
@@ -926,6 +985,7 @@ export async function serve({
           config: modelConfig,
           fetchImpl: cweModelFetch,
           budget: input.budget,
+          concurrency,
           runUntilComplete: runControl.mode === "until-complete",
           tokenTarget: runControl.tokenTarget,
           signal: cweController.signal,
@@ -1227,6 +1287,7 @@ export async function serve({
           model.aiReview.error =
             "Review cancelled; continue to process remaining batches";
           model.aiReview.stopReason = "cancelled";
+          interruptReviewExecution(model.aiReview, "cancelled");
         }
         interruptUsage(model?.usageLedger);
         if (reviewing && model?.aiReview)
@@ -1575,6 +1636,9 @@ export async function serve({
           "Server closed during review; continue pending work.";
       }
       interruptUsage(model?.usageLedger);
+      interruptReviewExecution(model?.aiReview, "interrupted");
+      if (model?.aiReview?.runId)
+        await updateReviewProgress(model, model.aiReview);
       await checkpoint();
       await traces
         .record("session.closed", { status: previousStatus })

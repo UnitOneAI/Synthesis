@@ -243,3 +243,7 @@ See [the ARTEX comparison and implemented architecture](../../docs/design/static
 ### Continuous STRIDE and CWE source review
 
 Both model-review views now offer **Run until complete** with an optional advisory token target. The operation continues beyond the bounded request/time limits, checkpoints each packet and retains Stop/resume. Live progress distinguishes completed, pending and failed work; token targets warn without stopping. Provider/evidence/persistence failures remain explicit. CWE code is loaded in bounded transient windows; no graph rebuild is required for unchanged source. See the [Windows instructions](../../docs/runbooks/windows-static-workspace.md#run-stride-and-cwe-until-the-planned-scope-is-finished) and [behavior/tests](../../docs/testing/continuous-review.md).
+
+### Parallel static review
+
+STRIDE and CWE source review use a shared bounded coordinator with **Parallel review workers** (1–4, default 2). Workers process separate pending packets; validated results and token usage merge into the existing reports. Request budgets remain global, compatible completed packets are reused, and Stop cancels pending dispatch and active requests. CWE evidence windows read only their planned files. All requested targets remain in scope; parallelism improves overlap, not necessarily total token consumption. See the [architecture](../../docs/architecture/parallel-static-review.md) and [Windows runbook](../../docs/runbooks/windows-static-workspace.md#parallel-review-workers).

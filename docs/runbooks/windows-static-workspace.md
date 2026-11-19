@@ -369,3 +369,13 @@ After updating and restarting with the same source root, workspace and provider,
 7. Open a scanner/model finding and expand **Code evidence** to see the hash-checked local source window with cited lines highlighted. Use **CWE evidence · PDF → Print / Save as PDF** to include those windows in a report. JSON exports do not contain source snippets.
 
 Token totals include failed attempts and retries. The advisory target is per action; the workspace token meter and CSV include historical requests. Existing trace and export locations remain unchanged. See [continuous review design and tests](../testing/continuous-review.md).
+
+## Parallel review workers
+
+Both **4 · STRIDE matrix** and **5 · CWE code review → CWE source review** offer **Parallel review workers**. Start with **2**, the default. Select **1** for a gateway that allows only serial calls, or **3–4** when the approved gateway capacity permits. Combine this with **Run until complete** to work through remaining packets without repeated clicks. A bounded request budget is shared by the whole action, not multiplied by the number of workers.
+
+The coordinator combines validated results into the existing STRIDE register/matrix or CWE report. Active, queued, completed and failed work appears alongside token usage. Changing worker count reuses compatible completed packets. Stop prevents new requests; active work settles or is interrupted before the action becomes idle. Do not start a second operation while the first is running or cancelling.
+
+CWE source retrieval now reads only planned files for each transient window, retaining source-hash and path checks. It no longer rescans entire repository trees for every window. The initial source-snapshot verification remains. These optimizations do not remove required CWE checks or claim fewer model tokens. Gateway throttling can constrain throughput; inspect exported errors and reduce workers if necessary.
+
+No new service, Python package or agent-framework installation is needed. The coordinator runs inside the existing local Synthesis server and uses the same configured Claude deployment and key. Static-only restrictions, traces, export locations and explicit resume after restart remain unchanged.

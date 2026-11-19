@@ -697,11 +697,12 @@ test("retry checkpoints retain successful batches later in the plan", async () =
     .filter((b) => b.status === "completed")
     .map((b) => b.id);
   assert.ok(retained.length > 0);
-  let checkpoints = 0;
+  const retryStates = new Set();
   await enrichGraphModel(m, config, new Map(), async () => good(), {
     maxBatches: 1,
     checkpoint: (review) => {
-      checkpoints++;
+      for (const batch of review.batches)
+        if (!retained.includes(batch.id)) retryStates.add(batch.status);
       const completed = new Set(
         review.batches.filter((b) => b.status === "completed").map((b) => b.id),
       );
@@ -709,6 +710,10 @@ test("retry checkpoints retain successful batches later in the plan", async () =
       assert.ok(review.coverage.completedBatches >= retained.length);
     },
   });
-  assert.equal(checkpoints, 4);
+  for (const state of ["queued", "pending", "completed"])
+    assert.ok(
+      retryStates.has(state),
+      `Retry checkpoint retains ${state} state`,
+    );
   assert.equal(m.aiReview.coverage.completedBatches, retained.length + 1);
 });

@@ -1,3 +1,5 @@
+import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
+import { loadCweSourcePayload } from "./cwe-source-reader.mjs";
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import {
   ISSUE_KINDS,
@@ -213,6 +215,7 @@ export async function reviewCweCode(
     budget = 12,
     runUntilComplete = false,
     tokenTarget,
+    concurrency = 2,
     signal,
     trace,
     checkpoint,
@@ -225,7 +228,20 @@ export async function reviewCweCode(
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("CWE request budget must be 1–100");
   const runControl = reviewRunControl({ runUntilComplete, tokenTarget });
+  concurrency = reviewConcurrency(concurrency);
   const continuous = runControl.mode === "until-complete";
+  let coordinatorFailure;
+  let traceTail = Promise.resolve();
+  const rawTrace = trace;
+  if (rawTrace)
+    trace = (event, data) => {
+      const copy = structuredClone(data);
+      const result = traceTail.then(() => rawTrace(event, copy));
+      traceTail = result.catch((error) => {
+        coordinatorFailure ||= error;
+      });
+      return result;
+    };
   const scannerFindings =
     model.cweReview?.basedOnRevision === model.modelRevision
       ? model.cweReview.findings.filter((f) => f.sourceMatchesGraph !== false)
@@ -292,19 +308,26 @@ export async function reviewCweCode(
     ],
   };
   model.cweModelReview = report;
-  const save = async () => {
-    report.completedBatches = report.batches.filter(
-      (b) => b.status === "completed",
-    ).length;
-    report.failedBatches = report.batches.filter(
-      (b) => b.status === "failed",
-    ).length;
-    report.pendingBatches = Math.max(
-      0,
-      (report.totalBatches || 0) - report.completedBatches,
-    );
-    await updateReviewProgress(model, report, trace, "cwe-model");
-    await checkpoint?.(report);
+  let saveTail = Promise.resolve();
+  const save = () => {
+    const result = saveTail.then(async () => {
+      report.completedBatches = report.batches.filter(
+        (b) => b.status === "completed",
+      ).length;
+      report.failedBatches = report.batches.filter(
+        (b) => b.status === "failed",
+      ).length;
+      report.pendingBatches = Math.max(
+        0,
+        (report.totalBatches || 0) - report.completedBatches,
+      );
+      await updateReviewProgress(model, report, trace, "cwe-model");
+      await checkpoint?.(structuredClone(report));
+    });
+    saveTail = result.catch((error) => {
+      coordinatorFailure ||= error;
+    });
+    return result;
   };
   const check = () => {
     if (signal?.aborted) throw Error("CWE model review cancelled");
@@ -502,45 +525,21 @@ export async function reviewCweCode(
     const selected = planned
       .filter((p) => !done.has(p.id))
       .slice(0, continuous ? undefined : budget);
-    // Keep at most 100 packets of source in memory, even during an unattended run.
-    const loadPayload = async (window) => {
-      const needed = new Map(
-        window.flatMap((p) => p.records).map((r) => [r.id, r]),
-      );
-      const payload = new Map();
-      for (const source of manifest.repositories.filter(
-        (r) => r.selected !== false && r.source !== "github",
-      )) {
-        if (![...needed.values()].some((r) => r.repository === source.name))
-          continue;
-        await localSource(source, sourceRoot, {
-          onEntry: () => {},
-          onFile: async (f) => {
-            check();
-            const records = [...needed.values()].filter(
-              (r) => r.repository === source.name && r.path === f.path,
-            );
-            if (!records.length) return;
-            const lines = f.text.split("\n");
-            for (const r of records) {
-              if (r.blobSha256 !== f.hash)
-                throw Error("Source changed while preparing CWE evidence");
-              payload.set(r.id, {
-                ...r,
-                code: redact(
-                  lines
-                    .slice(r.startLine - 1, r.endLine)
-                    .map((line, i) => `${r.startLine + i}: ${line}`)
-                    .join("\n"),
-                ),
-              });
-            }
+    // Load only files named by each bounded evidence window; no repeated tree walks.
+    report.sourceReads = { filesRead: 0, bytesRead: 0 };
+    const loadPayload = (window) =>
+      loadCweSourcePayload(
+        window.flatMap((p) => p.records),
+        manifest,
+        sourceRoot,
+        {
+          signal,
+          onRead: ({ bytes }) => {
+            report.sourceReads.filesRead++;
+            report.sourceReads.bytesRead += bytes;
           },
-        });
-      }
-      return payload;
-    };
-    let payload = new Map();
+        },
+      );
     await trace?.("cwe-model.planned", {
       counts: {
         segments: chunks.length,
@@ -564,215 +563,389 @@ export async function reviewCweCode(
       const r = chunkById.get(id);
       if (r) repoByName.get(r.repository).reviewedSegments++;
     }
-    for (let batchIndex = 0; batchIndex < selected.length; batchIndex++) {
-      const batch = selected[batchIndex];
+    const byFileKey = (r) => r.repository + "\0" + r.path;
+    const interfaceRank = new Map(
+      topology.interfaces.map((i, index) => [i, index]),
+    );
+    const scannerRank = new Map(scannerFindings.map((f, index) => [f, index]));
+    const interfacesByFile = new Map(),
+      scannerByFile = new Map();
+    const evidenceBySource = new Map(),
+      interfacesByEvidence = new Map();
+    for (const e of model.evidence) {
+      const key = byFileKey(e) + "\0" + e.blobSha256,
+        list = evidenceBySource.get(key) || [];
+      list.push(e.id);
+      evidenceBySource.set(key, list);
+    }
+    for (const i of model.interfaces)
+      for (const eid of i.evidence) {
+        const list = interfacesByEvidence.get(eid) || [];
+        list.push(i.id);
+        interfacesByEvidence.set(eid, list);
+      }
+    for (const i of topology.interfaces) {
+      for (const key of new Set(
+        i.evidence
+          .map((eid) => evidence.get(eid))
+          .filter(Boolean)
+          .map(byFileKey),
+      )) {
+        const list = interfacesByFile.get(key) || [];
+        list.push(i);
+        interfacesByFile.set(key, list);
+      }
+    }
+    for (const f of scannerFindings) {
+      const key = byFileKey(f),
+        list = scannerByFile.get(key) || [];
+      list.push(f);
+      scannerByFile.set(key, list);
+    }
+    const batchOrder = new Map(planned.map((b, i) => [b.id, i]));
+    const existingById = new Map(report.batches.map((b) => [b.id, b]));
+    const findingsById = new Map(report.findings.map((f) => [f.id, f]));
+    const priorPlanFindingIds = new Set(
+      previous ? [] : report.findings.map((f) => f.id),
+    );
+    const totals = { started: 0, completed: 0, failed: 0, peakActive: 0 };
+    report.execution = {
+      kind: "bounded-agent-pool",
+      concurrency,
+      active: 0,
+      queued: selected.length,
+      ...totals,
+      stopped: false,
+      stopReason: null,
+    };
+    for (
+      let windowStart = 0;
+      windowStart < selected.length;
+      windowStart += 100
+    ) {
       check();
-      if (!continuous && report.callsThisRun >= budget) break;
-      if (batchIndex % 100 === 0) {
-        payload.clear();
-        payload = await loadPayload(
-          selected.slice(batchIndex, batchIndex + 100),
-        );
-        await trace?.("cwe-model.source-window-loaded", {
-          packets: Math.min(100, selected.length - batchIndex),
-          records: payload.size,
-        });
-      }
-      const records = batch.records.map((r) => payload.get(r.id));
-      if (records.some((r) => !r))
-        throw Error("Selected CWE source evidence became unavailable");
-      const fileKeys = new Set(
-        records.map((r) => r.repository + "\0" + r.path),
-      );
-      const interfaces = topology.interfaces
-        .filter((i) =>
-          i.evidence.some((eid) => {
-            const e = evidence.get(eid);
-            return e && fileKeys.has(e.repository + "\0" + e.path);
-          }),
-        )
-        .slice(0, 30)
-        .map((i) => ({
-          id: i.id,
-          operation: i.operation,
-          protocol: i.protocol,
-          connection: i.connection,
-        }));
-      const packet = {
-        purpose: "static security source review with optional CWE mappings",
-        systemContext: sharedSecurityContext,
-        citationPolicy:
-          "Each citation belongs to exactly one submitted record and must stay inside its startLine/endLine. Split a cross-window range into separate citations. Never extend a range beyond a record even when an adjacent record supplies more lines.",
-        previousValidationFailure: report.batches
-          .find((b) => b.id === batch.id && b.status === "failed")
-          ?.error?.startsWith("CWE model response failed")
-          ? report.batches.find((b) => b.id === batch.id)?.error
-          : undefined,
-        profile: model.profile,
-        families: CWE_FAMILIES,
-        targets: CODE_TARGETS,
-        priorityCwes: [...priorityCwes],
-        records,
-        interfaces,
-        connection: batch.connection,
-        scannerFindings: scannerFindings
-          .filter((f) => fileKeys.has(f.repository + "\0" + f.path))
-          .slice(0, 20)
-          .map((f) => ({
-            cwe: f.cwe,
-            line: f.line,
-            path: f.path,
-            title: f.title,
-          })),
-      };
-      if (Buffer.byteLength(JSON.stringify(packet)) > 96000) {
-        report.gaps.push({ batchId: batch.id, reason: "packet-size-limit" });
-        continue;
-      }
-      const attempt = beginAttempt(model, config, packet, {
-        batchId: batch.id,
-        phase: batch.phase,
-        retry: report.batches.some((b) => b.id === batch.id),
+      if (report.stopReason) break;
+      const window = selected.slice(windowStart, windowStart + 100);
+      const payload = await loadPayload(window);
+      await trace?.("cwe-model.source-window-loaded", {
+        packets: window.length,
+        records: payload.size,
+        sourceReads: { ...report.sourceReads },
       });
-      report.callsThisRun++;
-      let entry = {
-        id: batch.id,
-        phase: batch.phase,
-        status: "running",
-        recordIds: records.map((r) => r.id),
-        repositories: [...new Set(records.map((r) => r.repository))],
-        packetHash: sha(JSON.stringify(packet)),
-        attemptId: attempt.id,
-      };
-      report.batches = report.batches.filter((b) => b.id !== batch.id);
-      report.batches.push(entry);
-      progress?.(
-        `CWE model review: ${report.callsThisRun}${continuous ? "" : "/" + budget} requests this run · ${report.completedBatches} / ${report.totalBatches} completed`,
-      );
-      await trace?.("cwe-model.request-started", {
-        attemptId: attempt.id,
-        batchId: batch.id,
-        counts: { records: records.length },
-        provider: config.provider,
-        model: config.model,
-      });
-      await save();
-      try {
-        const response = await requestReview(config, packet, fetchImpl, {
-          systemPrompt: CWE_MODEL_PROMPT,
-          responseSchema: CWE_RESPONSE_SCHEMA,
-          validate: validateCweModel,
-          signal,
-          onUsage: async (usage) => {
-            attempt.usage = usage;
-            await trace?.("cwe-model.usage-received", {
-              attemptId: attempt.id,
-              usage,
-            });
-            await save();
-          },
-          onResponseShape: async (shape) => {
-            entry.responseShape = shape;
-            attempt.responseShape = shape;
-            await trace?.("cwe-model.response-shape", {
-              attemptId: attempt.id,
-              batchId: batch.id,
-              ...shape,
-            });
-          },
-          onResponse: (data) =>
-            trace?.("cwe-model.response-received", {
-              attemptId: attempt.id,
-              ...data,
-            }),
-        });
-        consecutiveFormatFailures = 0;
-        finishAttempt(attempt, "succeeded");
-        entry.status = "completed";
-        for (const id of entry.recordIds) {
-          if (doneRecords.has(id)) continue;
-          doneRecords.add(id);
-          const r = chunkById.get(id);
-          if (r) repoByName.get(r.repository).reviewedSegments++;
-        }
-        entry.responseHash = response.responseHash;
-        entry.limitations = response.review.limitations;
-        entry.targetReviews = response.review.targetReviews;
-        for (const f of response.review.findings) {
-          const fid = id(
-            "cwe-model-finding",
-            f.cwe,
-            f.kind,
-            f.preconditions,
-            ...f.locations.map(
-              (l) =>
-                `${l.repository}:${l.path}:${l.blobSha256}:${l.line}:${l.endLine}`,
-            ),
+      const pool = await runReviewPool(window, {
+        concurrency,
+        signal,
+        shouldStop: () =>
+          coordinatorFailure ? "coordinator-failure" : report.stopReason,
+        onState: (state) => {
+          report.execution = {
+            ...state,
+            queued:
+              state.queued + selected.length - windowStart - window.length,
+            started: state.started + totals.started,
+            completed: state.completed + totals.completed,
+            failed: state.failed + totals.failed,
+            peakActive: Math.max(totals.peakActive, state.peakActive),
+          };
+        },
+        run: async (batch, { agentId }) => {
+          check();
+          const records = batch.records.map((r) => payload.get(r.id));
+          if (records.some((r) => !r))
+            throw Error("Selected CWE source evidence became unavailable");
+          const fileKeys = new Set(
+            records.map((r) => r.repository + "\0" + r.path),
           );
-          if (report.findings.length >= 10000) {
+          const interfaces = [
+            ...new Map(
+              [...fileKeys]
+                .flatMap((key) => interfacesByFile.get(key) || [])
+                .map((i) => [i.id, i]),
+            ).values(),
+          ]
+            .sort((a, b) => interfaceRank.get(a) - interfaceRank.get(b))
+            .slice(0, 30)
+            .map((i) => ({
+              id: i.id,
+              operation: i.operation,
+              protocol: i.protocol,
+              connection: i.connection,
+            }));
+          const prior = existingById.get(batch.id);
+          const packet = {
+            purpose: "static security source review with optional CWE mappings",
+            systemContext: sharedSecurityContext,
+            citationPolicy:
+              "Each citation belongs to exactly one submitted record and must stay inside its startLine/endLine. Split a cross-window range into separate citations. Never extend a range beyond a record even when an adjacent record supplies more lines.",
+            previousValidationFailure:
+              prior?.status === "failed" &&
+              prior.error?.startsWith("CWE model response failed")
+                ? prior.error
+                : undefined,
+            profile: model.profile,
+            families: CWE_FAMILIES,
+            targets: CODE_TARGETS,
+            priorityCwes: [...priorityCwes],
+            records,
+            interfaces,
+            connection: batch.connection,
+            scannerFindings: [...fileKeys]
+              .flatMap((key) => scannerByFile.get(key) || [])
+              .sort((a, b) => scannerRank.get(a) - scannerRank.get(b))
+              .slice(0, 20)
+              .map((f) => ({
+                cwe: f.cwe,
+                line: f.line,
+                path: f.path,
+                title: f.title,
+              })),
+          };
+          const packetJson = JSON.stringify(packet);
+          if (Buffer.byteLength(packetJson) > 96000) {
             report.gaps.push({
               batchId: batch.id,
-              reason: "finding-limit-10000",
+              reason: "packet-size-limit",
             });
-            break;
+            return { failed: true };
           }
-          const linkedEvidence = model.evidence
-            .filter((e) =>
-              f.locations.some(
-                (l) =>
-                  l.repository === e.repository &&
-                  l.path === e.path &&
-                  l.blobSha256 === e.blobSha256,
-              ),
-            )
-            .map((e) => e.id);
-          const linkedInterfaces = model.interfaces
-            .filter((i) => i.evidence.some((e) => linkedEvidence.includes(e)))
-            .map((i) => i.id);
-          if (!report.findings.some((v) => v.id === fid))
-            report.findings.push({
-              evidenceIds: linkedEvidence,
-              interfaceIds: linkedInterfaces,
-              association:
-                "Same-file source evidence; call path and exploitability require review",
-              ...f,
-              id: fid,
-              batchId: batch.id,
-              origin: "model source review",
+          let attempt;
+          const requestStartedAt = performance.now();
+          let entry = {
+            agentId,
+            packetBytes: Buffer.byteLength(packetJson),
+            sourceBytes: records.reduce(
+              (n, r) => n + Buffer.byteLength(r.code || ""),
+              0,
+            ),
+            contextBytes: Buffer.byteLength(
+              JSON.stringify(sharedSecurityContext),
+            ),
+            id: batch.id,
+            phase: batch.phase,
+            status: "queued",
+            recordIds: records.map((r) => r.id),
+            repositories: [...new Set(records.map((r) => r.repository))],
+            packetHash: sha(packetJson),
+          };
+          report.batches = report.batches.filter((b) => b.id !== batch.id);
+          report.batches.push(entry);
+          existingById.set(batch.id, entry);
+          await trace?.("cwe-model.agent-prepared", {
+            batchId: batch.id,
+            agentId,
+            counts: {
+              records: records.length,
+              packetBytes: entry.packetBytes,
+              sourceBytes: entry.sourceBytes,
+              contextBytes: entry.contextBytes,
+            },
+          });
+          await save();
+          try {
+            check();
+            if (report.stopReason) throw Error("CWE review dispatch stopped");
+            if (coordinatorFailure) throw coordinatorFailure;
+            const dispatch = (url, options) => {
+              check();
+              if (coordinatorFailure) throw coordinatorFailure;
+              attempt = beginAttempt(model, config, packet, {
+                batchId: batch.id,
+                phase: batch.phase,
+                retry: Boolean(prior),
+              });
+              attempt.agentId = agentId;
+              entry.attemptId = attempt.id;
+              entry.status = "running";
+              report.callsThisRun++;
+              progress?.(
+                `CWE model review: ${report.callsThisRun}${continuous ? "" : "/" + budget} requests this run · ${report.completedBatches} / ${report.totalBatches} completed`,
+              );
+              const pending = fetchImpl(url, options);
+              const dispatched = Promise.resolve(
+                trace?.("cwe-model.request-started", {
+                  attemptId: attempt.id,
+                  batchId: batch.id,
+                  agentId,
+                  counts: {
+                    records: records.length,
+                    packetBytes: entry.packetBytes,
+                    sourceBytes: entry.sourceBytes,
+                    contextBytes: entry.contextBytes,
+                  },
+                  provider: config.provider,
+                  model: config.model,
+                }),
+              ).then(save);
+              // Checkpoint the real in-flight attempt while the request is pending.
+              // Drain the dispatched request even when trace persistence fails.
+              return Promise.allSettled([pending, dispatched]).then(
+                ([response, traced]) => {
+                  if (traced.status === "rejected") throw traced.reason;
+                  if (response.status === "rejected") throw response.reason;
+                  return response.value;
+                },
+              );
+            };
+            const response = await requestReview(config, packet, dispatch, {
+              systemPrompt: CWE_MODEL_PROMPT,
+              responseSchema: CWE_RESPONSE_SCHEMA,
+              validate: validateCweModel,
+              signal,
+              onUsage: async (usage) => {
+                attempt.usage = usage;
+                await trace?.("cwe-model.usage-received", {
+                  attemptId: attempt.id,
+                  usage,
+                });
+                await save();
+              },
+              onResponseShape: async (shape) => {
+                entry.responseShape = shape;
+                attempt.responseShape = shape;
+                await trace?.("cwe-model.response-shape", {
+                  attemptId: attempt.id,
+                  batchId: batch.id,
+                  ...shape,
+                });
+              },
+              onResponse: (data) =>
+                trace?.("cwe-model.response-received", {
+                  attemptId: attempt.id,
+                  ...data,
+                }),
             });
-        }
-      } catch (error) {
-        finishAttempt(attempt, signal?.aborted ? "interrupted" : "failed");
-        entry.status = "failed";
-        entry.error = error.message;
-        attempt.failure = failureDetail(error.message);
-        consecutiveFormatFailures =
-          attempt.failure.code === "response-format"
-            ? consecutiveFormatFailures + 1
-            : 0;
-        await trace?.("cwe-model.request-failed", {
-          attemptId: attempt.id,
-          batchId: batch.id,
-          failure: attempt.failure,
-        });
-        await save();
-        if (consecutiveFormatFailures >= 3) {
-          report.stopReason = "repeated-response-format-failure";
-          report.error =
-            "Stopped after three consecutive JSON-format failures. Check the response contract before continuing; increasing the request budget will not resolve this error.";
-          break;
-        }
-        if (
-          !/^CWE model response failed|^Model did not return the required JSON/.test(
-            error.message,
-          )
-        ) {
-          report.stopReason = "provider-failure";
-          break;
-        }
-      }
+            consecutiveFormatFailures = 0;
+            finishAttempt(attempt, "succeeded");
+            entry.status = "completed";
+            for (const id of entry.recordIds) {
+              if (doneRecords.has(id)) continue;
+              doneRecords.add(id);
+              const r = chunkById.get(id);
+              if (r) repoByName.get(r.repository).reviewedSegments++;
+            }
+            entry.responseHash = response.responseHash;
+            entry.limitations = response.review.limitations;
+            entry.targetReviews = response.review.targetReviews;
+            for (const f of response.review.findings) {
+              const fid = id(
+                "cwe-model-finding",
+                f.cwe,
+                f.kind,
+                f.preconditions,
+                ...f.locations.map(
+                  (l) =>
+                    `${l.repository}:${l.path}:${l.blobSha256}:${l.line}:${l.endLine}`,
+                ),
+              );
+              if (!findingsById.has(fid) && report.findings.length >= 10000) {
+                report.gaps.push({
+                  batchId: batch.id,
+                  reason: "finding-limit-10000",
+                });
+                break;
+              }
+              const linkedEvidence = [
+                ...new Set(
+                  f.locations.flatMap(
+                    (l) =>
+                      evidenceBySource.get(
+                        byFileKey(l) + "\0" + l.blobSha256,
+                      ) || [],
+                  ),
+                ),
+              ];
+              const linkedInterfaces = [
+                ...new Set(
+                  linkedEvidence.flatMap(
+                    (eid) => interfacesByEvidence.get(eid) || [],
+                  ),
+                ),
+              ];
+              const existingFinding = findingsById.get(fid);
+              const resolvedFinding = {
+                evidenceIds: linkedEvidence,
+                interfaceIds: linkedInterfaces,
+                association:
+                  "Same-file source evidence; call path and exploitability require review",
+                ...f,
+                id: fid,
+                batchId: batch.id,
+                origin: "model source review",
+              };
+              if (!existingFinding) {
+                findingsById.set(fid, resolvedFinding);
+                report.findings.push(resolvedFinding);
+              } else if (
+                !priorPlanFindingIds.has(fid) &&
+                batchOrder.get(batch.id) <
+                  (batchOrder.get(existingFinding.batchId) ?? Infinity)
+              ) {
+                // Match serial plan priority, independent of response completion order.
+                Object.assign(existingFinding, resolvedFinding);
+              }
+            }
+          } catch (error) {
+            if (!attempt) {
+              report.batches = report.batches.filter((b) => b.id !== batch.id);
+              if (prior) {
+                report.batches.push(prior);
+                existingById.set(batch.id, prior);
+              } else existingById.delete(batch.id);
+              if (!coordinatorFailure && (signal?.aborted || report.stopReason))
+                return { skipped: true };
+              throw error;
+            }
+            finishAttempt(attempt, signal?.aborted ? "interrupted" : "failed");
+            entry.status = "failed";
+            entry.error = error.message;
+            attempt.failure = failureDetail(error.message);
+            consecutiveFormatFailures =
+              attempt.failure.code === "response-format"
+                ? consecutiveFormatFailures + 1
+                : 0;
+            if (consecutiveFormatFailures >= 3) {
+              report.stopReason = "repeated-response-format-failure";
+              report.error =
+                "Stopped after three consecutive JSON-format failures. Check the response contract before continuing; increasing the request budget will not resolve this error.";
+            } else if (
+              !/^CWE model response failed|^Model did not return the required JSON/.test(
+                error.message,
+              )
+            ) {
+              report.stopReason ||= signal?.aborted
+                ? "cancelled"
+                : "provider-failure";
+            }
+            await trace?.("cwe-model.request-failed", {
+              attemptId: attempt.id,
+              batchId: batch.id,
+              agentId,
+              failure: attempt.failure,
+            });
+          }
+          entry.durationMs = Math.round(performance.now() - requestStartedAt);
+          await trace?.("cwe-model.agent-finished", {
+            attemptId: attempt.id,
+            batchId: batch.id,
+            agentId,
+            status: entry.status,
+            durationMs: entry.durationMs,
+          });
+          await save();
+          return { failed: entry.status !== "completed" };
+        },
+      });
+      totals.started += pool.started;
+      totals.completed += pool.completed;
+      totals.failed += pool.failed;
+      totals.peakActive = Math.max(totals.peakActive, pool.peakActive);
+      payload.clear();
+      if (coordinatorFailure) throw coordinatorFailure;
       await save();
+      if (pool.stopped) break;
     }
+    report.batches.sort((a, b) => batchOrder.get(a.id) - batchOrder.get(b.id));
+    report.findings.sort((a, b) => a.id.localeCompare(b.id));
     report.stopReason = signal?.aborted
       ? "cancelled"
       : report.stopReason ||
@@ -793,21 +966,25 @@ export async function reviewCweCode(
         : report.pendingBatches || report.gaps.length
           ? "partial"
           : "completed-needs-review";
-    for (const repo of report.repositories) {
-      const ids = chunks
-        .filter((c) => c.repository === repo.name)
-        .map((c) => c.id);
-      repo.reviewedSegments = ids.filter((id) =>
-        report.batches.some(
-          (b) => b.recordIds.includes(id) && b.status === "completed",
-        ),
-      ).length;
-    }
   } catch (error) {
     report.status = signal?.aborted ? "cancelled" : "failed";
     report.stopReason = signal?.aborted
       ? "cancelled"
       : "source-or-persistence-failure";
+    if (report.execution) {
+      report.execution.active = 0;
+      report.execution.stopped = true;
+      report.execution.stopReason = report.stopReason;
+    }
+    for (const attempt of model.usageLedger?.attempts || []) {
+      if (attempt.runId === report.runId && attempt.status === "in-flight")
+        finishAttempt(attempt, signal?.aborted ? "interrupted" : "failed");
+    }
+    for (const entry of report.batches)
+      if (entry.status === "running" || entry.status === "queued") {
+        entry.status = "failed";
+        entry.error = "CWE review coordinator stopped before completion";
+      }
     report.error = /^Source changed|^CWE |^Selected CWE/.test(error.message)
       ? error.message
       : "CWE evidence collection failed";

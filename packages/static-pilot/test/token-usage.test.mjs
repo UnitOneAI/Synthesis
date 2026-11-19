@@ -16,6 +16,7 @@ import { enrichGraphModel, reviewPlan } from "../src/graph-review.mjs";
 import { modelConfig, enrichModel } from "../src/model-review.mjs";
 import { workspaceStore } from "../src/workspace-store.mjs";
 import { systemReport } from "../src/system-exports.mjs";
+import { sha } from "../src/sources.mjs";
 const root = fileURLToPath(
   new URL("../fixtures/repositories", import.meta.url),
 );
@@ -110,24 +111,34 @@ test("rejected output, retries, cache reuse, shared requests and restart retain 
   assert.equal(usageSummary(m.usageLedger).totalTokens, 160);
   assert.equal(m.usageLedger.attempts[0].status, "failed");
   let checkpointSeen = false;
+  const preparedPackets = new Set();
   await enrichGraphModel(
     m,
     config,
     new Map(),
-    async () => {
-      assert.ok(checkpointSeen, "attempt checkpoint must precede dispatch");
+    async (_, options) => {
+      assert.ok(
+        preparedPackets.has(sha(JSON.parse(options.body).messages[0].content)),
+        "packet intent must be checkpointed before dispatch",
+      );
       calls++;
       return response();
     },
     {
       maxBatches: 100,
       checkpoint: (review, ledger) => {
+        for (const batch of review.batches)
+          if (batch.status === "queued") preparedPackets.add(batch.packetHash);
         if (ledger.attempts.some((a) => a.status === "in-flight"))
           checkpointSeen = true;
       },
     },
   );
   const planned = reviewPlan(m).batches.length;
+  assert.ok(
+    checkpointSeen,
+    "dispatched attempts must be checkpointed in flight",
+  );
   assert.equal(calls, planned + 1);
   let summary = usageSummary(m.usageLedger);
   assert.equal(summary.totalTokens, calls * 160);

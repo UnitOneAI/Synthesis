@@ -349,6 +349,7 @@ function renderModel() {
     startReview: async (budget, controls = {}) => {
       $("review-until-complete").checked = controls.runUntilComplete === true;
       $("review-token-target").value = controls.tokenTarget ?? "";
+      $("review-workers").value = controls.concurrency ?? 2;
       $("review-budget").value = budget;
       await $("run-review").onclick();
       await status();
@@ -687,6 +688,7 @@ $("run-review").onclick = async () => {
     await api("review", {
       modelRevision: model.modelRevision,
       maxBatches: Number($("review-budget").value),
+      concurrency: Number($("review-workers").value),
       runUntilComplete: $("review-until-complete").checked,
       tokenTarget:
         $("review-token-target").value === ""

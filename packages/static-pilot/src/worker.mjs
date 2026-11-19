@@ -71,6 +71,7 @@ try {
           fetch,
           {
             maxBatches: workerData.options.reviewBatches,
+            concurrency: workerData.options.concurrency,
             runUntilComplete: workerData.options.runUntilComplete,
             tokenTarget: workerData.options.tokenTarget,
             progress,

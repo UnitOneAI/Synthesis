@@ -272,6 +272,7 @@
             Number($("cwe-model-budget").value),
             $("cwe-model-consent").checked,
             {
+              concurrency: Number($("cwe-model-workers").value),
               runUntilComplete: $("cwe-model-until-complete").checked,
               tokenTarget:
                 $("cwe-model-token-target").value === ""
@@ -343,6 +344,9 @@
         !s.hasModel ||
         !s.inference ||
         ["running", "cancelling"].includes(s.status);
+      $("cwe-model-workers").disabled = ["running", "cancelling"].includes(
+        s.status,
+      );
       $("cwe-model-stop").hidden =
         s.status !== "running" || s.mode !== "cwe-model";
       if (s.status === "running" && s.mode === "cwe-model")

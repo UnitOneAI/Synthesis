@@ -1,4 +1,5 @@
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
+import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
 import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import {
   GUIDANCE_VERSION,
@@ -430,6 +431,7 @@ export async function enrichGraphModel(
   fetchImpl = fetch,
   options = {},
 ) {
+  const concurrency = reviewConcurrency(options.concurrency);
   const runControl = reviewRunControl(options);
   const continuous = runControl.mode === "until-complete";
   const maxBatches = options.maxBatches ?? 12;
@@ -469,6 +471,7 @@ export async function enrichGraphModel(
     },
     budget: continuous ? null : maxBatches,
     runControl,
+    concurrency,
   });
   const previous =
     model.aiReview?.runKey === runKey ? model.aiReview.batches || [] : [];
@@ -525,6 +528,55 @@ export async function enrichGraphModel(
     consecutiveFormatFailures = 0,
     formatFailureStop = false;
   const deadline = continuous ? Infinity : Date.now() + 24 * 60 * 1000;
+  // Compute immutable packet and repository metadata once, rather than serializing
+  // the whole portfolio again at every concurrent request checkpoint.
+  const metrics = new Map(
+    plan.batches.map((b) => [
+      b.id,
+      {
+        bytes: Buffer.byteLength(JSON.stringify(b.packet)),
+        excerpts: b.packet.records.flatMap((r) =>
+          r.evidence.filter((e) => e.excerpt).map((e) => e.id),
+        ),
+      },
+    ]),
+  );
+  const repositoryInterfaces = new Map(
+    model.sources.map((source) => [
+      source.name,
+      model.interfaces
+        .filter((i) => i.repository === source.name)
+        .map((i) => i.id),
+    ]),
+  );
+  const plannedPacketBytes = [...metrics.values()].reduce(
+    (n, m) => n + m.bytes,
+    0,
+  );
+  const totalExcerpts = [...metrics.values()].reduce(
+    (n, m) => n + m.excerpts.length,
+    0,
+  );
+  review.packetHash = sha(plan.batches.map((b) => b.packetHash).join(""));
+  let effectQueue = Promise.resolve(),
+    coordinationFailure;
+  const effect = (run) => {
+    const pending = effectQueue.then(run);
+    effectQueue = pending.catch((error) => {
+      coordinationFailure ||= error;
+    });
+    return pending;
+  };
+  const emit = (event, data) => effect(() => options.trace?.(event, data));
+  const save = () =>
+    effect(async () => {
+      aggregate();
+      await updateReviewProgress(model, review, options.trace, "review");
+      await options.checkpoint?.(
+        structuredClone(review),
+        structuredClone(model.usageLedger),
+      );
+    });
   const aggregate = () => {
     // Every checkpoint retains compatible successes, including later plan entries.
     review.batches.sort((a, b) => order.get(a.id) - order.get(b.id));
@@ -562,7 +614,9 @@ export async function enrichGraphModel(
     }
     review.questions = [...new Set(review.questions)];
     const done = review.batches.filter((b) => b.status === "completed").length;
-    const sentBatches = new Set(review.batches.map((b) => b.id));
+    const sentBatches = new Set(
+      review.batches.filter((b) => b.status !== "queued").map((b) => b.id),
+    );
     const sentPackets = plan.batches.filter((b) => sentBatches.has(b.id));
     review.coverage = {
       obligations: (() => {
@@ -575,13 +629,11 @@ export async function enrichGraphModel(
       totalInterfaces: model.interfaces.length,
       submittedInterfaces: submitted.size,
       omittedInterfaces: model.interfaces.length - submitted.size,
-      interfaceIds: [...submitted],
-      reviewedInterfaceIds: [...reviewed],
+      interfaceIds: [...submitted].sort(),
+      reviewedInterfaceIds: [...reviewed].sort(),
       reviewedInterfaces: reviewed.size,
       repositories: model.sources.map((source) => {
-        const ids = model.interfaces
-          .filter((i) => i.repository === source.name)
-          .map((i) => i.id);
+        const ids = repositoryInterfaces.get(source.name);
         const count = ids.filter((id) => reviewed.has(id)).length;
         return {
           repository: source.name,
@@ -610,32 +662,16 @@ export async function enrichGraphModel(
       callsThisRun: calls,
       batchBudget: continuous ? null : maxBatches,
       oversizedRecords: plan.omitted,
-      excerptCount: plan.batches.reduce(
-        (n, b) =>
-          n +
-          b.packet.records.reduce(
-            (n, r) => n + r.evidence.filter((e) => e.excerpt).length,
-            0,
-          ),
-        0,
-      ),
-      packetBytes: plan.batches.reduce(
-        (n, b) => n + Buffer.byteLength(JSON.stringify(b.packet)),
-        0,
-      ),
+      excerptCount: totalExcerpts,
+      packetBytes: plannedPacketBytes,
     };
-    review.packetHash = sha(plan.batches.map((b) => b.packetHash).join(""));
-    review.coverage.plannedPacketBytes = review.coverage.packetBytes;
+    review.coverage.plannedPacketBytes = plannedPacketBytes;
     review.coverage.packetBytes = sentPackets.reduce(
-      (n, b) => n + Buffer.byteLength(JSON.stringify(b.packet)),
+      (n, b) => n + metrics.get(b.id).bytes,
       0,
     );
     review.coverage.excerptCount = new Set(
-      sentPackets.flatMap((b) =>
-        b.packet.records.flatMap((r) =>
-          r.evidence.filter((e) => e.excerpt).map((e) => e.id),
-        ),
-      ),
+      sentPackets.flatMap((b) => metrics.get(b.id).excerpts),
     ).size;
     review.responseHash = sha(
       review.batches
@@ -644,174 +680,229 @@ export async function enrichGraphModel(
         .join(""),
     );
   };
+  const pending = [];
   for (const batch of plan.batches) {
-    if (options.signal?.aborted) break;
     const prior = cached.get(batch.id);
     if (prior?.packetHash === batch.packetHash) {
-      await options.trace?.("review.cache-reused", {
+      await emit("review.cache-reused", {
         runKey,
         batchId: batch.id,
         packetHash: batch.packetHash,
       });
-      continue;
-    }
-    if (options.batchIds && !options.batchIds.includes(batch.id)) continue;
-    if (
-      terminalFailure ||
-      formatFailureStop ||
-      (!continuous && calls >= maxBatches) ||
-      Date.now() > deadline
-    )
-      continue;
-    options.progress?.(
-      `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
-    );
-    const entry = {
-      id: batch.id,
-      phase: batch.phase,
-      label: batch.label,
-      packetHash: batch.packetHash,
-      interfaceIds: batch.packet.records.map((r) => r.id),
-      status: "pending",
-    };
-    review.batches.push(entry);
-    calls++;
-    entry.interfaceIds.forEach((i) => submitted.add(i));
-    let attempt;
-    try {
-      const failed = previous.find(
-        (b) =>
-          b.id === batch.id &&
-          b.packetHash === batch.packetHash &&
-          b.status === "failed",
-      );
-      entry.validationRetry = Boolean(
-        failed &&
-          /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
-            failed.error || "",
-          ),
-      );
-      attempt = beginAttempt(model, config, batch.packet, {
-        batchId: batch.id,
-        phase: batch.phase,
-        retry:
-          Boolean(batch.parentId) ||
-          model.usageLedger.attempts.some(
-            (a) =>
-              a.batchId === batch.id &&
-              a.provider === config.provider &&
-              a.model === config.model &&
-              a.status !== "succeeded",
-          ),
-      });
-      if (batch.parentId) attempt.parentBatchId = batch.parentId;
-      await options.trace?.("model.request-started", {
-        runKey,
-        batchId: batch.id,
-        attemptId: attempt.id,
-        phase: batch.phase,
-        packetHash: batch.packetHash,
-        counts: {
-          records: batch.packet.records.length,
-          packetBytes: Buffer.byteLength(JSON.stringify(batch.packet)),
-        },
-        provider: config.provider,
-        model: config.model,
-        retry: attempt.retry,
-      });
-      aggregate();
-      await updateReviewProgress(model, review, options.trace, "review");
-      await options.checkpoint?.(
-        structuredClone(review),
-        structuredClone(model.usageLedger),
-      );
-      const result = await requestReview(config, batch.packet, fetchImpl, {
-        validationRetry: entry.validationRetry,
-        signal: options.signal,
-        onResponseShape: (shape) => {
-          entry.responseShape = shape;
-          attempt.responseShape = shape;
-          return options.trace?.("model.response-shape", {
-            runKey,
-            batchId: batch.id,
-            attemptId: attempt.id,
-            ...shape,
-          });
-        },
-        onResponse: (response) =>
-          options.trace?.("model.response-received", {
-            runKey,
-            batchId: batch.id,
-            attemptId: attempt.id,
-            ...response,
-          }),
-        onStop: (response) =>
-          options.trace?.("model.stop-reason", {
-            runKey,
-            batchId: batch.id,
-            attemptId: attempt.id,
-            ...response,
-          }),
-        onUsage: async (usage) => {
-          attempt.usage = usage;
-          await options.trace?.("model.usage-received", {
-            runKey,
-            batchId: batch.id,
-            attemptId: attempt.id,
-            usage,
-          });
-          await updateReviewProgress(model, review, options.trace, "review");
-          await options.checkpoint?.(
-            structuredClone(review),
-            structuredClone(model.usageLedger),
-          );
-        },
-      });
-      consecutiveFormatFailures = 0;
-      finishAttempt(attempt, "succeeded");
-      Object.assign(entry, {
-        status: "completed",
-        review: result.review,
-        responseHash: result.responseHash,
-        requestPromptHash: result.requestPromptHash,
-      });
-      entry.interfaceIds.forEach((i) => reviewed.add(i));
-      await options.trace?.("model.request-completed", {
-        runKey,
-        batchId: batch.id,
-        attemptId: attempt.id,
-        responseHash: result.responseHash,
-        requestPromptHash: result.requestPromptHash,
-      });
-    } catch (error) {
-      if (attempt) {
-        finishAttempt(attempt, "failed");
-        attempt.failure = failureDetail(error.message);
-      }
-      entry.status = "failed";
-      entry.error = error.message;
-      consecutiveFormatFailures =
-        failureDetail(error.message).code === "response-format"
-          ? consecutiveFormatFailures + 1
-          : 0;
-      formatFailureStop = consecutiveFormatFailures >= 3;
-      await options.trace?.("model.request-failed", {
-        runKey,
-        batchId: batch.id,
-        attemptId: attempt?.id,
-        failure: failureDetail(error.message),
-      });
-      terminalFailure = /HTTP (?:401|403|429)|request failed or timed out/.test(
-        error.message,
-      );
-    }
-    aggregate();
-    await updateReviewProgress(model, review, options.trace, "review");
-    await options.checkpoint?.(
-      structuredClone(review),
-      structuredClone(model.usageLedger),
-    );
+    } else if (!options.batchIds || options.batchIds.includes(batch.id))
+      pending.push(batch);
   }
+  const selected = continuous ? pending : pending.slice(0, maxBatches);
+  const shouldStop = () =>
+    coordinationFailure
+      ? "persistence-failure"
+      : formatFailureStop
+        ? "repeated-response-format-failure"
+        : terminalFailure
+          ? "provider-failure"
+          : Date.now() > deadline
+            ? "time-budget"
+            : null;
+  await runReviewPool(selected, {
+    concurrency,
+    signal: options.signal,
+    shouldStop,
+    onState: async (state) => {
+      review.execution = state;
+      // Packet preparation, dispatch, usage and completion already checkpoint
+      // this state. Avoid two extra full-workspace writes per packet.
+      await emit("review.agent-pool", state);
+    },
+    run: async (batch, { agentId }) => {
+      options.progress?.(
+        `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
+      );
+      const entry = {
+        id: batch.id,
+        phase: batch.phase,
+        label: batch.label,
+        packetHash: batch.packetHash,
+        agentId,
+        interfaceIds: batch.packet.records.map((r) => r.id),
+        status: "queued",
+      };
+      review.batches.push(entry);
+      let attempt;
+      const requestStartedAt = performance.now();
+      try {
+        const failed = previous.find(
+          (b) =>
+            b.id === batch.id &&
+            b.packetHash === batch.packetHash &&
+            b.status === "failed",
+        );
+        entry.validationRetry = Boolean(
+          failed &&
+            /schema or evidence validation|required JSON|output-token budget|request failed or timed out/.test(
+              failed.error || "",
+            ),
+        );
+        await emit("review.agent-prepared", {
+          runKey,
+          batchId: batch.id,
+          agentId,
+          packetHash: batch.packetHash,
+        });
+        await save();
+        const dispatch = (url, requestOptions) => {
+          if (options.signal?.aborted || shouldStop())
+            throw Error("STRIDE dispatch stopped before submission");
+          attempt = beginAttempt(model, config, batch.packet, {
+            batchId: batch.id,
+            phase: batch.phase,
+            retry:
+              Boolean(batch.parentId) ||
+              model.usageLedger.attempts.some(
+                (a) =>
+                  a.batchId === batch.id &&
+                  a.provider === config.provider &&
+                  a.model === config.model &&
+                  a.status !== "succeeded",
+              ),
+          });
+          attempt.agentId = agentId;
+          if (batch.parentId) attempt.parentBatchId = batch.parentId;
+          calls++;
+          entry.status = "pending";
+          entry.interfaceIds.forEach((i) => submitted.add(i));
+          let pendingResponse;
+          try {
+            pendingResponse = Promise.resolve(fetchImpl(url, requestOptions));
+          } catch (error) {
+            pendingResponse = Promise.reject(error);
+          }
+          // Persist dispatched usage while the request is in flight. No await
+          // occurs between the final cancellation check and fetch invocation.
+          const dispatched = emit("model.request-started", {
+            runKey,
+            batchId: batch.id,
+            attemptId: attempt.id,
+            phase: batch.phase,
+            packetHash: batch.packetHash,
+            agentId,
+            counts: {
+              records: batch.packet.records.length,
+              packetBytes: metrics.get(batch.id).bytes,
+            },
+            provider: config.provider,
+            model: config.model,
+            retry: attempt.retry,
+          }).then(save);
+          return Promise.allSettled([pendingResponse, dispatched]).then(
+            ([response, saved]) => {
+              if (saved.status === "rejected") throw saved.reason;
+              if (response.status === "rejected") throw response.reason;
+              return response.value;
+            },
+          );
+        };
+        const result = await requestReview(config, batch.packet, dispatch, {
+          validationRetry: entry.validationRetry,
+          signal: options.signal,
+          onResponseShape: (shape) => {
+            entry.responseShape = shape;
+            attempt.responseShape = shape;
+            return emit("model.response-shape", {
+              runKey,
+              batchId: batch.id,
+              attemptId: attempt.id,
+              ...shape,
+            });
+          },
+          onResponse: (response) =>
+            emit("model.response-received", {
+              runKey,
+              batchId: batch.id,
+              attemptId: attempt.id,
+              ...response,
+            }),
+          onStop: (response) =>
+            emit("model.stop-reason", {
+              runKey,
+              batchId: batch.id,
+              attemptId: attempt.id,
+              ...response,
+            }),
+          onUsage: async (usage) => {
+            attempt.usage = usage;
+            await emit("model.usage-received", {
+              runKey,
+              batchId: batch.id,
+              attemptId: attempt.id,
+              usage,
+            });
+            await save();
+          },
+        });
+        consecutiveFormatFailures = 0;
+        finishAttempt(attempt, "succeeded");
+        Object.assign(entry, {
+          status: "completed",
+          review: result.review,
+          responseHash: result.responseHash,
+          requestPromptHash: result.requestPromptHash,
+        });
+        entry.interfaceIds.forEach((i) => reviewed.add(i));
+        await emit("model.request-completed", {
+          runKey,
+          batchId: batch.id,
+          attemptId: attempt.id,
+          responseHash: result.responseHash,
+          requestPromptHash: result.requestPromptHash,
+        });
+      } catch (error) {
+        if (!attempt) {
+          review.batches = review.batches.filter((b) => b !== entry);
+          if (coordinationFailure) throw coordinationFailure;
+          if (options.signal?.aborted || shouldStop()) {
+            await save();
+            return { skipped: true };
+          }
+          throw error;
+        }
+        if (attempt) {
+          finishAttempt(
+            attempt,
+            options.signal?.aborted ? "interrupted" : "failed",
+          );
+          attempt.failure = failureDetail(error.message);
+        }
+        entry.status = "failed";
+        entry.error = error.message;
+        consecutiveFormatFailures =
+          failureDetail(error.message).code === "response-format"
+            ? consecutiveFormatFailures + 1
+            : 0;
+        formatFailureStop ||= consecutiveFormatFailures >= 3;
+        terminalFailure ||= /HTTP \d{3}|request failed or timed out/.test(
+          error.message,
+        );
+        await emit("model.request-failed", {
+          runKey,
+          batchId: batch.id,
+          attemptId: attempt?.id,
+          failure: failureDetail(error.message),
+        });
+      }
+      entry.durationMs = Math.round(performance.now() - requestStartedAt);
+      attempt.durationMs = entry.durationMs;
+      await emit("review.agent-finished", {
+        runKey,
+        agentId,
+        batchId: batch.id,
+        attemptId: attempt.id,
+        status: entry.status,
+        durationMs: entry.durationMs,
+      });
+      await save();
+      return { failed: entry.status === "failed" };
+    },
+  });
   aggregate();
   review.status = !plan.batches.length
     ? "skipped"
@@ -845,7 +936,7 @@ export async function enrichGraphModel(
           : Date.now() > deadline
             ? "time-budget"
             : "plan-exhausted";
-  await options.trace?.("review.finished", {
+  await emit("review.finished", {
     runKey,
     status: review.status,
     counts: {
@@ -856,10 +947,6 @@ export async function enrichGraphModel(
     },
     stopReason: review.stopReason,
   });
-  await updateReviewProgress(model, review, options.trace, "review");
-  await options.checkpoint?.(
-    structuredClone(review),
-    structuredClone(model.usageLedger),
-  );
+  await save();
   return model;
 }
