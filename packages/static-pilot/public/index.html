@@ -185,6 +185,17 @@
       </section>
       <section id="cwe" class="panel" hidden>
         <h2>CWE code review</h2>
+        <div class="toolbar">
+          <button data-export="cwe-pdf" disabled>CWE evidence · PDF</button
+          ><button data-export="cwe-evidence-html" disabled>
+            CWE evidence · HTML
+          </button>
+        </div>
+        <p>
+          Exports include all scanner and model candidates with locally verified
+          code snippets. PDF opens a report preview; choose Print / Save as PDF.
+          Source files must match the reviewed hashes.
+        </p>
         <h3>Local Semgrep scan</h3>
         <p>
           Scan the selected local clones with the bundled Semgrep rules.

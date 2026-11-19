@@ -1,3 +1,4 @@
+import { PRINT_STYLE } from "./print-style.mjs";
 import { diagramModel, layoutDiagram, actorPath } from "./diagram-model.mjs";
 import { usageSummary } from "./token-usage.mjs";
 import { systemModel, CATEGORIES } from "./system-model.mjs";
@@ -325,7 +326,7 @@ export function systemReport(model) {
   const s = systemModel(model),
     table = (headers, rows) =>
       `<table><thead><tr>${headers.map((v) => `<th>${e(v)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(Array.isArray(v) ? v.join("; ") : v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${e(s.title)}</title><style>body{font:14px/1.5 system-ui;color:#1c2e44;margin:32px}table{border-collapse:collapse;width:100%;margin:15px 0;table-layout:fixed}td,th{border:1px solid #ccd5df;padding:7px;text-align:left;overflow-wrap:anywhere;vertical-align:top}svg{width:100%;height:auto}h2{margin-top:32px}article{break-inside:avoid;border-top:1px solid #ccd5df;padding:15px 0}@media print{body{margin:0}table{font-size:10px}h2{break-after:avoid}svg{max-height:800px}}</style><h1>${e(s.title)}</h1><p>${e(s.profile)} · Static threat model · Draft</p><p>Revision ${e(s.revision)}. Source observations, assumptions and reviewer declarations are distinguished. Review decisions are local annotations, not authenticated organizational approvals.</p><h2>Scope and coverage</h2>${table(
+  return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${e(s.title)}</title><style>body{font:14px/1.5 system-ui;color:#1c2e44;margin:32px}table{border-collapse:collapse;width:100%;margin:15px 0;table-layout:fixed}td,th{border:1px solid #ccd5df;padding:7px;text-align:left;overflow-wrap:anywhere;vertical-align:top}svg{width:100%;height:auto}h2{margin-top:32px}article{break-inside:avoid;border-top:1px solid #ccd5df;padding:15px 0}@media print{body{margin:0}table{font-size:10px}h2{break-after:avoid}svg{max-height:800px}}${PRINT_STYLE}</style><h1>${e(s.title)}</h1><p>${e(s.profile)} · Static threat model · Draft</p><p>Revision ${e(s.revision)}. Source observations, assumptions and reviewer declarations are distinguished. Review decisions are local annotations, not authenticated organizational approvals.</p><h2>Scope and coverage</h2>${table(
     ["Repository", "Status", "Snapshot", "Coverage"],
     model.sources.map((r) => [
       r.name,
@@ -412,4 +413,110 @@ export function systemReport(model) {
     ["Repository", "File", "Type", "Detail"],
     model.diagnostics.map((d) => [d.repository, d.path, d.kind, d.message]),
   )}</html>`;
+}
+
+// A review-oriented print projection. Detailed registers remain in the complete
+// HTML/JSON/CSV exports; checklist prompts never become threat scenarios.
+export function systemPrintReport(model) {
+  const s = systemModel(model);
+  const scenarios = s.threats.filter((t) => t.origin !== "review checklist");
+  const table = (headers, rows) =>
+    `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const boundaryGroups = new Map();
+  for (const b of s.boundaries) {
+    const key = JSON.stringify([
+      b.name,
+      b.dimension,
+      b.before,
+      b.after,
+      b.enforcement,
+      b.basis,
+      b.reviewState,
+    ]);
+    if (!boundaryGroups.has(key))
+      boundaryGroups.set(key, { ...b, members: [] });
+    boundaryGroups.get(key).members.push(b.id);
+  }
+  const d = diagramModel(s, {});
+  const nodes = new Map(d.nodes.map((n) => [n.id, n.name]));
+  const refs = new Set(scenarios.flatMap((t) => t.evidenceIds || []));
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}</style></head><body><h1>${e(s.title)}</h1><p>Static threat model review · Draft</p><p class="meta">Generated ${e(new Date().toISOString())} · Revision ${e(s.revision)}</p><h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories; ${s.components.length} components; ${s.actors.length} actor profiles; ${s.boundaries.length} boundary records; ${scenarios.length} threat scenarios. ${s.coverage.unresolvedFlows} unresolved relationships and ${s.coverage.pendingBoundaries} boundary decisions pending.</p><p>${model.aiReview?.coverage ? `${model.aiReview.coverage.completedBatches || 0} / ${model.aiReview.coverage.totalBatches || 0} STRIDE packets completed; ${model.aiReview.coverage.failedBatches || 0} failed; ${model.aiReview.coverage.pendingBatches || 0} pending. Status: ${e(model.aiReview.status)}.` : "STRIDE analysis has not run."} Empty results do not establish absence of threats. Source observations, inferred actors/boundaries and reviewer declarations remain distinct. No target execution or runtime validation.</p><p>This printable review includes all recorded threat scenarios, component STRIDE rows and grouped boundary records. It excludes repeated checklist text, detailed flow properties and the complete evidence ledger. Use Complete HTML report and CSV/JSON exports for those records. ${s.threats.length - scenarios.length} checklist items are not threat scenarios.</p>${table(
+    ["Repository", "Status", "Snapshot"],
+    model.sources.map((r) => [r.name, r.status, r.snapshot || "not recorded"]),
+  )}<h2>System context</h2>${systemSvg(model, { level: "context" })}<h2>Overall system DFD</h2>${systemSvg(model)}<p>Diagram uses the default service view and its disclosed node/connection limits. Unresolved destinations are coverage gaps, not invented connections. Full flow data remains in the flow register export.</p><h2>Connected flow summary</h2>${table(
+    ["From", "To", "Protocol / label", "Member flows", "Basis / review"],
+    d.connections.map((c) => [
+      nodes.get(c.source) || c.source,
+      nodes.get(c.target) || c.target,
+      c.name || c.protocol || "",
+      c.flowIds?.length || 1,
+      `${c.basis} / ${c.reviewState}`,
+    ]),
+  )}<h2>Threat actors</h2>${table(
+    ["Actor", "Access / prerequisites", "Basis / review"],
+    s.actors.map((a) => [
+      a.name,
+      a.startingAccess || a.description || "Unspecified",
+      `${a.basis} / ${a.reviewState}`,
+    ]),
+  )}<h2>Trust boundaries</h2><p>${s.boundaries.length} boundary records grouped into ${boundaryGroups.size} equivalent transition descriptions. Grouping preserves every member ID. Inferred boundaries require review; repository boundaries do not establish trust boundaries.</p>${table(
+    [
+      "Boundary / dimension",
+      "Transition / enforcement",
+      "Basis / review / member IDs",
+    ],
+    [...boundaryGroups.values()].map((b) => [
+      `${b.name} (${b.dimension})`,
+      `${b.before} → ${b.after}. ${b.enforcement || ""}`,
+      `${b.basis} / ${b.reviewState}. Members: ${b.members.join(", ")}`,
+    ]),
+  )}<h2>Components</h2>${table(
+    ["Component", "Type", "Basis / review"],
+    s.components.map((c) => [c.name, c.type, `${c.basis} / ${c.reviewState}`]),
+  )}<h2>Trust domains and data assets</h2>${table(["Type", "Name", "Basis / review"], [...s.domains.map((r) => ["Trust domain", r.name, `${r.basis} / ${r.reviewState}`]), ...s.assets.map((r) => ["Data asset", r.name, `${r.basis} / ${r.reviewState}`])])}<h2>Security controls</h2>${table(
+    ["Control", "Basis / review", "Evidence IDs"],
+    s.securityControls.map((r) => [
+      r.name,
+      `${r.basis} / ${r.reviewState}`,
+      (r.evidenceIds || []).join(", "),
+    ]),
+  )}<h2>STRIDE matrix</h2><p>Component rows. Each cell reports scenario count and review state; checklist prompts are excluded from scenario counts.</p>${table(
+    ["Component", ...CATEGORIES],
+    s.matrix
+      .filter((r) => r.rowKind === "component")
+      .map((r) => [
+        r.name,
+        ...r.cells.map((c) => `${c.scenarioCount} / ${c.state}`),
+      ]),
+  )}<h2>Threat register</h2>${
+    scenarios.length
+      ? scenarios
+          .map(
+            (t) =>
+              `<article><h3>${e(t.name)}</h3><p>${e(t.id)} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${table(
+                ["Field", "Detail"],
+                [
+                  "actorIds",
+                  "asset",
+                  "prerequisites",
+                  "flowIds",
+                  "boundaryIds",
+                  "controls",
+                  "mitigation",
+                  "analysis",
+                  "analysisQuality",
+                  "evidenceIds",
+                  "decision",
+                  "assumptions",
+                ].map((k) => [fieldName(k), display(t[k])]),
+              )}</article>`,
+          )
+          .join("")
+      : "<p>No threat scenarios recorded. Complete STRIDE review and inspect pending coverage; this is not a clean security assessment.</p>"
+  }<h2>Supporting evidence</h2><p>Evidence cited by the threat scenarios above. The complete source evidence ledger is in the full HTML/JSON export.</p>${table(
+    ["ID", "Repository", "File / line", "Basis"],
+    model.evidence
+      .filter((r) => refs.has(r.id))
+      .map((r) => [r.id, r.repository, `${r.path}:${r.line}`, r.basis]),
+  )}<h2>Assumptions and open questions</h2><ul>${[...model.limitations, ...s.questions].map((q) => `<li>${e(q)}</li>`).join("")}</ul>${tokenUsageHtml(model)}</body></html>`;
 }

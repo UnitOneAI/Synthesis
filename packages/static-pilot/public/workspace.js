@@ -778,7 +778,8 @@
     } else if (b.id === "ws-export") {
       const panel = root.querySelector("#ws-export-panel");
       panel.hidden = !panel.hidden;
-      panel.innerHTML = `<h3>Full review package</h3><p>Registers and model exports contain the complete selected scope and revision. These diagram exports use the default service view; use Export this view on the canvas to preserve current filters. Open the HTML report and choose Print → Save as PDF for a printable copy.</p><div class="toolbar">${[
+      panel.innerHTML = `<h3>Full review package</h3><p>Registers and model exports contain the complete selected scope and revision. These diagram exports use the default service view; use Export this view on the canvas to preserve current filters. PDF opens a review report with threat scenarios, component STRIDE rows and grouped boundary records. Complete HTML retains the detailed registers and checklist prompts. Choose Print / Save as PDF to save it locally.</p><div class="toolbar">${[
+        ["pdf", "Threat model · PDF"],
         ["html", "Complete HTML report"],
         ["svg", "System DFD · SVG"],
         ["mermaid", "System DFD · Mermaid"],

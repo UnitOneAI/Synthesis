@@ -335,3 +335,14 @@ Earlier builds omitted the STRIDE response schema even with `SYNTHESIS_STRUCTURE
 5. Download **Export errors** after the call. The `stride.outputContract` field should say `native-json-schema`; attempted batches include safe response-format metadata and reported token usage. If the gateway rejects the structured-output parameter, send this small export for diagnosis before spending on further calls.
 
 STRIDE's native schema is part of its cache identity, including the graph-driven investigation scope. Results produced under the earlier contract are not silently counted as completed under the corrected contract. Keep prior exports for comparison. The source graph itself remains reusable. A standalone STRIDE action stops after three consecutive format failures, preserves any successful packets and usage, and reports `repeated-response-format-failure`.
+
+### Export CWE code evidence and threat model as PDF
+
+Update the review branch and restart using the same source root, saved workspace and gateway configuration. No new dependency, source rebuild or model call is required.
+
+1. **Open saved graph**, then **5 · CWE code review → CWE evidence · PDF**. The report includes all saved scanner and model candidates, source scope, review/assessment status and highlighted code at each available verified location. It is independent of the on-screen finding filter. **CWE evidence · HTML** downloads the same evidence report for offline use.
+2. In the report tab choose **Print / Save as PDF**, then **Save as PDF** in Edge/Chrome (or **Microsoft Print to PDF**). Save the file to your exports folder outside the clones. If the browser blocks the report tab, allow popups for the local Synthesis address or use the HTML export and Ctrl+P.
+3. For the threat model, choose **3 · System model → Export review package → Threat model · PDF**, then the same print/save action. This review report includes DFDs, actors, grouped boundaries, components, controls, component STRIDE rows and actual threat scenarios. Detailed properties, the full evidence ledger and checklist prompts remain in **Complete HTML report** and JSON/CSV exports.
+4. Verify that the report shows the expected completed/pending counts. An exported candidate is not automatically a confirmed vulnerability. Missing/changed local source appears as an evidence gap; the exporter will not fabricate a snippet from a model description.
+
+PDFs and HTML reports are explicit downloads, not automatic traces. Existing JSON exports continue to omit source snippets. Existing graph and diagram coverage limits remain. See [report scope and tests](../testing/pdf-evidence-reports.md).

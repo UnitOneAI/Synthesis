@@ -1,3 +1,4 @@
+import { cweEvidenceReport } from "./evidence-report.mjs";
 import { cweEvidence } from "./cwe-evidence.mjs";
 import { ExplorationStore } from "./exploration.mjs";
 import { exploreStatic } from "./exploration-review.mjs";
@@ -40,6 +41,7 @@ import {
   systemSvg,
   systemMermaid,
   systemReport,
+  systemPrintReport,
   registerCsv,
 } from "./system-exports.mjs";
 import { workspaceStore } from "./workspace-store.mjs";
@@ -510,6 +512,8 @@ export async function serve({
     await Promise.all(
       [
         "index.html",
+        "print-report.html",
+        "print-report.js",
         "app.js",
         "style.css",
         "workspace.js",
@@ -551,6 +555,11 @@ export async function serve({
         const name =
           url.pathname === "/" ? "index.html" : url.pathname.slice(1);
         if (!assets.has(name)) return send(404, { error: "Not found" });
+        if (name === "print-report.html")
+          res.setHeader(
+            "Content-Security-Policy",
+            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+          );
         return send(
           200,
           assets.get(name),
@@ -1322,6 +1331,7 @@ export async function serve({
         if (!model) return send(409, { error: "No completed model" });
         const format = url.searchParams.get("format");
         const names = {
+          "cwe-evidence-html": "cwe-evidence-report.html",
           "security-json": "security-investigations.json",
           "cwe-coverage-json": "cwe-target-coverage.json",
           "cwe-coverage-csv": "cwe-target-coverage.csv",
@@ -1330,6 +1340,7 @@ export async function serve({
           "cwe-csv": "cwe-findings.csv",
           "cwe-sarif": "cwe-findings.sarif",
           html: "threat-model.html",
+          "threat-print-html": "threat-model-review.html",
           securityControls: "control-register.csv",
           actors: "actor-register.csv",
           boundaries: "boundary-register.csv",
@@ -1352,6 +1363,29 @@ export async function serve({
           "Content-Disposition",
           `attachment; filename="${names[format]}"`,
         );
+        if (format === "cwe-evidence-html") {
+          if (["running", "cancelling"].includes(job.status))
+            return send(409, {
+              error:
+                "Wait for analysis to finish before exporting code evidence.",
+            });
+          if (graphExportBusy)
+            return send(409, {
+              error: "Wait for the active export to finish.",
+            });
+          graphExportBusy = true;
+          try {
+            return send(
+              200,
+              await cweEvidenceReport(model, manifest, root, {
+                secrets: [githubToken, modelConfig?.apiKey, token],
+              }),
+              "text/html; charset=utf-8",
+            );
+          } finally {
+            graphExportBusy = false;
+          }
+        }
         if (format === "security-json")
           return send(200, securityRegister(model));
         if (format === "cwe-coverage-json")
@@ -1387,6 +1421,12 @@ export async function serve({
             200,
             usageCsv(model.usageLedger),
             "text/csv; charset=utf-8",
+          );
+        if (format === "threat-print-html")
+          return send(
+            200,
+            systemPrintReport(model),
+            "text/html; charset=utf-8",
           );
         if (format === "html")
           return send(200, systemReport(model), "text/html");

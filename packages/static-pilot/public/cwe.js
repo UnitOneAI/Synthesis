@@ -212,6 +212,8 @@
       $("security-stop").onclick = () =>
         actions.stop().catch((e) => actions.notify(e.message, true));
       document.querySelector('[data-export="security-json"]').disabled = !model;
+      for (const format of ["cwe-pdf", "cwe-evidence-html"])
+        document.querySelector(`[data-export="${format}"]`).disabled = !model;
       investigations();
       const r = model?.cweReview;
       const selectedRepository = $("cwe-target-repository").value;

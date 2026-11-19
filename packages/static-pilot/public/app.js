@@ -831,6 +831,18 @@ $("bindings").onclick = async (event) => {
   }
 };
 async function download(format, preview = false, options = {}) {
+  if (["pdf", "cwe-pdf"].includes(format)) {
+    window.open(
+      "/print-report.html#" +
+        new URLSearchParams({
+          token,
+          format: format === "pdf" ? "threat-print-html" : "cwe-evidence-html",
+        }),
+      "_blank",
+      "noopener,noreferrer",
+    );
+    return;
+  }
   const r = await fetch(
     "/api/export?" + new URLSearchParams({ ...options, format }),
     {
@@ -861,6 +873,7 @@ async function download(format, preview = false, options = {}) {
     json: "model.json",
     usage: "token-usage.csv",
     "cwe-coverage-json": "cwe-target-coverage.json",
+    "cwe-evidence-html": "cwe-evidence-report.html",
     "security-json": "security-investigations.json",
     "cwe-coverage-csv": "cwe-target-coverage.csv",
     "cwe-model-json": "cwe-source-review.json",
