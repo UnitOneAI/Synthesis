@@ -10,7 +10,7 @@ import { serve } from "../src/server.mjs";
 
 import { reportFixture } from "./report-fixture.mjs";
 
-test("evidence report includes verified scanner/model code, gaps, provenance and incomplete coverage", async (t) => {
+test("evidence report includes verified scanner/model code, gaps and evidence provenance", async (t) => {
   const f = await reportFixture();
   t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
   const html = await cweEvidenceReport(f.model, f.manifest, f.root);
@@ -19,7 +19,7 @@ test("evidence report includes verified scanner/model code, gaps, provenance and
   assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /2 candidates/);
-  assert.match(html, /1 \/ 12 packets completed, 11 pending/);
+  assert.doesNotMatch(html, /packets completed, 11 pending/);
   assert.match(html, /2 locations include verified code; 1 unavailable/);
   assert.match(html, /not-assessed/);
   assert.match(html, /missing.py/);
@@ -75,7 +75,7 @@ test("source report export requires workspace access and works with model-only f
   const html = await response.text();
   assert.match(html, /1 candidates/);
   assert.match(html, /verify=False/);
-  assert.match(html, /Scanner: not run/);
+  assert.doesNotMatch(html, /Scanner: not run/);
 });
 
 test("print projection excludes checklist detail and long code ranges disclose omissions", async (t) => {
@@ -133,21 +133,120 @@ test("portfolio evidence report includes all twelve repositories and findings wi
     assert.ok(html.includes(`repo${n} / app.py:3-3`));
 });
 
-
 test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and explicit snapshot status", async (t) => {
   const f = await reportFixture();
   t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
   f.model.aiReview = {
-    status: "partial", basedOnRevision: f.model.modelRevision,
-    stopReason: "request-budget", threats: [], connections: [], questions: [], batches: [],
-    coverage: {completedBatches: 2, totalBatches: 450, failedBatches: 1, pendingBatches: 447},
+    status: "partial",
+    basedOnRevision: f.model.modelRevision,
+    stopReason: "request-budget",
+    threats: [],
+    connections: [],
+    questions: [],
+    batches: [],
+    coverage: {
+      completedBatches: 2,
+      totalBatches: 450,
+      failedBatches: 1,
+      pendingBatches: 447,
+    },
   };
   const html = systemPrintReport(f.model);
-  for (const text of ["Partial STRIDE review", "2 / 450 STRIDE packets completed; 1 failed; 447 pending", "Threat actors", "Trust boundaries", "Overall system DFD", "STRIDE matrix", "latest available review checkpoint", "Exporting does not stop or restart analysis"])
+  for (const text of [
+    "Partial STRIDE review",
+    "2 / 450 STRIDE packets completed; 1 failed; 447 pending",
+    "Threat actors",
+    "Trust boundaries",
+    "Overall system DFD",
+    "STRIDE matrix",
+    "latest available review checkpoint",
+    "Exporting does not stop or restart analysis",
+  ])
     assert.ok(html.includes(text), text);
   f.model.aiReview.status = "stale";
   const stale = systemPrintReport(f.model);
   assert.match(stale, /Historical STRIDE review/);
   assert.match(stale, /historical, not current valid coverage/);
   assert.match(stale, /2 \/ 450 STRIDE packets/);
+});
+
+test("default shareable reports embed UnitOne branding and omit only requested presentation fields", async (t) => {
+  const f = await reportFixture();
+  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  const omitted = [
+    "Community Edition does not provide compiler-level cross-file or cross-repository taint resolution.",
+    "Requested CWE coverage and STRIDE review remain separate scope obligations.",
+  ];
+  f.model.cweReview.limitations = [omitted[0], "Retained scanner limitation."];
+  f.model.cweModelReview.limitations = [
+    omitted[1],
+    "Retained model limitation.",
+  ];
+  const before = structuredClone({
+    scanner: f.model.cweReview,
+    review: f.model.cweModelReview,
+  });
+  const html = await cweEvidenceReport(f.model, f.manifest, f.root);
+  const printed = systemPrintReport(f.model);
+  const logo = await fs.readFile(
+    new URL("../src/assets/unitone-logo.png", import.meta.url),
+  );
+  for (const report of [html, printed]) {
+    assert.ok(
+      report.includes("data:image/png;base64," + logo.toString("base64")),
+    );
+    assert.match(report, /alt="UnitOne logo"/);
+    assert.match(report, /Confidential — Do not share/);
+    assert.match(report, /img-src data:/);
+    assert.doesNotMatch(report, /Generated \d{4}|Finding index/);
+  }
+  for (const text of [
+    ...omitted,
+    "Scanner and model records retain separate identities",
+    "Missing or changed source is explicitly excluded.",
+    "Candidate assessment: not-run",
+    "1 / 12 packets completed",
+  ])
+    assert.ok(!html.includes(text), text);
+  assert.match(html, /Retained scanner limitation/);
+  assert.match(html, /Retained model limitation/);
+  assert.match(
+    html,
+    /Disposition: needs-review · Evidence assessment: not-assessed/,
+  );
+  assert.match(html, /Code evidence is unavailable/);
+  assert.deepEqual(
+    { scanner: f.model.cweReview, review: f.model.cweModelReview },
+    before,
+  );
+});
+
+test("CWE summary counts records once, keeps unmapped issues and counts distinct repositories", async (t) => {
+  const f = await reportFixture();
+  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  f.model.cweModelReview.findings.push({
+    ...f.model.cweModelReview.findings[0],
+    id: "unmapped",
+    cwe: null,
+    kind: "control-gap",
+    locations: [f.ref, f.ref, { ...f.ref, repository: "other-repository" }],
+  });
+  const html = await cweEvidenceReport(f.model, f.manifest, f.root);
+  const summary = html.match(/<table class="cwe-summary">[\s\S]*?<\/table>/)[0];
+  assert.match(
+    summary,
+    /<td>CWE-295<\/td><td>2<\/td><td>1<\/td><td>1<\/td><td>1<\/td>/,
+  );
+  assert.match(
+    summary,
+    /<td>No CWE mapping<\/td><td>1<\/td><td>0<\/td><td>1<\/td><td>2<\/td>/,
+  );
+  assert.match(
+    summary,
+    /<td>Total<\/td><td>3<\/td><td>1<\/td><td>2<\/td><td>2<\/td>/,
+  );
+  assert.match(
+    html,
+    /Counts describe candidate records, not confirmed vulnerabilities/,
+  );
 });

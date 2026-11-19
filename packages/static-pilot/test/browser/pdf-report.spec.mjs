@@ -40,12 +40,53 @@ test("CWE and threat model PDF previews show verified evidence and printable reg
       report.getByRole("button", { name: "Print / Save as PDF", exact: true }),
     ).toBeEnabled();
     expect(report.url()).not.toContain(app.token);
+    await expect(
+      report.getByRole("heading", { name: "CWE summary", exact: true }),
+    ).toBeVisible();
+    await expect(report.locator(".cwe-summary tbody tr").first()).toHaveText(
+      "CWE-2952111",
+    );
     await expect(report.locator(".code-line.cited").first()).toContainText(
       "verify=False",
     );
-    await expect(report.locator("#report-content")).toContainText(
-      "1 / 12 packets completed, 11 pending",
+    await expect(report.locator("#report-content")).not.toContainText(
+      "packets completed, 11 pending",
     );
+    await expect(
+      report.getByRole("heading", { name: "Finding index", exact: true }),
+    ).toHaveCount(0);
+    await expect(report.locator(".report-confidential")).toHaveText(
+      "Confidential — Do not share",
+    );
+    await expect(report.getByAltText("UnitOne logo")).toBeVisible();
+    await expect
+      .poll(() =>
+        report
+          .getByAltText("UnitOne logo")
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      )
+      .toBe(true);
+    const offlinePath = testInfo.outputPath("cwe-offline.html");
+    const htmlResponse = await page.request.get(
+      app.url.split("/#")[0] + "/api/export?format=cwe-evidence-html",
+      { headers: { "X-Synthesis-Token": app.token } },
+    );
+    await fs.writeFile(offlinePath, await htmlResponse.text());
+    const offline = await context.newPage();
+    await offline.goto(
+      (await import("node:url")).pathToFileURL(offlinePath).href,
+    );
+    await expect
+      .poll(() =>
+        offline
+          .getByAltText("UnitOne logo")
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      )
+      .toBe(true);
+    await expect(offline.locator(".report-confidential")).toHaveText(
+      "Confidential — Do not share",
+    );
+    await offline.close();
     await expect(report.locator("#report-content")).toContainText(
       "Code evidence is unavailable",
     );
@@ -96,6 +137,16 @@ test("CWE and threat model PDF previews show verified evidence and printable reg
       await expect(
         threat.getByRole("heading", { name, exact: true }),
       ).toBeVisible();
+    await expect(threat.locator(".report-confidential")).toHaveText(
+      "Confidential — Do not share",
+    );
+    await expect
+      .poll(() =>
+        threat
+          .getByAltText("UnitOne logo")
+          .evaluate((img) => img.complete && img.naturalWidth > 0),
+      )
+      .toBe(true);
     await threat.pdf({
       path: testInfo.outputPath("threat-model.pdf"),
       printBackground: true,

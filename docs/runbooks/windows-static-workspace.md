@@ -404,3 +404,10 @@ Open **4 · STRIDE matrix → Export STRIDE review · PDF**. It works before the
 In the new tab select **Print / Save as PDF**, choose **Save as PDF** in Edge/Chrome, and save outside the source clones. The report includes the overall system DFD, threat actors, trust boundaries and crossings, controls, component STRIDE matrix, prioritized threat scenarios with T- references, and supporting evidence. Pending and failed counts remain visible. Inferred actors/boundaries remain labeled; checklist prompts are not reported as threat scenarios. Stale exports are explicitly historical.
 
 The same PDF remains available under **System model → Export review package → Threat model · PDF**. For an offline HTML copy use **Complete HTML report**. Browser popups must be allowed for the local Synthesis page. A partial report does not claim unreviewed areas are safe.
+
+
+## Branded PDF reports and CWE summary
+
+After updating and restarting Synthesis, existing saved findings export with the UnitOne logo and **Confidential — Do not share** notice. No graph rebuild, model rerun, new VM dependency or report setting is required. Use **CWE code review → CWE evidence · PDF** or **STRIDE matrix → Export STRIDE review · PDF**. The CWE report starts with a compact summary by CWE, candidate count, scanner/model totals and distinct affected repository counts; unmapped security issues remain included.
+
+In Edge/Chrome's print dialog choose **Save as PDF** and turn **Headers and footers** off to exclude browser-added timestamps, URLs and titles. Save outside the repositories. The downloaded CWE HTML uses the same layout and embeds the logo for offline printing. Detailed execution/coverage data remain in the UI and JSON exports; STRIDE's partial or historical review status remains in its PDF.

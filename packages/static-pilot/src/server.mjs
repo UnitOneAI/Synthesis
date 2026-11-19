@@ -618,7 +618,7 @@ export async function serve({
         if (name === "print-report.html")
           res.setHeader(
             "Content-Security-Policy",
-            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
           );
         return send(
           200,
