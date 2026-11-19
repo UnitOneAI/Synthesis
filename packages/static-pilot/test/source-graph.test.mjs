@@ -114,7 +114,7 @@ test("literal project references link collected projects across repos without cr
   }
 });
 
-async function portfolio() {
+async function portfolio(methodsPerRepository = 35) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-portfolio-"));
   const repositories = [];
   for (let r = 0; r < 12; r++) {
@@ -122,7 +122,7 @@ async function portfolio() {
     repositories.push({ name });
     await fs.mkdir(path.join(root, name));
     const methods = Array.from(
-      { length: 35 },
+      { length: methodsPerRepository },
       (_, n) =>
         `[HttpGet("/r${r}/operation${n}")] public void Operation${n}() { client.GetAsync("/remote/${n}"); }`,
     ).join("\n");
@@ -375,7 +375,7 @@ test("staged worker continues and cancels review without rescanning source", asy
         body: JSON.stringify(body),
       });
     const wait = async () => {
-      for (let i = 0; i < 200; i++) {
+      for (let i = 0; i < 1000; i++) {
         const s = await (await fetch(base + "/api/status", { headers })).json();
         if (s.status === "ready") return;
         if (s.status === "failed") throw new Error(s.message);
@@ -431,10 +431,12 @@ test("staged worker continues and cancels review without rescanning source", asy
     await post("review", {
       modelRevision: model.modelRevision,
       maxBatches: 12,
+      runUntilComplete: true,
+      tokenTarget: 1,
       includeSourceExcerpts: false,
     });
     let started = false;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 1000; i++) {
       const status = await (
         await fetch(base + "/api/status", { headers })
       ).json();
@@ -475,6 +477,27 @@ test("staged worker continues and cancels review without rescanning source", asy
       await fs.readFile(path.join(harness, "state", "snapshot.json"), "utf8"),
     );
     assert.equal(saved.data.model.usageLedger.attempts.length, 4);
+    await post("review", {
+      modelRevision: model.modelRevision,
+      maxBatches: 1,
+      runUntilComplete: true,
+      tokenTarget: 1,
+      includeSourceExcerpts: false,
+    });
+    await wait();
+    model = await (await fetch(base + "/api/model", { headers })).json();
+    assert.equal(model.aiReview.coverage.pendingBatches, 0);
+    assert.equal(model.aiReview.runControl.mode, "until-complete");
+    assert.equal(model.aiReview.runProgress.targetExceeded, true);
+    assert.ok(model.aiReview.runProgress.requests > 1);
+    const continuousTokens = model.tokenUsage.totalTokens;
+    const status = await (
+      await fetch(base + "/api/status", { headers })
+    ).json();
+    assert.equal(
+      status.reviewRuns.stride.runProgress.reportedTokens,
+      model.aiReview.runProgress.reportedTokens,
+    );
     await post("analyze", {
       profile: "test",
       repositories: [{ name: "repo-0" }],
@@ -482,7 +505,7 @@ test("staged worker continues and cancels review without rescanning source", asy
     });
     await wait();
     model = await (await fetch(base + "/api/model", { headers })).json();
-    assert.equal(model.tokenUsage.totalTokens, 360);
+    assert.equal(model.tokenUsage.totalTokens, continuousTokens);
     assert.equal(model.tokenUsage.unknownRequests, 1);
   } finally {
     child.kill();
@@ -680,13 +703,23 @@ test("STRIDE stops repeated format failures with usage and safe shape diagnostic
           usage: { input_tokens: 20, output_tokens: 10 },
         });
       },
-      { maxBatches: 12, trace: (event, data) => events.push({ event, data }) },
+      {
+        maxBatches: 12,
+        runUntilComplete: true,
+        trace: (event, data) => events.push({ event, data }),
+      },
     );
     assert.equal(calls, 3);
     assert.equal(model.aiReview.status, "failed");
     assert.equal(model.aiReview.stopReason, "repeated-response-format-failure");
     assert.equal(model.aiReview.coverage.completedBatches, 0);
-    assert.equal(model.usageLedger.attempts.reduce((sum, a) => sum + a.usage.totalTokens, 0), 90);
+    assert.equal(
+      model.usageLedger.attempts.reduce(
+        (sum, a) => sum + a.usage.totalTokens,
+        0,
+      ),
+      90,
+    );
     assert.equal(model.usageLedger.attempts.length, 3);
     assert.ok(
       model.aiReview.batches.every((b) => b.responseShape.textCharacters > 0),
@@ -699,4 +732,85 @@ test("STRIDE stops repeated format failures with usage and safe shape diagnostic
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("continuous STRIDE crosses 100 calls and elapsed budget across twelve repos, retains tokens and resumes", async (t) => {
+  const { root, model } = await portfolio(120);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const plan = reviewPlan(model);
+  assert.ok(plan.batches.length > 100);
+  let calls = 0,
+    now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const events = [];
+  const fetchImpl = async () => {
+    calls++;
+    now += 31 * 60 * 1000;
+    const r = await response().json();
+    r.usage = { input_tokens: 100, output_tokens: 20 };
+    return Response.json(r);
+  };
+  await enrichGraphModel(model, config, new Map(), fetchImpl, {
+    maxBatches: 1,
+    runUntilComplete: true,
+    tokenTarget: 1,
+    plan,
+    trace: (event, data) => events.push({ event, data }),
+  });
+  assert.equal(calls, plan.batches.length);
+  assert.equal(model.aiReview.coverage.pendingBatches, 0);
+  assert.equal(model.aiReview.coverage.failedBatches, 0);
+  assert.equal(model.aiReview.coverage.repositories.length, 12);
+  assert.equal(model.aiReview.stopReason, "plan-exhausted");
+  assert.equal(model.aiReview.runProgress.reportedTokens, calls * 120);
+  assert.equal(model.aiReview.runProgress.targetExceeded, true);
+  assert.equal(
+    events.filter((e) => e.event === "review.token-target-reached").length,
+    1,
+  );
+  const ids = model.aiReview.batches.map((b) => b.id);
+  const restored = JSON.parse(JSON.stringify(model));
+  await enrichGraphModel(restored, config, new Map(), fetchImpl, {
+    runUntilComplete: true,
+    plan,
+  });
+  assert.equal(calls, plan.batches.length);
+  assert.deepEqual(
+    restored.aiReview.batches.map((b) => b.id),
+    ids,
+  );
+  assert.equal(restored.aiReview.runProgress.requests, 0);
+});
+
+test("continuous STRIDE cancellation retains successes and failed provider halts", async (t) => {
+  const { root, model } = await portfolio();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let calls = 0;
+  await enrichGraphModel(
+    model,
+    config,
+    new Map(),
+    async () => {
+      calls++;
+      controller.abort();
+      return response();
+    },
+    { runUntilComplete: true, signal: controller.signal },
+  );
+  assert.equal(calls, 1);
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  await enrichGraphModel(
+    model,
+    config,
+    new Map(),
+    async () => {
+      calls++;
+      return Response.json({ error: { message: "denied" } }, { status: 403 });
+    },
+    { runUntilComplete: true },
+  );
+  assert.equal(calls, 2);
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  assert.equal(model.aiReview.stopReason, "provider-failure");
 });

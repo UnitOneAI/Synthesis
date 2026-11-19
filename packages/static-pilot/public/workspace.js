@@ -24,6 +24,8 @@
     providerAvailable = false,
     jobState = { status: "idle" },
     requestBudget = 12,
+    runUntilComplete = false,
+    tokenTarget = "",
     threatIndex = new Map(),
     selected = "",
     view = "system",
@@ -291,7 +293,7 @@
     if (view === "matrix") {
       const review = model.aiReview,
         c = review?.coverage;
-      body.innerHTML = `<div class="ws-analysis"><div><strong>${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p class="hint">Request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+      body.innerHTML = `<div class="ws-analysis"><div><strong>${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}" ${runUntilComplete ? "disabled" : ""}></label><label><input id="ws-until-complete" type="checkbox" ${runUntilComplete ? "checked" : ""}>Run until complete</label><label>Token target this action (advisory)<input id="ws-token-target" type="number" min="1" step="1" placeholder="No target" value="${e(tokenTarget)}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p id="ws-run-progress" role="status">${e(window.SynthesisReviewRun?.(model.aiReview) || "")}</p><p class="hint">Run until complete reviews pending packets across the saved repository scope without the 100-call or elapsed-time stop. Token targets are advisory and never stop a run. Stop at any time; provider failures and repeated invalid responses require attention. In bounded mode, request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
         .filter((r) => r.rowKind === (window.wsRowKind || "component"))
         .map(
           (r) =>
@@ -791,7 +793,10 @@
       try {
         b.disabled = true;
         requestBudget = Number(root.querySelector("#ws-request-budget").value);
-        await startReview(requestBudget);
+        await startReview(requestBudget, {
+          runUntilComplete,
+          tokenTarget: tokenTarget === "" ? null : Number(tokenTarget),
+        });
       } catch (error) {
         notify(error.message, true);
       }
@@ -865,6 +870,15 @@
   root.addEventListener("change", (event) => {
     const id = event.target.id;
     if (id === "ws-gap-search" || id === "ws-search") return;
+    if (id === "ws-until-complete") {
+      runUntilComplete = event.target.checked;
+      root.querySelector("#ws-request-budget").disabled = runUntilComplete;
+      return;
+    }
+    if (id === "ws-token-target") {
+      tokenTarget = event.target.value;
+      return;
+    }
     if (id === "ws-request-budget") {
       requestBudget = Number(event.target.value);
       return;
@@ -958,6 +972,12 @@
     },
     setStatus(value) {
       jobState = value;
+      const progress = root.querySelector("#ws-run-progress");
+      if (progress)
+        progress.textContent =
+          window.SynthesisReviewRun?.(
+            value.reviewRuns?.stride || model.aiReview,
+          ) || "";
       const meter = root.querySelector("#ws-usage");
       if (meter && value.tokenUsage) {
         const html = usageHtml(value.tokenUsage);
@@ -974,7 +994,9 @@
       }
       const run = root.querySelector("[data-start-review]"),
         stop = root.querySelector("[data-stop-review]");
-      if (run) run.disabled = !value.inference || value.status === "running";
+      if (run)
+        run.disabled =
+          !value.inference || ["running", "cancelling"].includes(value.status);
       if (stop)
         stop.hidden = !(value.status === "running" && value.mode === "review");
     },

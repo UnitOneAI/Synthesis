@@ -346,7 +346,9 @@ function renderModel() {
       tab("exploration");
       await window.SynthesisExploration.showIssue(issue);
     },
-    startReview: async (budget) => {
+    startReview: async (budget, controls = {}) => {
+      $("review-until-complete").checked = controls.runUntilComplete === true;
+      $("review-token-target").value = controls.tokenTarget ?? "";
       $("review-budget").value = budget;
       await $("run-review").onclick();
       await status();
@@ -377,12 +379,13 @@ function renderModel() {
       );
       await status();
     },
-    startModel: async (budget, includeSourceCode) => {
+    startModel: async (budget, includeSourceCode, controls = {}) => {
       jobNavigationRevision = navigationRevision;
       await api("cwe/model", {
         modelRevision: model.modelRevision,
         budget,
         includeSourceCode,
+        ...controls,
       });
       clearInterval(polling);
       polling = setInterval(
@@ -684,6 +687,11 @@ $("run-review").onclick = async () => {
     await api("review", {
       modelRevision: model.modelRevision,
       maxBatches: Number($("review-budget").value),
+      runUntilComplete: $("review-until-complete").checked,
+      tokenTarget:
+        $("review-token-target").value === ""
+          ? null
+          : Number($("review-token-target").value),
       includeSourceExcerpts: $("source-excerpts").checked,
     });
     $("run-review").disabled = true;

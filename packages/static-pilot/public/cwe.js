@@ -234,7 +234,29 @@
         ? `${r.status} · ${r.findings.length} potential weaknesses · ${r.rulePack.rules.length} rules · ${r.tokens} model tokens${r.error ? " · " + r.error : ""}`
         : "Ready to scan the repositories in this source graph.";
       $("cwe-coverage").innerHTML = r
-        ? `<table><thead><tr><th>Repository</th><th>Status</th><th>Scanned / eligible</th><th>Unsupported</th><th>Gaps</th><th>Graph snapshot</th></tr></thead><tbody>${r.repositories.map((v) => `<tr><td>${esc(v.name)}</td><td>${esc(v.status)}</td><td>${v.scannedFiles} / ${v.eligibleFiles}</td><td>${v.unsupportedFiles}</td><td>${esc(v.errors.map((e) => e.type).join(", "))}${v.skipped.length ? " · " + v.skipped.length + " skipped" : ""}</td><td>${v.matchesGraphSnapshot ? "Matches" : "Unverified or changed"}</td></tr>`).join("")}</tbody></table><p>${r.limitations.map(esc).join(" ")}</p>`
+        ? `<table><thead><tr><th>Repository</th><th>Status</th><th>Scanned / eligible</th><th>Unsupported</th><th>Gaps</th><th>Graph snapshot</th></tr></thead><tbody>${r.repositories
+            .map(
+              (v) =>
+                `<tr><td>${esc(v.name)}</td><td>${esc(v.status)}</td><td>${v.scannedFiles} / ${v.eligibleFiles}</td><td>${v.unsupportedFiles}</td><td>${
+                  v.errors.length || v.skipped.length
+                    ? `<details><summary>${v.errors.length} scanner errors · ${v.skipped.length} skipped files</summary><ul>${v.errors
+                        .slice(0, 50)
+                        .map(
+                          (error) =>
+                            `<li>${esc(error.type)}${error.path ? " · " + esc(error.path) : ""}</li>`,
+                        )
+                        .join("")}${v.skipped
+                        .slice(0, 50)
+                        .map((path) => `<li>Skipped · ${esc(path)}</li>`)
+                        .join(
+                          "",
+                        )}</ul><p>Showing up to 50 errors and 50 skipped paths. Export Semgrep JSON for all recorded details.</p></details>`
+                    : "None recorded"
+                }</td><td>${v.matchesGraphSnapshot ? "Matches" : "Unverified or changed"}</td></tr>`,
+            )
+            .join(
+              "",
+            )}</tbody></table><p>Unsupported files are outside the local scanner adapter: supported extensions are .py, .js, .mjs, .jsx, .ts, .tsx, .cs, .c, .h, .cpp, .cc and .hpp. Graph and model review have separate coverage. Partial parsing means some syntax was not analyzed; it is not a clean result.</p><p>${r.limitations.map(esc).join(" ")}</p>`
         : "";
       $("cwe-run").onclick = () =>
         actions.start().catch((e) => actions.notify(e.message, true));
@@ -249,8 +271,20 @@
           .startModel(
             Number($("cwe-model-budget").value),
             $("cwe-model-consent").checked,
+            {
+              runUntilComplete: $("cwe-model-until-complete").checked,
+              tokenTarget:
+                $("cwe-model-token-target").value === ""
+                  ? null
+                  : Number($("cwe-model-token-target").value),
+            },
           )
           .catch((e) => actions.notify(e.message, true));
+      $("cwe-model-until-complete").onchange = () => {
+        $("cwe-model-budget").disabled = $("cwe-model-until-complete").checked;
+      };
+      $("cwe-run-progress").textContent =
+        window.SynthesisReviewRun?.(review) || "";
       $("cwe-model-stop").onclick = () =>
         actions.stop().catch((e) => actions.notify(e.message, true));
       $("cwe-model-status").textContent = review
@@ -291,6 +325,10 @@
       detail(current);
     },
     setStatus(s) {
+      $("cwe-run-progress").textContent =
+        window.SynthesisReviewRun?.(
+          s.reviewRuns?.cwe || model?.cweModelReview,
+        ) || "";
       $("security-run").disabled =
         !s.hasModel ||
         !s.inference ||

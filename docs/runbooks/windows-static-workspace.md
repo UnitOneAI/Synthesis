@@ -355,3 +355,17 @@ After installing the threat-review presentation update, reopen the saved graph. 
 - **Trust boundaries** shows TB- references, trust transition, enforcement and named from/to crossings with F- references. Click a crossing to open its flow. The DFD badge uses the selected trust lens; a pending boundary is not a verified control or deployed trust zone.
 - **STRIDE matrix** separates Not analyzed, Analysis failed, Partially analyzed, Stale analysis, Scenarios identified, and Analyzed — no scenario identified. Reviewer dispositions remain separate. Inspect failure counts and Export errors before increasing a failing request budget.
 - CWE source review and STRIDE are separate actions. Successful CWE calls do not fill the STRIDE matrix. To continue STRIDE, open **4 · STRIDE matrix**, start with one request to verify the gateway, then raise the budget only after reviewing that outcome. Completed compatible packets are retained.
+
+## Run STRIDE and CWE until the planned scope is finished
+
+After updating and restarting with the same source root, workspace and provider, choose **Open saved graph**.
+
+1. In **4 · STRIDE matrix**, check **Run until complete**. The bounded request-count input is disabled. Optionally enter **Token target this action (advisory)**; leave blank for no target. Choose **Run or continue STRIDE analysis** once.
+2. Track completed/pending/failed packets, current-action reported tokens, unknown usage and repository review progress. Reaching the token target displays a warning but continues. The run does not stop after 100 calls or at the normal 24-minute action limit.
+3. Use **Stop review** to interrupt. Compatible completed packets are retained. Closing the browser does not stop the server-side run; stopping PowerShell/server does. After a server restart, open the saved graph and explicitly start again to resume.
+4. In **5 · CWE code review → CWE source review**, enable **Send redacted source segments**, check **Run until complete across selected repositories**, optionally set the advisory token target, and choose **Run or continue CWE source review**. This reviews source packets and graph interactions. Semgrep scanning is separate and already scans all selected local clones. Independent evidence assessment remains separately budgeted.
+5. A provider failure, repeated invalid responses, changed source or persistence failure can stop a run. Inspect **Export errors** and the reported stop reason before resuming. A completed pass with failed packets or coverage gaps is still partial. No result promises every possible weakness was found.
+6. Expand **Gaps** in scanner coverage to see recorded parsing errors and skipped paths. Unsupported file types are outside the scanner adapter, not automatically outside graph/model analysis.
+7. Open a scanner/model finding and expand **Code evidence** to see the hash-checked local source window with cited lines highlighted. Use **CWE evidence · PDF → Print / Save as PDF** to include those windows in a report. JSON exports do not contain source snippets.
+
+Token totals include failed attempts and retries. The advisory target is per action; the workspace token meter and CSV include historical requests. Existing trace and export locations remain unchanged. See [continuous review design and tests](../testing/continuous-review.md).

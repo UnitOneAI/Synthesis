@@ -239,3 +239,7 @@ This applies native JSON schemas to source-review and security-assessment reques
 With workspace persistence enabled, `exploration.sqlite` retains review history separately from `graph.sqlite`. The graph API paginates and reports omissions; the UI groups requested checks without deleting their outcomes. Selected JSON/SVG exports are capped at 3 MiB. Use the existing focused graph packages when transferring surrounding source and controls.
 
 See [the ARTEX comparison and implemented architecture](../../docs/design/static-exploration-graph.md) and [the Windows runbook](../../docs/runbooks/windows-static-workspace.md). Update main using the Windows runbook and reopen the existing saved graph when source and extraction rules are unchanged.
+
+### Continuous STRIDE and CWE source review
+
+Both model-review views now offer **Run until complete** with an optional advisory token target. The operation continues beyond the bounded request/time limits, checkpoints each packet and retains Stop/resume. Live progress distinguishes completed, pending and failed work; token targets warn without stopping. Provider/evidence/persistence failures remain explicit. CWE code is loaded in bounded transient windows; no graph rebuild is required for unchanged source. See the [Windows instructions](../../docs/runbooks/windows-static-workspace.md#run-stride-and-cwe-until-the-planned-scope-is-finished) and [behavior/tests](../../docs/testing/continuous-review.md).

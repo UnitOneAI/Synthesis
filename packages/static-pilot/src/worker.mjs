@@ -71,6 +71,8 @@ try {
           fetch,
           {
             maxBatches: workerData.options.reviewBatches,
+            runUntilComplete: workerData.options.runUntilComplete,
+            tokenTarget: workerData.options.tokenTarget,
             progress,
             checkpoint,
             trace,

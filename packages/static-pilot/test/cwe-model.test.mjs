@@ -390,6 +390,7 @@ test("repeated gateway prose failures stop before spending the full budget and r
     sourceRoot: root,
     config,
     budget: 12,
+    runUntilComplete: true,
     trace: (event, data) => events.push({ event, ...data }),
     fetchImpl: async () => {
       calls++;
@@ -443,7 +444,7 @@ test("repeated gateway prose failures stop before spending the full budget and r
       ),
   });
   assert.equal(continued.completedBatches, 1);
-  assert.equal(continued.stopReason, undefined);
+  assert.equal(continued.stopReason, "request-budget");
   assert.equal(continued.status, "partial");
 });
 test("native JSON CWE review sends the exact gateway deployment and records validated target coverage", async (t) => {
@@ -468,4 +469,112 @@ test("native JSON CWE review sends the exact gateway deployment and records vali
   assert.equal(report.outputContract, "native-json-schema");
   assert.equal(report.completedBatches, 1);
   assert.equal(report.batches[0].targetReviews.length, 25);
+});
+
+test("continuous CWE reviews over 100 packets across twelve repos with bounded source windows and advisory tokens", async (t) => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "synthesis-continuous-cwe-"),
+  );
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const manifest = {
+    profile: "continuous-test",
+    repositories: Array.from({ length: 12 }, (_, i) => ({ name: `repo-${i}` })),
+  };
+  for (const r of manifest.repositories) {
+    await fs.mkdir(path.join(root, r.name));
+    await fs.writeFile(
+      path.join(root, r.name, "large.py"),
+      Array.from(
+        { length: 6500 },
+        (_, i) => `# static source context ${i}`,
+      ).join("\n"),
+    );
+  }
+  const model = await analyze(manifest, { sourceRoot: root });
+  let calls = 0;
+  const repos = new Set(),
+    events = [];
+  const fetchImpl = async (_, o) => {
+    calls++;
+    const packet = JSON.parse(JSON.parse(o.body).messages[0].content);
+    packet.records.forEach((r) => repos.add(r.repository));
+    assert.ok(packet.records.every((r) => typeof r.code === "string"));
+    return response({ findings: [], limitations: [] }, packet);
+  };
+  const report = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    runUntilComplete: true,
+    tokenTarget: 1,
+    fetchImpl,
+    trace: (event, data) => events.push({ event, ...data }),
+  });
+  assert.ok(calls > 100);
+  assert.equal(calls, report.totalBatches);
+  assert.equal(repos.size, 12);
+  assert.equal(report.pendingBatches, 0);
+  assert.equal(report.failedBatches, 0);
+  assert.equal(report.runProgress.reportedTokens, calls * 120);
+  assert.equal(report.runProgress.targetExceeded, true);
+  assert.equal(
+    events.filter((e) => e.event === "cwe-model.token-target-reached").length,
+    1,
+  );
+  const windows = events.filter(
+    (e) => e.event === "cwe-model.source-window-loaded",
+  );
+  assert.ok(windows.length > 1);
+  assert.ok(windows.every((w) => w.packets <= 100));
+  assert.ok(report.repositories.every((r) => r.reviewedSegments === r.chunks));
+  const restored = JSON.parse(JSON.stringify(model)),
+    before = calls;
+  await reviewCweCode(manifest, restored, {
+    sourceRoot: root,
+    config,
+    runUntilComplete: true,
+    fetchImpl,
+  });
+  assert.equal(calls, before);
+  assert.equal(restored.cweModelReview.runProgress.requests, 0);
+  assert.ok(
+    !JSON.stringify(restored.cweModelReview).includes("static source context"),
+  );
+});
+
+test("continuous CWE cancellation and source changes keep saved work without uncontrolled calls", async (t) => {
+  const { root, manifest, model } = await fixture(t),
+    controller = new AbortController();
+  let calls = 0;
+  await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    runUntilComplete: true,
+    signal: controller.signal,
+    fetchImpl: async (_, o) => {
+      calls++;
+      controller.abort();
+      return response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(o.body).messages[0].content),
+      );
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(model.cweModelReview.status, "cancelled");
+  assert.equal(model.cweModelReview.completedBatches, 1);
+  await fs.appendFile(path.join(root, "two", "query.py"), "\n# changed\n");
+  await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    runUntilComplete: true,
+    fetchImpl: async () => {
+      calls++;
+      throw Error("must not call");
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(model.cweModelReview.status, "failed");
+  assert.equal(model.cweModelReview.completedBatches, 1);
+  assert.match(model.cweModelReview.error, /Source changed/);
 });

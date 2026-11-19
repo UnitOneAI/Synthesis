@@ -1,3 +1,4 @@
+import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import {
   ISSUE_KINDS,
   SECURITY_GUIDANCE,
@@ -210,6 +211,8 @@ export async function reviewCweCode(
     sourceRoot,
     config,
     budget = 12,
+    runUntilComplete = false,
+    tokenTarget,
     signal,
     trace,
     checkpoint,
@@ -221,6 +224,8 @@ export async function reviewCweCode(
     throw Error("Configure an approved model provider before CWE code review");
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("CWE request budget must be 1–100");
+  const runControl = reviewRunControl({ runUntilComplete, tokenTarget });
+  const continuous = runControl.mode === "until-complete";
   const scannerFindings =
     model.cweReview?.basedOnRevision === model.modelRevision
       ? model.cweReview.findings.filter((f) => f.sourceMatchesGraph !== false)
@@ -278,7 +283,8 @@ export async function reviewCweCode(
     repositories: [],
     gaps: [],
     callsThisRun: 0,
-    budget,
+    budget: continuous ? null : budget,
+    runControl,
     limitations: [
       "Static source review with proposed CWE mappings; findings require security review.",
       "All collected files and supported graph connections are planned. Exclusions and resource limits remain explicit.",
@@ -286,7 +292,20 @@ export async function reviewCweCode(
     ],
   };
   model.cweModelReview = report;
-  const save = async () => checkpoint?.(report);
+  const save = async () => {
+    report.completedBatches = report.batches.filter(
+      (b) => b.status === "completed",
+    ).length;
+    report.failedBatches = report.batches.filter(
+      (b) => b.status === "failed",
+    ).length;
+    report.pendingBatches = Math.max(
+      0,
+      (report.totalBatches || 0) - report.completedBatches,
+    );
+    await updateReviewProgress(model, report, trace, "cwe-model");
+    await checkpoint?.(report);
+  };
   const check = () => {
     if (signal?.aborted) throw Error("CWE model review cancelled");
   };
@@ -296,7 +315,7 @@ export async function reviewCweCode(
   const done = new Set(
     report.batches.filter((b) => b.status === "completed").map((b) => b.id),
   );
-  beginUsageRun(model);
+  report.runId = beginUsageRun(model);
   let consecutiveFormatFailures = 0;
   try {
     // First pass builds metadata only. No code excerpts are saved in the workspace.
@@ -480,41 +499,48 @@ export async function reviewCweCode(
       recordIds: b.records.map((r) => r.id),
     }));
     report.totalSegments = chunks.length;
-    const selected = planned.filter((p) => !done.has(p.id)).slice(0, budget);
-    const needed = new Map(
-      selected.flatMap((p) => p.records).map((r) => [r.id, r]),
-    );
-    const payload = new Map();
-    for (const source of manifest.repositories.filter(
-      (r) => r.selected !== false && r.source !== "github",
-    )) {
-      if (![...needed.values()].some((r) => r.repository === source.name))
-        continue;
-      await localSource(source, sourceRoot, {
-        onEntry: () => {},
-        onFile: async (f) => {
-          check();
-          const records = [...needed.values()].filter(
-            (r) => r.repository === source.name && r.path === f.path,
-          );
-          if (!records.length) return;
-          const lines = f.text.split("\n");
-          for (const r of records) {
-            if (r.blobSha256 !== f.hash)
-              throw Error("Source changed while preparing CWE evidence");
-            payload.set(r.id, {
-              ...r,
-              code: redact(
-                lines
-                  .slice(r.startLine - 1, r.endLine)
-                  .map((line, i) => `${r.startLine + i}: ${line}`)
-                  .join("\n"),
-              ),
-            });
-          }
-        },
-      });
-    }
+    const selected = planned
+      .filter((p) => !done.has(p.id))
+      .slice(0, continuous ? undefined : budget);
+    // Keep at most 100 packets of source in memory, even during an unattended run.
+    const loadPayload = async (window) => {
+      const needed = new Map(
+        window.flatMap((p) => p.records).map((r) => [r.id, r]),
+      );
+      const payload = new Map();
+      for (const source of manifest.repositories.filter(
+        (r) => r.selected !== false && r.source !== "github",
+      )) {
+        if (![...needed.values()].some((r) => r.repository === source.name))
+          continue;
+        await localSource(source, sourceRoot, {
+          onEntry: () => {},
+          onFile: async (f) => {
+            check();
+            const records = [...needed.values()].filter(
+              (r) => r.repository === source.name && r.path === f.path,
+            );
+            if (!records.length) return;
+            const lines = f.text.split("\n");
+            for (const r of records) {
+              if (r.blobSha256 !== f.hash)
+                throw Error("Source changed while preparing CWE evidence");
+              payload.set(r.id, {
+                ...r,
+                code: redact(
+                  lines
+                    .slice(r.startLine - 1, r.endLine)
+                    .map((line, i) => `${r.startLine + i}: ${line}`)
+                    .join("\n"),
+                ),
+              });
+            }
+          },
+        });
+      }
+      return payload;
+    };
+    let payload = new Map();
     await trace?.("cwe-model.planned", {
       counts: {
         segments: chunks.length,
@@ -522,12 +548,36 @@ export async function reviewCweCode(
         selected: selected.length,
         repositories: report.repositories.length,
       },
-      budget,
+      budget: report.budget,
+      runControl,
     });
     await save();
-    for (const batch of selected) {
+    const doneRecords = new Set(
+      report.batches
+        .filter((b) => b.status === "completed")
+        .flatMap((b) => b.recordIds),
+    );
+    const chunkById = new Map(chunks.map((r) => [r.id, r]));
+    const repoByName = new Map(report.repositories.map((r) => [r.name, r]));
+    for (const r of report.repositories) r.reviewedSegments = 0;
+    for (const id of doneRecords) {
+      const r = chunkById.get(id);
+      if (r) repoByName.get(r.repository).reviewedSegments++;
+    }
+    for (let batchIndex = 0; batchIndex < selected.length; batchIndex++) {
+      const batch = selected[batchIndex];
       check();
-      if (report.callsThisRun >= budget) break;
+      if (!continuous && report.callsThisRun >= budget) break;
+      if (batchIndex % 100 === 0) {
+        payload.clear();
+        payload = await loadPayload(
+          selected.slice(batchIndex, batchIndex + 100),
+        );
+        await trace?.("cwe-model.source-window-loaded", {
+          packets: Math.min(100, selected.length - batchIndex),
+          records: payload.size,
+        });
+      }
       const records = batch.records.map((r) => payload.get(r.id));
       if (records.some((r) => !r))
         throw Error("Selected CWE source evidence became unavailable");
@@ -597,7 +647,7 @@ export async function reviewCweCode(
       report.batches = report.batches.filter((b) => b.id !== batch.id);
       report.batches.push(entry);
       progress?.(
-        `CWE model review: ${report.callsThisRun}/${budget} requests this run`,
+        `CWE model review: ${report.callsThisRun}${continuous ? "" : "/" + budget} requests this run · ${report.completedBatches} / ${report.totalBatches} completed`,
       );
       await trace?.("cwe-model.request-started", {
         attemptId: attempt.id,
@@ -639,6 +689,12 @@ export async function reviewCweCode(
         consecutiveFormatFailures = 0;
         finishAttempt(attempt, "succeeded");
         entry.status = "completed";
+        for (const id of entry.recordIds) {
+          if (doneRecords.has(id)) continue;
+          doneRecords.add(id);
+          const r = chunkById.get(id);
+          if (r) repoByName.get(r.repository).reviewedSegments++;
+        }
         entry.responseHash = response.responseHash;
         entry.limitations = response.review.limitations;
         entry.targetReviews = response.review.targetReviews;
@@ -710,11 +766,20 @@ export async function reviewCweCode(
           !/^CWE model response failed|^Model did not return the required JSON/.test(
             error.message,
           )
-        )
+        ) {
+          report.stopReason = "provider-failure";
           break;
+        }
       }
       await save();
     }
+    report.stopReason = signal?.aborted
+      ? "cancelled"
+      : report.stopReason ||
+        (!continuous &&
+        selected.length < planned.filter((p) => !done.has(p.id)).length
+          ? "request-budget"
+          : "plan-exhausted");
     report.completedBatches = report.batches.filter(
       (b) => b.status === "completed",
     ).length;
@@ -740,6 +805,9 @@ export async function reviewCweCode(
     }
   } catch (error) {
     report.status = signal?.aborted ? "cancelled" : "failed";
+    report.stopReason = signal?.aborted
+      ? "cancelled"
+      : "source-or-persistence-failure";
     report.error = /^Source changed|^CWE |^Selected CWE/.test(error.message)
       ? error.message
       : "CWE evidence collection failed";

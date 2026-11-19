@@ -1,3 +1,4 @@
+import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { cweEvidenceReport } from "./evidence-report.mjs";
 import { cweEvidence } from "./cwe-evidence.mjs";
 import { ExplorationStore } from "./exploration.mjs";
@@ -368,15 +369,18 @@ export async function serve({
       checkpoint();
       job = { status: model ? "ready" : "failed", message };
     };
-    const activeTimer = setTimeout(
-      () => {
-        stop(
-          "Time limit reached; completed batches retained. Continue review to process remaining batches.",
-        );
-        active.terminate();
-      },
-      30 * 60 * 1000,
-    );
+    const activeTimer =
+      mode === "review" && data.options?.runUntilComplete
+        ? null
+        : setTimeout(
+            () => {
+              stop(
+                "Time limit reached; completed batches retained. Continue review to process remaining batches.",
+              );
+              active.terminate();
+            },
+            30 * 60 * 1000,
+          );
     timer = activeTimer;
     active.on("message", (m) => {
       (async () => {
@@ -517,6 +521,7 @@ export async function serve({
         "app.js",
         "style.css",
         "workspace.js",
+        "review-run.js",
         "workspace.css",
         "cwe.js",
         "exploration.js",
@@ -587,6 +592,33 @@ export async function serve({
         return send(200, {
           ...job,
           hasModel: Boolean(model),
+          reviewRuns: Object.fromEntries(
+            [
+              ["stride", model?.aiReview],
+              ["cwe", model?.cweModelReview],
+            ].map(([key, report]) => [
+              key,
+              report
+                ? {
+                    runControl: report.runControl,
+                    runProgress: report.runProgress,
+                    coverage: report.coverage
+                      ? {
+                          completedBatches: report.coverage.completedBatches,
+                          totalBatches: report.coverage.totalBatches,
+                          pendingBatches: report.coverage.pendingBatches,
+                          failedBatches: report.coverage.failedBatches,
+                        }
+                      : undefined,
+                    completedBatches: report.completedBatches,
+                    totalBatches: report.totalBatches,
+                    pendingBatches: report.pendingBatches,
+                    failedBatches: report.failedBatches,
+                    stopReason: report.stopReason,
+                  }
+                : null,
+            ]),
+          ),
           tokenUsage: usageSummary(
             model?.usageLedger,
             !model?.usageLedger && Boolean(model?.aiReview),
@@ -770,6 +802,7 @@ export async function serve({
           input.maxBatches > 100
         )
           throw new Error("Choose 1–100 model requests per review action");
+        const runControl = reviewRunControl(input);
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
         if (input.includeSourceExcerpts && !reviewExcerpts.length)
@@ -783,6 +816,8 @@ export async function serve({
           options: {
             modelConfig,
             reviewBatches: input.maxBatches,
+            runUntilComplete: runControl.mode === "until-complete",
+            tokenTarget: runControl.tokenTarget,
             graphDatabase:
               model.sourceGraph?.storage === "sqlite"
                 ? path.join(store.dir, "graph.sqlite")
@@ -877,6 +912,7 @@ export async function serve({
           throw Error(
             "Enable source-code review and choose a request budget from 1 to 100",
           );
+        const runControl = reviewRunControl(input);
         cweController = new AbortController();
         const jobId = randomBytes(12).toString("hex");
         job = {
@@ -890,6 +926,8 @@ export async function serve({
           config: modelConfig,
           fetchImpl: cweModelFetch,
           budget: input.budget,
+          runUntilComplete: runControl.mode === "until-complete",
+          tokenTarget: runControl.tokenTarget,
           signal: cweController.signal,
           trace: (event, data) => traces.record(event, { ...data, jobId }),
           progress: (message) => {
@@ -1188,8 +1226,11 @@ export async function serve({
           model.aiReview.status = "partial";
           model.aiReview.error =
             "Review cancelled; continue to process remaining batches";
+          model.aiReview.stopReason = "cancelled";
         }
         interruptUsage(model?.usageLedger);
+        if (reviewing && model?.aiReview)
+          await updateReviewProgress(model, model.aiReview);
         if (!preserve) model = null;
         await checkpoint();
         return send(200, job);

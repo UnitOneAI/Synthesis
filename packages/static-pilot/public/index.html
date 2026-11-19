@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/workspace.css" />
     <script src="/app.js" defer></script>
+    <script src="/review-run.js" defer></script>
     <script src="/workspace.js" defer></script>
     <script src="/cwe.js" defer></script>
     <script src="/exploration.js" defer></script>
@@ -274,6 +275,25 @@
           One request reviews one source or interaction packet. Continue to
           review the remaining scope. Completed packets are retained.
         </p>
+        <label
+          ><input type="checkbox" id="cwe-model-until-complete" /> Run until
+          complete across selected repositories</label
+        >
+        <label
+          >Token target this action (optional, advisory)<input
+            id="cwe-model-token-target"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="No target"
+        /></label>
+        <p>
+          Run until complete continues beyond 100 calls. The token target does
+          not stop the run. Stop at any time; completed packets are saved.
+          Provider failures, changed source or repeated invalid responses
+          require attention.
+        </p>
+        <p id="cwe-run-progress" role="status"></p>
         <button id="cwe-model-run" disabled>
           Run or continue CWE source review</button
         ><button id="cwe-model-stop" hidden>Stop CWE source review</button
@@ -539,7 +559,19 @@
               min="1"
               max="100"
               value="12" /></label
-          ><button id="run-review" disabled>Run STRIDE review</button
+          ><label
+            ><input id="review-until-complete" type="checkbox" /> Run until
+            complete</label
+          >
+          <label
+            >Token target this action (advisory)<input
+              id="review-token-target"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="No target"
+          /></label>
+          <button id="run-review" disabled>Run STRIDE review</button
           ><button id="cancel-review" class="secondary" hidden>
             Stop review
           </button>
