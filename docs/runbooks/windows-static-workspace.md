@@ -247,9 +247,9 @@ Keep `--trace-dir` pointed outside the clones. Traces are automatic; report down
 
 See [design and limitations](../design/requested-cwe-coverage.md) and [verification](../testing/requested-cwe-coverage.md). No findings is not a pass, and graph/model completion does not demonstrate runtime exploitability.
 
-## Security-investigation review build
+## Security investigations (0.11.0)
 
-The 0.11.0 investigation feature adds optional CWE mappings and a separate static evidence assessment. It introduces no new VM dependency. Use the already approved provider, exact gateway deployment, source root, workspace and scanner settings. Deployment to main is a separate release step; verify the approved branch/commit before updating a VM.
+The 0.11.0 investigation feature adds optional CWE mappings and a separate static evidence assessment. It introduces no new VM dependency. Use the already approved provider, exact gateway deployment, source root, workspace and scanner settings. These changes are available on main; verify the updated commit before restarting a VM.
 
 1. Open the saved graph when the clones and extractor are unchanged.
 2. Run Semgrep and/or continue model source review to produce candidates. Existing source sharing sends redacted excerpts to the configured provider.
@@ -268,7 +268,7 @@ $env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'
 
 This applies native JSON schemas to source-review and security-assessment requests. The source-location, CWE-eligibility and evidence checks still run locally. It does not change the approved model/deployment name. Gateway compatibility must be checked in that environment; HTTP failures remain visible and there is no silent fallback. Unset it, or set it to `0`, to retain the default prompt-based JSON protocol. The default gateway payload is unchanged.
 
-### Static exploration (0.11.0 review build)
+### Static exploration (0.11.0)
 
 Use the same VM, source root, gateway, exact model deployment and state directory. No target runtime, browser automation against applications or network scanning is introduced. This increment has not been released to main merely because the runbook exists.
 
@@ -288,13 +288,13 @@ Opening code evidence makes no model call and executes no repository code. The f
 
 ### Graph-driven investigation update
 
-Use `feat/static-security-intelligence` for the reviewed 0.11.0 build until its release is merged. Stop the server before updating and back up the entire existing workspace. Do not change the workspace location or delete its saved graph. From a clean checkout:
+Use `main` for the released 0.11.0 changes, including threat references, boundary crossings and explicit STRIDE analysis status. Stop the server before updating and back up the entire existing workspace. Do not change the workspace location or delete its saved graph. From a clean checkout:
 
 ```powershell
 Set-Location C:/Tools/Synthesis
 git fetch origin
-git switch feat/static-security-intelligence
-git pull --ff-only origin feat/static-security-intelligence
+git switch main
+git pull --ff-only origin main
 Set-Location packages/static-pilot
 npm ci --ignore-scripts
 npm run check
@@ -326,9 +326,9 @@ Export errors after the test finishes. New exports retain provider-reported usag
 
 ### STRIDE did not run or returned prose instead of JSON
 
-Earlier builds omitted the STRIDE response schema even with `SYNTHESIS_STRUCTURED_OUTPUTS=1`. Update the review branch using the commands above before retrying. The setting now applies to both STRIDE entry points and graph-driven STRIDE investigations. It requests the required structure; local evidence and threat validation remain mandatory. Gateway acceptance still needs a one-request test in your environment.
+Earlier builds omitted the STRIDE response schema even with `SYNTHESIS_STRUCTURED_OUTPUTS=1`. Update main using the commands above before retrying. The setting now applies to both STRIDE entry points and graph-driven STRIDE investigations. It requests the required structure; local evidence and threat validation remain mandatory. Gateway acceptance still needs a one-request test in your environment.
 
-1. Stop the server with Ctrl+C and preserve the existing workspace. Update `feat/static-security-intelligence`, then run the checks above.
+1. Stop the server with Ctrl+C and preserve the existing workspace. Update `main`, then run the checks above.
 2. In the same PowerShell window, set `$env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'` and ensure the approved gateway key is set in `CLAUDE_API_KEY`. Restart with your existing provider, deployment, source root, workspace and trace directory.
 3. Open the new access link and **Open saved graph**. Do not rebuild unchanged clones for this fix.
 4. In **STRIDE matrix**, set **Request budget** to **1**, then select **Run or continue STRIDE analysis**. A completed packet proves that call succeeded; it does not complete all repositories. Inspect returned scenarios and remaining coverage before increasing the budget.
@@ -338,7 +338,7 @@ STRIDE's native schema is part of its cache identity, including the graph-driven
 
 ### Export CWE code evidence and threat model as PDF
 
-Update the review branch and restart using the same source root, saved workspace and gateway configuration. No new dependency, source rebuild or model call is required.
+Update main and restart using the same source root, saved workspace and gateway configuration. No new dependency, source rebuild or model call is required.
 
 1. **Open saved graph**, then **5 · CWE code review → CWE evidence · PDF**. The report includes all saved scanner and model candidates, source scope, review/assessment status and highlighted code at each available verified location. It is independent of the on-screen finding filter. **CWE evidence · HTML** downloads the same evidence report for offline use.
 2. In the report tab choose **Print / Save as PDF**, then **Save as PDF** in Edge/Chrome (or **Microsoft Print to PDF**). Save the file to your exports folder outside the clones. If the browser blocks the report tab, allow popups for the local Synthesis address or use the HTML export and Ctrl+P.

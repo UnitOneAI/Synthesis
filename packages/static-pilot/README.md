@@ -210,7 +210,7 @@ The Service DFD uses directional layout and aggregates equivalent calls while pr
 
 See the [implementation plan and limits](../../docs/design/architecture-dfd-plan.md), [acceptance specification](../../docs/testing/architecture-dfd.md), and [Windows upgrade steps](../../docs/runbooks/windows-static-workspace.md#architecture-dfd-upgrade-080).
 
-## Security investigations (0.11.0 review build)
+## Security investigations (0.11.0)
 
 CWE is optional for model-discovered security concerns. Source review can retain control gaps, excessive authority, attack paths, recovery gaps and security-design issues without inventing a CWE mapping.
 
@@ -218,7 +218,7 @@ After building or opening the saved graph, run Semgrep and/or model source revie
 
 A source-supported assessment is not verified exploitation. A finished candidate queue is not complete CWE or STRIDE coverage. Source/configuration changes require rebuilding; context changes invalidate prior assessments. Use the same source root and workspace to preserve evidence and token history. No additional runtime, target execution or scanner installation is required for this feature.
 
-See [architecture](../../docs/design/static-security-intelligence.md) and [verification](../../docs/testing/static-security-intelligence.md). This review build must be validated before release; do not assume it is on main.
+See [architecture](../../docs/design/static-security-intelligence.md) and [verification](../../docs/testing/static-security-intelligence.md). These changes are available on main; validate the configured provider in your environment.
 
 ### Optional native JSON response mode
 
@@ -238,4 +238,4 @@ This applies native JSON schemas to source-review and security-assessment reques
 
 With workspace persistence enabled, `exploration.sqlite` retains review history separately from `graph.sqlite`. The graph API paginates and reports omissions; the UI groups requested checks without deleting their outcomes. Selected JSON/SVG exports are capped at 3 MiB. Use the existing focused graph packages when transferring surrounding source and controls.
 
-See [the ARTEX comparison and implemented architecture](../../docs/design/static-exploration-graph.md) and [the Windows runbook](../../docs/runbooks/windows-static-workspace.md). This remains a review branch until release approval; do not infer main availability from the version string.
+See [the ARTEX comparison and implemented architecture](../../docs/design/static-exploration-graph.md) and [the Windows runbook](../../docs/runbooks/windows-static-workspace.md). Update main using the Windows runbook and reopen the existing saved graph when source and extraction rules are unchanged.
