@@ -308,3 +308,17 @@ Choose **Browse → Investigation steps** to inspect queued, waiting, completed,
 **Include local Semgrep baseline** is optional and runs the bundled rules through the configured local scanner. Existing scanner results can seed investigations without selecting it again. Semgrep still reads staged source, while the investigation follows indexed relationships and cited controls. No target application is run.
 
 Server traces are automatic under `--trace-dir`. They include `investigation.*` task IDs, searches, traversal basis, source hashes, provider outcomes, budget stops and usage. **Export errors** includes the frontier counters and stop reason; it does not include the whole source graph. Download errors and token CSV first. Selected exploration JSON/SVG and focused graph transfer ZIPs remain capped at 3 MiB each. Browser exports must be saved to `C:/SynthesisState/Exports`; `--trace-dir` does not change the browser download directory. Keep complete SQLite files and traces on the VM unless specifically needed.
+
+### Repeated model JSON failures
+
+A source-review run with attempted requests but no successful packets is reported as **failed**. Three consecutive response-format failures stop the action early; completed compatible packets and reported usage are retained. This prevents a larger request budget from repeatedly spending on the same response-contract failure. A single malformed response can still be followed by successful work in another packet. All requested-CWE and source-citation validation remains enforced.
+
+If the exported source review says `outputContract: prompt-json` and repeated errors say **text outside the required JSON format**, stop the server and try the existing native JSON setting with **one** request:
+
+```powershell
+$env:SYNTHESIS_STRUCTURED_OUTPUTS = '1'
+```
+
+Restart with the same workspace, source root, exact approved gateway deployment and key. This requests a structured JSON response via `output_config.format`; gateway support must be established by that test. If the gateway rejects the parameter, stop and export the error instead of increasing the budget. Native JSON does not relax CWE mapping or code-evidence checks. Changing the output contract changes the review-plan key; prior findings remain available, but prior packet completion is not silently credited to the new contract.
+
+Export errors after the test finishes. New exports retain provider-reported usage, failure classifications and response-shape metadata (text length, block count and format category). They exclude response prose, source text and secrets. Historical trace events whose failure was stored as a string now retain a classified error rather than an empty object. Earlier exports cannot reveal response contents that were never recorded. Retain the full workspace and token-usage CSV locally.

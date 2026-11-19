@@ -332,6 +332,9 @@ export async function errorReport({
   const batch = (b) => ({
     ...pick(b, ["id", "phase", "status"]),
     failure: b.error ? failureDetail(b.error) : null,
+    responseShape: b.responseShape
+      ? pick(b.responseShape, ["textCharacters", "textBlocks", "format"])
+      : undefined,
   });
   const review = (r) => ({
     ...pick(r, [
@@ -367,7 +370,9 @@ export async function errorReport({
             "repository",
           ]),
           failure: v.failure
-            ? pick(v.failure, ["code", "httpStatus", "retryable", "action"])
+            ? typeof v.failure === "string"
+              ? failureDetail(v.failure)
+              : pick(v.failure, ["code", "httpStatus", "retryable", "action"])
             : undefined,
         });
     } catch {
@@ -538,9 +543,31 @@ export async function errorReport({
       sourceDiagnostics: sample(model?.diagnostics, (d) =>
         pick(d, ["repository", "path", "kind", "message"]),
       ),
-      requestOutcomes: sample(model?.usageLedger?.attempts, (a) =>
-        pick(a, ["id", "batchId", "phase", "status", "startedAt", "endedAt"]),
-      ),
+      requestOutcomes: sample(model?.usageLedger?.attempts, (a) => ({
+        ...pick(a, [
+          "id",
+          "batchId",
+          "phase",
+          "status",
+          "startedAt",
+          "endedAt",
+        ]),
+        failure: a.failure
+          ? pick(a.failure, ["code", "httpStatus", "retryable", "action"])
+          : undefined,
+        usage: a.usage
+          ? pick(a.usage, [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "totalTokens",
+            ])
+          : null,
+        responseShape: a.responseShape
+          ? pick(a.responseShape, ["textCharacters", "textBlocks", "format"])
+          : undefined,
+      })),
       failureEvents: sample(events),
       traceScope: {
         retention: text(traces?.retention),

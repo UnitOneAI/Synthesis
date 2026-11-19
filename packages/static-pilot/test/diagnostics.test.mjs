@@ -561,3 +561,56 @@ test("graph resource limits enumerate every skipped file and leave missing-inter
     GRAPH_LIMITS.nodes = prior;
   }
 });
+
+test("small error export retains historical string failures and current usage without response text", async () => {
+  const report = await errorReport({
+    model: {
+      cweModelReview: {
+        status: "failed",
+        batches: [
+          {
+            id: "b",
+            status: "failed",
+            error: "Model did not return the required JSON object",
+            responseShape: {
+              format: "prose-or-other",
+              textCharacters: 100,
+              textBlocks: 1,
+              raw: "PRIVATE_RESPONSE_SENTINEL",
+            },
+          },
+        ],
+      },
+      usageLedger: {
+        attempts: [
+          {
+            id: "a",
+            status: "failed",
+            usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+            failure: { code: "response-format" },
+            responseShape: {
+              format: "prose-or-other",
+              textCharacters: 100,
+              textBlocks: 1,
+              raw: "PRIVATE_RESPONSE_SENTINEL",
+            },
+          },
+        ],
+      },
+    },
+    traces: {
+      events: JSON.stringify({
+        event: "cwe-model.request-failed",
+        failure:
+          "Model did not return the required JSON object PRIVATE_RESPONSE_SENTINEL",
+      }),
+    },
+  });
+  assert.equal(report.failureEvents.items[0].failure.code, "response-format");
+  assert.equal(report.requestOutcomes.items[0].usage.totalTokens, 120);
+  assert.equal(
+    report.cweSourceReview.batches.items[0].responseShape.format,
+    "prose-or-other",
+  );
+  assert.ok(!JSON.stringify(report).includes("PRIVATE_RESPONSE_SENTINEL"));
+});

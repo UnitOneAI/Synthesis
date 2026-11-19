@@ -5,6 +5,7 @@ import {
   securityContextKey,
 } from "./security-intelligence.mjs";
 import { CWE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
+import { failureDetail } from "./diagnostics.mjs";
 import { sourceScope } from "./architecture.mjs";
 import {
   cweFindingAllowed,
@@ -296,6 +297,7 @@ export async function reviewCweCode(
     report.batches.filter((b) => b.status === "completed").map((b) => b.id),
   );
   beginUsageRun(model);
+  let consecutiveFormatFailures = 0;
   try {
     // First pass builds metadata only. No code excerpts are saved in the workspace.
     for (const source of manifest.repositories.filter(
@@ -619,12 +621,22 @@ export async function reviewCweCode(
             });
             await save();
           },
+          onResponseShape: async (shape) => {
+            entry.responseShape = shape;
+            attempt.responseShape = shape;
+            await trace?.("cwe-model.response-shape", {
+              attemptId: attempt.id,
+              batchId: batch.id,
+              ...shape,
+            });
+          },
           onResponse: (data) =>
             trace?.("cwe-model.response-received", {
               attemptId: attempt.id,
               ...data,
             }),
         });
+        consecutiveFormatFailures = 0;
         finishAttempt(attempt, "succeeded");
         entry.status = "completed";
         entry.responseHash = response.responseHash;
@@ -677,12 +689,23 @@ export async function reviewCweCode(
         finishAttempt(attempt, signal?.aborted ? "interrupted" : "failed");
         entry.status = "failed";
         entry.error = error.message;
+        attempt.failure = failureDetail(error.message);
+        consecutiveFormatFailures =
+          attempt.failure.code === "response-format"
+            ? consecutiveFormatFailures + 1
+            : 0;
         await trace?.("cwe-model.request-failed", {
           attemptId: attempt.id,
           batchId: batch.id,
-          failure: error.message,
+          failure: attempt.failure,
         });
         await save();
+        if (consecutiveFormatFailures >= 3) {
+          report.stopReason = "repeated-response-format-failure";
+          report.error =
+            "Stopped after three consecutive JSON-format failures. Check the response contract before continuing; increasing the request budget will not resolve this error.";
+          break;
+        }
         if (
           !/^CWE model response failed|^Model did not return the required JSON/.test(
             error.message,
@@ -698,9 +721,13 @@ export async function reviewCweCode(
     report.pendingBatches = planned.length - report.completedBatches;
     report.status = signal?.aborted
       ? "cancelled"
-      : report.pendingBatches || report.gaps.length
-        ? "partial"
-        : "completed-needs-review";
+      : report.callsThisRun > 0 &&
+          report.completedBatches === 0 &&
+          report.batches.some((b) => b.status === "failed")
+        ? "failed"
+        : report.pendingBatches || report.gaps.length
+          ? "partial"
+          : "completed-needs-review";
     for (const repo of report.repositories) {
       const ids = chunks
         .filter((c) => c.repository === repo.name)

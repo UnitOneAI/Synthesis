@@ -233,7 +233,7 @@ test("CWE validation rejects invented IDs, locations and mappings; failed output
         limitations: [],
       }),
   });
-  assert.equal(r.status, "partial");
+  assert.equal(r.status, "failed");
   assert.equal(r.findings.length, 0);
   assert.equal(r.batches[0].status, "failed");
   assert.equal(model.usageLedger.attempts[0].usage.totalTokens, 120);
@@ -380,4 +380,92 @@ test("CWE review includes internal worker/storage connections and invalidates a 
   });
   assert.equal(packets.length, calls + 1);
   assert.equal(r.completedBatches, 1);
+});
+
+test("repeated gateway prose failures stop before spending the full budget and retain safe diagnostic metadata", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  let calls = 0;
+  const events = [];
+  const report = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 12,
+    trace: (event, data) => events.push({ event, ...data }),
+    fetchImpl: async () => {
+      calls++;
+      return Response.json({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 100, output_tokens: 20 },
+        content: [
+          {
+            type: "text",
+            text: "PRIVATE_RESPONSE_SENTINEL prose instead of the requested JSON",
+          },
+        ],
+      });
+    },
+  });
+  assert.equal(calls, 3);
+  assert.equal(report.status, "failed");
+  assert.equal(report.stopReason, "repeated-response-format-failure");
+  assert.equal(report.completedBatches, 0);
+  assert.ok(report.pendingBatches >= 3);
+  assert.equal(
+    model.usageLedger.attempts.reduce((n, a) => n + a.usage.totalTokens, 0),
+    360,
+  );
+  assert.ok(
+    model.usageLedger.attempts.every(
+      (a) => a.failure.code === "response-format",
+    ),
+  );
+  assert.ok(
+    report.batches.every((b) => b.responseShape.format === "prose-or-other"),
+  );
+  assert.ok(
+    events
+      .filter((e) => e.event === "cwe-model.request-failed")
+      .every((e) => e.failure.code === "response-format"),
+  );
+  assert.ok(
+    !JSON.stringify([report, events, model.usageLedger]).includes(
+      "PRIVATE_RESPONSE_SENTINEL",
+    ),
+  );
+  const continued = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config,
+    budget: 1,
+    fetchImpl: async (_, o) =>
+      response(
+        { findings: [], limitations: [] },
+        JSON.parse(JSON.parse(o.body).messages[0].content),
+      ),
+  });
+  assert.equal(continued.completedBatches, 1);
+  assert.equal(continued.stopReason, undefined);
+  assert.equal(continued.status, "partial");
+});
+test("native JSON CWE review sends the exact gateway deployment and records validated target coverage", async (t) => {
+  const { root, manifest, model } = await fixture(t);
+  const report = await reviewCweCode(manifest, model, {
+    sourceRoot: root,
+    config: { ...config, structuredOutputs: true },
+    budget: 1,
+    fetchImpl: async (_, o) => {
+      const body = JSON.parse(o.body);
+      assert.equal(body.model, "claude-opus-4-6-1");
+      assert.equal(body.output_config.format.type, "json_schema");
+      assert.ok(
+        body.output_config.format.schema.required.includes("targetReviews"),
+      );
+      return response(
+        { findings: [], limitations: [] },
+        JSON.parse(body.messages[0].content),
+      );
+    },
+  });
+  assert.equal(report.outputContract, "native-json-schema");
+  assert.equal(report.completedBatches, 1);
+  assert.equal(report.batches[0].targetReviews.length, 25);
 });

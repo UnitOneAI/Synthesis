@@ -625,6 +625,23 @@ export async function requestReview(
       .map((p) => p.text)
       .join("");
   }
+  // Structural metadata only: never copy provider prose or source into diagnostics.
+  const trimmedText = text.trim();
+  await options.onResponseShape?.({
+    textCharacters: text.length,
+    textBlocks: anthropic
+      ? data.content.filter((c) => c.type === "text").length
+      : data.candidates[0].content.parts.filter((p) => !p.thought).length,
+    format: !trimmedText
+      ? "empty"
+      : trimmedText.startsWith("```")
+        ? "fenced"
+        : trimmedText.startsWith("{")
+          ? "object-prefix"
+          : trimmedText.startsWith("[")
+            ? "array-prefix"
+            : "prose-or-other",
+  });
   const parsed = parseReviewText(text);
   return {
     usage,
