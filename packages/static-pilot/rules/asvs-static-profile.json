@@ -1,0 +1,65 @@
+{
+  "version": "asvs-5.0.0-static-subset-1",
+  "source": "https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/docs_en/OWASP_Application_Security_Verification_Standard_5.0.0_en.flat.json",
+  "sourceSha256": "8201b20eec2908c3380ac600c91c8ba746346fbb808859366abb232027532311",
+  "attribution": "OWASP Application Security Verification Standard 5.0.0, OWASP Foundation and contributors. CC BY-SA 4.0. Selected requirements reproduced unchanged.",
+  "license": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "scope": "Selected static control checks only. No ASVS level or compliance claim; deployment and organizational requirements remain outside this subset.",
+  "requirements": [
+    {
+      "id": "V1.1.1",
+      "description": "Verify that input is decoded or unescaped into a canonical form only once, it is only decoded when encoded data in that form is expected, and that this is done before processing the input further, for example it is not performed after input validation or sanitization.",
+      "level": "2"
+    },
+    {
+      "id": "V1.2.1",
+      "description": "Verify that output encoding for an HTTP response, HTML document, or XML document is relevant for the context required, such as encoding the relevant characters for HTML elements, HTML attributes, HTML comments, CSS, or HTTP header fields, to avoid changing the message or document structure.",
+      "level": "1"
+    },
+    {
+      "id": "V1.3.1",
+      "description": "Verify that all untrusted HTML input from WYSIWYG editors or similar is sanitized using a well-known and secure HTML sanitization library or framework feature.",
+      "level": "1"
+    },
+    {
+      "id": "V8.2.1",
+      "description": "Verify that the application ensures that function-level access is restricted to consumers with explicit permissions.",
+      "level": "1"
+    },
+    {
+      "id": "V8.2.2",
+      "description": "Verify that the application ensures that data-specific access is restricted to consumers with explicit permissions to specific data items to mitigate insecure direct object reference (IDOR) and broken object level authorization (BOLA).",
+      "level": "1"
+    },
+    {
+      "id": "V8.3.1",
+      "description": "Verify that the application enforces authorization rules at a trusted service layer and doesn't rely on controls that an untrusted consumer could manipulate, such as client-side JavaScript.",
+      "level": "1"
+    },
+    {
+      "id": "V8.3.3",
+      "description": "Verify that access to an object is based on the originating subject's (e.g. consumer's) permissions, not on the permissions of any intermediary or service acting on their behalf. For example, if a consumer calls a web service using a self-contained token for authentication, and the service then requests data from a different service, the second service will use the consumer's token, rather than a machine-to-machine token from the first service, to make permission decisions.",
+      "level": "3"
+    },
+    {
+      "id": "V12.1.1",
+      "description": "Verify that only the latest recommended versions of the TLS protocol are enabled, such as TLS 1.2 and TLS 1.3. The latest version of the TLS protocol must be the preferred option.",
+      "level": "1"
+    },
+    {
+      "id": "V12.1.2",
+      "description": "Verify that only recommended cipher suites are enabled, with the strongest cipher suites set as preferred. L3 applications must only support cipher suites which provide forward secrecy.",
+      "level": "2"
+    },
+    {
+      "id": "V12.3.2",
+      "description": "Verify that TLS clients validate certificates received before communicating with a TLS server.",
+      "level": "2"
+    },
+    {
+      "id": "V14.2.4",
+      "description": "Verify that controls around sensitive data related to encryption, integrity verification, retention, how the data is to be logged, access controls around sensitive data in logs, privacy and privacy-enhancing technologies, are implemented as defined in the documentation for the specific data's protection level.",
+      "level": "2"
+    }
+  ]
+}

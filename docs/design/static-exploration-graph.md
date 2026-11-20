@@ -127,3 +127,7 @@ The same approved Claude deployment can handle discovery and assessment roles. T
 - [Coverage outcomes and missing-evidence rules](https://github.com/BaaRai/ARTEX/blob/d89cf781b790ec9a1d071bee7e79de489ed05252/db/coverage_ledger.go)
 - [Planner graph overview and goal-completion gates](https://github.com/BaaRai/ARTEX/blob/d89cf781b790ec9a1d071bee7e79de489ed05252/agent/tools.go)
 - [Digest expansion and read-only inherited context](https://github.com/BaaRai/ARTEX/blob/d89cf781b790ec9a1d071bee7e79de489ed05252/agent/tools_digest.go)
+
+## STRIDE source follow-up
+
+The [source-backed STRIDE increment](source-backed-stride-investigation.md) connects this frontier to verified code context and validated STRIDE searches. Regular STRIDE retains its parallel continuous run; Exploration supplies adaptive follow-up under its existing action budgets.

@@ -447,3 +447,119 @@ test("interrupted attempts need explicit retry and persisted completed results s
   frontier.recover({ retryFailed: true });
   assert.equal(frontier.get(task).state, "queued");
 });
+
+test("STRIDE retrieves cross-repository control evidence, reassesses, and resumes without repeating completed requests", async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(
+    path.join(f.root, "repo0", "api.py"),
+    "from flask import Flask\napp = Flask(__name__)\n@app.get('/backup')\ndef backup():\n    return authorize_request()\n",
+  );
+  f.model = await analyze(f.manifest, { sourceRoot: f.root });
+  for (let i = 0; i < 12; i++) {
+    f.model.sourceGraph.nodes.push({
+      id: `stride-chain-${i}`,
+      kind: "function",
+      name: `chain${i}`,
+      repository: `repo${i}`,
+      path: i ? "app.py" : "api.py",
+      line: 1,
+    });
+    if (i)
+      f.model.sourceGraph.edges.push({
+        id: `stride-edge-${i}`,
+        kind: "candidate-call",
+        from: `stride-chain-${i - 1}`,
+        to: `stride-chain-${i}`,
+        basis: "fixture-static-contract",
+      });
+  }
+  const store = new ExplorationStore();
+  t.after(() => store.close());
+  const stridePackets = [];
+  let calls = 0;
+  const options = {
+    sourceRoot: f.root,
+    config,
+    budget: 100,
+    maxSteps: 10000,
+    maxTokens: 10000000,
+    explorationStore: store,
+    fetchImpl: async (_, options) => {
+      calls++;
+      const p = JSON.parse(JSON.parse(options.body).messages[0].content);
+      if (p.targets) return reply(discovery(p));
+      if (p.purpose === "static security candidate assessment")
+        return reply(assessment(p));
+      stridePackets.push(p);
+      assert.ok(
+        p.sourceContext.records.length,
+        "STRIDE must receive verified code after restart",
+      );
+      const hasControl = p.sourceContext.records.some(
+        (r) => r.repository === "repo11",
+      );
+      return reply({
+        summary: hasControl
+          ? "Control evidence retrieved; deployment unknown"
+          : "Authorization implementation requires inspection",
+        threats: [],
+        connections: [],
+        questions: [],
+        explorationRequests: hasControl
+          ? []
+          : [
+              {
+                action: p.sourceContext.graphNodes.some(
+                  (n) => n.id === "stride-chain-0",
+                )
+                  ? "neighbors"
+                  : "search",
+                recordId: p.sourceContext.records[0].id,
+                nodeId: p.sourceContext.graphNodes.some(
+                  (n) => n.id === "stride-chain-0",
+                )
+                  ? "stride-chain-0"
+                  : "",
+                symbol: p.sourceContext.graphNodes.some(
+                  (n) => n.id === "stride-chain-0",
+                )
+                  ? ""
+                  : "authorize_request",
+                reason: "Locate actual authorization implementation",
+              },
+            ],
+      });
+    },
+  };
+  await exploreStatic(f.manifest, f.model, options);
+  const complete = await exploreStatic(f.manifest, f.model, options);
+  assert.ok(
+    stridePackets.some(
+      (p) =>
+        p.sourceContext.records.some(
+          (r) =>
+            r.repository === "repo11" && r.code.includes("principal.is_admin"),
+        ) && p.sourceContext.priorReview,
+    ),
+    "Follow-up source must return to its originating STRIDE investigation",
+  );
+  const frontier = new InvestigationFrontier(store);
+  frontier.open(complete.scope, f.model.modelRevision, {});
+  assert.ok(
+    stridePackets.some(
+      (p) =>
+        new Set(p.sourceContext.records.map((r) => r.repository)).size === 12,
+    ),
+    "STRIDE retains path evidence across twelve selected repositories",
+  );
+  const steps = [...frontier.tasks()].filter((t) => t.kind === "stride");
+  assert.ok(steps.some((t) => t.result.history.length));
+  assert.ok(steps.every((t) => t.state === "done"));
+  const before = calls;
+  await exploreStatic(f.manifest, f.model, options);
+  assert.equal(calls, before);
+  assert.ok(
+    !JSON.stringify(steps).includes("return principal.is_admin"),
+    "Persist references, not source text",
+  );
+});

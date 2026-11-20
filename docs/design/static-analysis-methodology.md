@@ -23,3 +23,7 @@ The guidance version/hash participates in review provenance and cache identity a
 The optional reviewer form uses the existing OWASP technical-impact factors and risk matrix. All twelve factors must be supplied before a technical-risk estimate is calculated on the server. Unknown values remain unknown; there are no default fives, actor-type boosts or automatically inferred business consequences. The reviewer supplies rationale and identity, and the estimate becomes stale with its subject's evidence. This is an estimate for review, not a verified vulnerability or organizational risk acceptance. See [OWASP's risk-rating method](https://owasp.org/www-community/OWASP_Risk_Rating_Methodology) for the distinction between technical and business impact.
 
 Attack reasoning, proposed mappings, risk estimates and provenance are retained in the workspace and normal reports. Portable diagnostics retain method identity and coverage but exclude model-response prose and source excerpts. See [acceptance tests](../testing/disk-graph-and-analysis-quality.md).
+
+## Source-backed standards increment
+
+The current static review additionally includes versioned OWASP Web 2025, eleven selected ASVS 5.0.0 requirements and three CAPEC 3.9 patterns. Older mappings remain available; incomplete requirements do not imply compliance. See [source-backed STRIDE investigation](source-backed-stride-investigation.md) for evidence retrieval, adaptive follow-up and the exact limits.

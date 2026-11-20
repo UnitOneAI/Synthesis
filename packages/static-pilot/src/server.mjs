@@ -1,3 +1,4 @@
+import { STRIDE_INVESTIGATION_PROMPT } from "./stride-evidence.mjs";
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { cweEvidenceReport } from "./evidence-report.mjs";
 import { cweEvidence } from "./cwe-evidence.mjs";
@@ -248,7 +249,12 @@ export async function serve({
         if (
           model.aiReview &&
           (model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
-            model.aiReview.promptHash !== sha(SYSTEM_PROMPT))
+            model.aiReview.promptHash !==
+              sha(
+                model.aiReview.promptKind === "static-investigation"
+                  ? STRIDE_INVESTIGATION_PROMPT
+                  : SYSTEM_PROMPT,
+              ))
         ) {
           model.aiReview.status = "stale";
           model.aiReview.error =
@@ -258,7 +264,12 @@ export async function serve({
               ...(model.aiReview.guidance?.hash !== GUIDANCE_HASH
                 ? ["guidance-changed"]
                 : []),
-              ...(model.aiReview.promptHash !== sha(SYSTEM_PROMPT)
+              ...(model.aiReview.promptHash !==
+              sha(
+                model.aiReview.promptKind === "static-investigation"
+                  ? STRIDE_INVESTIGATION_PROMPT
+                  : SYSTEM_PROMPT,
+              )
                 ? ["prompt-changed"]
                 : []),
             ],
@@ -465,7 +476,12 @@ export async function serve({
             if (
               model.modelRevision !== m.model.modelRevision ||
               model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
-              model.aiReview.promptHash !== sha(SYSTEM_PROMPT)
+              model.aiReview.promptHash !==
+                sha(
+                  model.aiReview.promptKind === "static-investigation"
+                    ? STRIDE_INVESTIGATION_PROMPT
+                    : SYSTEM_PROMPT,
+                )
             ) {
               m.model.aiReview.status = "stale";
               m.model.aiReview.error =
@@ -896,17 +912,15 @@ export async function serve({
           throw Error("Choose 1–4 parallel review workers");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
-        if (input.includeSourceExcerpts && !reviewExcerpts.length)
-          return send(400, {
-            error:
-              "Source excerpts are not retained across restarts. Rebuild with excerpts enabled or review metadata only.",
-          });
         await startJob("review", {
           model,
+          manifest,
           excerpts: input.includeSourceExcerpts ? reviewExcerpts : [],
           options: {
             modelConfig,
             reviewBatches: input.maxBatches,
+            sourceRoot: root,
+            includeSourceExcerpts: input.includeSourceExcerpts,
             concurrency,
             runUntilComplete: runControl.mode === "until-complete",
             tokenTarget: runControl.tokenTarget,

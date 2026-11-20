@@ -1,3 +1,8 @@
+import { InvestigationSource } from "./investigation-source.mjs";
+import {
+  prepareStrideEvidence,
+  STRIDE_EVIDENCE_VERSION,
+} from "./stride-evidence.mjs";
 import { internalFacts } from "./internal-topology.mjs";
 import { architectureFacts, deploymentFacts } from "./architecture.mjs";
 import {
@@ -1193,12 +1198,25 @@ export async function analyze(manifest, options = {}) {
       options.progress?.(
         "Requesting bounded model review; source collection remains static-only",
       );
+      const strideSource =
+        options.includeSourceExcerpts &&
+        options.sourceRoot &&
+        manifest.repositories.every((r) => r.source !== "github")
+          ? new InvestigationSource(model, manifest, options.sourceRoot)
+          : null;
       await enrichGraphModel(
         model,
         options.modelConfig,
         excerpts,
         options.modelFetch,
         {
+          ...(strideSource
+            ? {
+                evidencePolicy: STRIDE_EVIDENCE_VERSION,
+                prepareBatch: (batch) =>
+                  prepareStrideEvidence(batch.packet, strideSource),
+              }
+            : {}),
           maxBatches:
             options.reviewBatches || manifest.analysis?.reviewBatches || 12,
           progress: options.progress,

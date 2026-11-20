@@ -1,3 +1,11 @@
+import {
+  prepareStrideEvidence,
+  STRIDE_EVIDENCE_VERSION,
+  STRIDE_INVESTIGATION_PROMPT,
+  STRIDE_INVESTIGATION_SCHEMA,
+  validateStrideInvestigation,
+} from "./stride-evidence.mjs";
+import { GUIDANCE_HASH } from "./analysis-guidance.mjs";
 import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import { ExplorationStore } from "./exploration.mjs";
@@ -79,6 +87,8 @@ export async function exploreStatic(manifest, model, options = {}) {
   const scope = sha(
     JSON.stringify([
       INVESTIGATION_VERSION,
+      GUIDANCE_HASH,
+      STRIDE_EVIDENCE_VERSION,
       contextKey,
       CWE_PROFILE_HASH,
       selected,
@@ -976,6 +986,29 @@ export async function exploreStatic(manifest, model, options = {}) {
       return;
     }
     if (task.kind === "stride") {
+      if (
+        task.result?.stride?.status === "completed" &&
+        task.result.expansionComplete === false
+      ) {
+        const requests = task.result.stride.review.explorationRequests || [];
+        const context = task.result.stride.evidenceContext;
+        enqueueRequests(
+          requests,
+          { records: context.records },
+          task.id,
+          task.id,
+        );
+        frontier.state(
+          task.id,
+          requests.length
+            ? "waiting"
+            : context.gaps.length
+              ? "blocked"
+              : "done",
+          { ...task.result, expansionComplete: true },
+        );
+        return;
+      }
       plan ||= reviewPlan(model);
       const batch = plan.batches.find((b) => b.id === d.batchId);
       if (!batch) {
@@ -997,8 +1030,37 @@ export async function exploreStatic(manifest, model, options = {}) {
       const before = new Set(
         (model.usageLedger?.attempts || []).map((a) => a.id),
       );
+      const references = [],
+        gaps = [];
+      for (const child of frontier.children(task.id)) {
+        if (child.kind === "evidence" && child.result?.ref)
+          references.push(child.result.ref);
+        if (["blocked", "failed"].includes(child.state))
+          gaps.push({
+            taskId: child.id,
+            reason: child.result?.reason || "evidence-unavailable",
+          });
+      }
+      const prepared = await prepareStrideEvidence(batch.packet, source, {
+        references,
+        gaps,
+        priorReview: task.result?.stride?.review || null,
+      });
+      if (task.result?.evidenceFingerprint === prepared.context.fingerprint) {
+        frontier.state(task.id, "blocked", {
+          ...task.result,
+          reason: "no-new-evidence",
+        });
+        return;
+      }
       await enrichGraphModel(model, config, new Map(), fetchImpl, {
         plan,
+        evidencePolicy: STRIDE_EVIDENCE_VERSION,
+        systemPrompt: STRIDE_INVESTIGATION_PROMPT,
+        responseSchema: STRIDE_INVESTIGATION_SCHEMA,
+        validate: validateStrideInvestigation,
+        prepareBatch: async () => prepared,
+        forceBatchIds: task.result ? [batch.id] : [],
         batchIds: [batch.id],
         maxBatches: 1,
         signal: abortSignal,
@@ -1026,8 +1088,45 @@ export async function exploreStatic(manifest, model, options = {}) {
       frontier.state(
         task.id,
         result?.status === "completed" ? "done" : "failed",
-        { stride: result, reason: result?.error },
+        {
+          stride: result,
+          review: result?.review,
+          expansionComplete: false,
+          reason: result?.error,
+          evidenceFingerprint: prepared.context.fingerprint,
+          history: [
+            ...(task.result?.history || []),
+            ...(task.result?.stride
+              ? [
+                  {
+                    responseHash: task.result.stride.responseHash,
+                    evidenceFingerprint: task.result.evidenceFingerprint,
+                  },
+                ]
+              : []),
+          ],
+        },
       );
+      const requests = result?.review?.explorationRequests || [];
+      enqueueRequests(
+        requests,
+        { records: prepared.packet.sourceContext.records },
+        task.id,
+        task.id,
+      );
+      frontier.state(task.id, frontier.get(task.id).state, {
+        ...frontier.get(task.id).result,
+        expansionComplete: true,
+      });
+      if (
+        result?.status === "completed" &&
+        (requests.length || prepared.context.gaps.length)
+      ) {
+        frontier.state(task.id, requests.length ? "waiting" : "blocked", {
+          ...frontier.get(task.id).result,
+          reason: "unresolved-stride-evidence",
+        });
+      }
       if (model.aiReview.stopReason === "provider-failure") providerStop = true;
       return;
     }
@@ -1094,6 +1193,10 @@ export async function exploreStatic(manifest, model, options = {}) {
         plan,
         batchIds: [],
         recoveredBatches: recoveredStride,
+        evidencePolicy: STRIDE_EVIDENCE_VERSION,
+        systemPrompt: STRIDE_INVESTIGATION_PROMPT,
+        responseSchema: STRIDE_INVESTIGATION_SCHEMA,
+        validate: validateStrideInvestigation,
       });
     }
     const ledger = ensureLedger(model);

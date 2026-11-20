@@ -98,6 +98,18 @@ export const SECURITY_RESPONSE_SCHEMA = object({
 
 // STRIDE shape; evidence ownership, boundary IDs and taxonomy are still checked locally.
 export const STRIDE_RESPONSE_SCHEMA = object({
+  standardsReviews: list(
+    object({
+      id: text,
+      status: enumeration([
+        "source-supported",
+        "needs-context",
+        "not-applicable",
+      ]),
+      rationale: text,
+      evidenceIds: list(text),
+    }),
+  ),
   summary: text,
   threats: list(
     object({

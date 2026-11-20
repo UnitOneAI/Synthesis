@@ -592,10 +592,27 @@ test("native STRIDE gateway schema preserves deployment and still rejects invent
       options.headers["Ocp-Apim-Subscription-Key"],
       "synthetic-gateway-key",
     );
-    assert.deepEqual(body.output_config.format, {
-      type: "json_schema",
-      schema: STRIDE_RESPONSE_SCHEMA,
-    });
+    assert.equal(body.output_config.format.type, "json_schema");
+    assert.ok(
+      !JSON.stringify(body.output_config.format.schema).includes('"maxItems"'),
+      "Native response schema must not use unsupported array constraints",
+    );
+    const constrained =
+      body.output_config.format.schema.properties.threats.items.properties;
+    assert.deepEqual(
+      constrained.interfaceIds.items.enum,
+      packet.records.map((r) => r.id),
+    );
+    assert.deepEqual(
+      new Set(constrained.evidenceIds.items.enum),
+      new Set(packet.records.flatMap((r) => r.evidence.map((e) => e.id))),
+    );
+    assert.equal(
+      STRIDE_RESPONSE_SCHEMA.properties.threats.items.properties.evidenceIds
+        .items.enum,
+      undefined,
+      "Shared schema must remain unchanged",
+    );
     assert.ok(
       body.output_config.format.schema.properties.threats.items.required.includes(
         "analysis",
@@ -609,7 +626,10 @@ test("native STRIDE gateway schema preserves deployment and still rejects invent
   await assert.rejects(requestReview(native, packet, transport), /evidence/i);
   result.threats[0].evidenceIds = suggestion(packet).threats[0].evidenceIds;
   result.threats[0].analysis.boundaryIds = ["invented-boundary"];
-  await assert.rejects(requestReview(native, packet, transport), /outside the supplied context/i);
+  await assert.rejects(
+    requestReview(native, packet, transport),
+    /outside the supplied context/i,
+  );
   result.threats[0].analysis.boundaryIds = [];
   await enrichModel(model, native, new Map(), transport);
   assert.equal(model.aiReview.outputContract, "native-json-schema");
@@ -619,7 +639,6 @@ test("native STRIDE gateway schema preserves deployment and still rejects invent
     return responseFor("anthropic", result);
   });
 });
-
 
 test("STRIDE validation retry excludes optional connections without relaxing evidence validation",async()=>{
  const packet=reviewPacket(await fixture());

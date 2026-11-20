@@ -440,14 +440,20 @@ export async function enrichGraphModel(
   const plan = options.plan || reviewPlan(model, excerpts);
   const provenance = {
     ...publicModelConfig(config),
+    ...(options.evidencePolicy
+      ? { evidencePolicy: options.evidencePolicy }
+      : {}),
     ...(config.structuredOutputs
       ? {
           outputContract: "native-json-schema",
-          responseSchemaHash: sha(JSON.stringify(STRIDE_RESPONSE_SCHEMA)),
+          responseSchemaHash: sha(
+            JSON.stringify(options.responseSchema || STRIDE_RESPONSE_SCHEMA),
+          ),
         }
       : {}),
+    promptKind: options.systemPrompt ? "static-investigation" : "stride",
     promptVersion: GRAPH_REVIEW_VERSION,
-    promptHash: sha(SYSTEM_PROMPT),
+    promptHash: sha(options.systemPrompt || SYSTEM_PROMPT),
     guidance: {
       version: GUIDANCE_VERSION,
       hash: GUIDANCE_HASH,
@@ -477,7 +483,10 @@ export async function enrichGraphModel(
     model.aiReview?.runKey === runKey ? model.aiReview.batches || [] : [];
   const cached = new Map(
     [...previous, ...(options.recoveredBatches || [])]
-      .filter((b) => b.status === "completed")
+      .filter(
+        (b) =>
+          b.status === "completed" && !options.forceBatchIds?.includes(b.id),
+      )
       .map((b) => [b.id, b]),
   );
   const retained = plan.batches
@@ -493,7 +502,8 @@ export async function enrichGraphModel(
       ? "native-json-schema"
       : "prompt-json",
     status: "pending",
-    mode: excerpts.size ? "source-excerpts" : "metadata",
+    mode:
+      options.prepareBatch || excerpts.size ? "source-excerpts" : "metadata",
     batches: [...retained],
     threats: [],
     connections: [],
@@ -613,6 +623,27 @@ export async function enrichGraphModel(
       review.questions.push(...b.review.questions);
     }
     review.questions = [...new Set(review.questions)];
+    review.coverageEvidence = {
+      sourceWindows: review.batches.reduce(
+        (n, b) => n + (b.evidenceContext?.records.length || 0),
+        0,
+      ),
+      unresolved: review.batches.reduce(
+        (n, b) =>
+          n +
+          (b.evidenceContext?.gaps.length || 0) +
+          (b.review?.explorationRequests?.length || 0),
+        0,
+      ),
+      standards: review.batches.flatMap((b) =>
+        (b.review?.standardsReviews || []).map((r) => ({
+          ...r,
+          batchId: b.id,
+        })),
+      ),
+      interpretation:
+        "Packet completion is not proof of resolved evidence or complete security coverage",
+    };
     const done = review.batches.filter((b) => b.status === "completed").length;
     const sentBatches = new Set(
       review.batches.filter((b) => b.status !== "queued").map((b) => b.id),
@@ -717,7 +748,7 @@ export async function enrichGraphModel(
       await emit("review.agent-pool", state);
     },
     run: async (index, { agentId }) => {
-      const batch = plan.batches[index];
+      let batch = plan.batches[index];
       options.progress?.(
         `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
       );
@@ -734,6 +765,21 @@ export async function enrichGraphModel(
       let attempt;
       const requestStartedAt = performance.now();
       try {
+        if (options.prepareBatch) {
+          const prepared = await options.prepareBatch(batch);
+          batch = { ...batch, packet: prepared.packet };
+          entry.evidenceContext = prepared.context;
+          metrics.set(batch.id, {
+            bytes: Buffer.byteLength(JSON.stringify(batch.packet)),
+            excerpts: batch.packet.records.flatMap((r) =>
+              r.evidence.filter((e) => e.excerpt).map((e) => e.id),
+            ),
+          });
+          await emit("review.source-context", {
+            batchId: batch.id,
+            ...prepared.context,
+          });
+        }
         const failed = previous.find(
           (b) =>
             b.id === batch.id &&
@@ -807,6 +853,13 @@ export async function enrichGraphModel(
         };
         const result = await requestReview(config, batch.packet, dispatch, {
           validationRetry: entry.validationRetry,
+          ...(options.systemPrompt
+            ? { systemPrompt: options.systemPrompt }
+            : {}),
+          ...(options.responseSchema
+            ? { responseSchema: options.responseSchema }
+            : {}),
+          ...(options.validate ? { validate: options.validate } : {}),
           signal: options.signal,
           onResponseShape: (shape) => {
             entry.responseShape = shape;

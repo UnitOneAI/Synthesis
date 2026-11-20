@@ -1,3 +1,8 @@
+import {
+  verifiedStrideSource,
+  prepareStrideEvidence,
+  STRIDE_EVIDENCE_VERSION,
+} from "./stride-evidence.mjs";
 import { GraphStore, attachGraph } from "./graph-store.mjs";
 import { parentPort, workerData } from "node:worker_threads";
 import { analyze } from "./engine.mjs";
@@ -62,6 +67,15 @@ try {
       parentPort.postMessage({ type: "static-checkpoint", id, model });
     });
   await trace("worker.started", { mode: workerData.mode });
+  const source =
+    workerData.mode === "review" && workerData.options.includeSourceExcerpts
+      ? await verifiedStrideSource(
+          workerData.model,
+          workerData.manifest,
+          workerData.options.sourceRoot,
+          progress,
+        )
+      : null;
   const model =
     workerData.mode === "review"
       ? await enrichGraphModel(
@@ -70,6 +84,13 @@ try {
           excerpts,
           fetch,
           {
+            ...(source
+              ? {
+                  evidencePolicy: STRIDE_EVIDENCE_VERSION,
+                  prepareBatch: (batch) =>
+                    prepareStrideEvidence(batch.packet, source),
+                }
+              : {}),
             maxBatches: workerData.options.reviewBatches,
             concurrency: workerData.options.concurrency,
             runUntilComplete: workerData.options.runUntilComplete,

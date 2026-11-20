@@ -1,7 +1,14 @@
+import fs from "node:fs";
+export const ASVS_PROFILE = JSON.parse(
+  fs.readFileSync(
+    new URL("../rules/asvs-static-profile.json", import.meta.url),
+    "utf8",
+  ),
+);
 import { sha } from "./sources.mjs";
 
 // Reviewed, bundled methodology. Target repository SKILL.md files are never executed or loaded as instructions.
-export const GUIDANCE_VERSION = "static-security-method-2";
+export const GUIDANCE_VERSION = "static-security-method-3";
 export const GUIDANCE_SOURCES = Object.freeze([
   {
     name: "UnitOne threat-modeling skill",
@@ -45,6 +52,18 @@ const web = [
   "Security Logging and Monitoring Failures",
   "Server-Side Request Forgery",
 ];
+const web2025 = [
+  "Broken Access Control",
+  "Security Misconfiguration",
+  "Software Supply Chain Failures",
+  "Cryptographic Failures",
+  "Injection",
+  "Insecure Design",
+  "Authentication Failures",
+  "Software or Data Integrity Failures",
+  "Security Logging and Alerting Failures",
+  "Mishandling of Exceptional Conditions",
+];
 const api = [
   "Broken Object Level Authorization",
   "Broken Authentication",
@@ -58,6 +77,22 @@ const api = [
   "Unsafe Consumption of APIs",
 ];
 export const TAXONOMY = Object.freeze([
+  ...web2025.map((name, i) => ({
+    framework: "OWASP Web 2025",
+    id: `A${String(i + 1).padStart(2, "0")}:2025`,
+    name,
+    url: "https://top10.owasp.org/2025/",
+  })),
+  ...[
+    ["63", "Cross-Site Scripting (XSS)"],
+    ["122", "Privilege Abuse"],
+    ["180", "Exploiting Incorrectly Configured Access Control Security Levels"],
+  ].map(([id, name]) => ({
+    framework: "MITRE CAPEC 3.9",
+    id: `CAPEC-${id}`,
+    name,
+    url: `https://capec.mitre.org/data/definitions/${id}.html`,
+  })),
   ...web.map((name, i) => ({
     framework: "OWASP Web 2021",
     id: `A${String(i + 1).padStart(2, "0")}:2021`,
@@ -166,6 +201,7 @@ const domains = [
 export const GUIDANCE_HASH = sha(
   JSON.stringify({
     version: GUIDANCE_VERSION,
+    asvs: ASVS_PROFILE,
     sources: GUIDANCE_SOURCES,
     taxonomy: TAXONOMY,
     core,
@@ -182,8 +218,10 @@ export function analysisGuidance(records) {
       ...domains.filter((d) => records.some(d.when)).map(({ when, ...d }) => d),
     ],
     taxonomy: TAXONOMY,
+    requirements: ASVS_PROFILE.requirements,
+    requirementsSource: ASVS_PROFILE.source,
     scope:
-      "Pinned offline methodology; taxonomy mappings are review proposals, not proof. Web 2021 is retained for baseline compatibility, not represented as the latest edition. ATT&CK catalog is a curated subset.",
+      "Pinned offline methodology; taxonomy mappings are review proposals, not proof. Web 2021 is retained for baseline compatibility, not represented as the latest edition. Web 2025 is available alongside the retained Web 2021 baseline. ATT&CK, CAPEC and ASVS catalogs are curated subsets; no compliance or full coverage is claimed.",
   };
 }
 export const QUALITY_INSTRUCTIONS = `Apply the bundled analysisGuidance checks to the supplied evidence and architecture context. Preserve the prior Synthesis methodology: asset and entry-point identification, realistic actor access, explicit authority transitions, STRIDE per element, control and counterevidence review, conditional multi-step abuse and actionable mitigations. Taxonomy is a classification aid, not an attack checklist or proof. Never fill missing OWASP risk factors with defaults; severity remains unassessed until supported reviewer assessment. Do not automatically infer a vulnerability from an API name, missing excerpt or actor stereotype.
@@ -255,7 +293,12 @@ export function validateAnalysis(value, packet, text, fail) {
       attackSteps: steps,
       impact: text(value.impact),
       assumptions: list(value.assumptions, 6).map(text),
-      controlEvidenceIds: checked(value.controlEvidenceIds, controls, 12, "controlEvidenceIds"),
+      controlEvidenceIds: checked(
+        value.controlEvidenceIds,
+        controls,
+        12,
+        "controlEvidenceIds",
+      ),
       boundaryIds: checked(value.boundaryIds, boundaries, 6, "boundaryIds"),
       mappings,
     },
