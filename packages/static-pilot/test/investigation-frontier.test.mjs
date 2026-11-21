@@ -1,3 +1,4 @@
+import { cleanupAfter } from "./cleanup.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -17,7 +18,7 @@ const config = modelConfig(
 );
 async function fixture(t, count = 12) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-frontier-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(root, { recursive: true, force: true }));
   const manifest = {
     profile: "static-fixture",
     repositories: Array.from({ length: count }, (_, i) => ({
@@ -166,9 +167,9 @@ test("graph-driven investigation searches missing evidence and follows a twelve-
   const state = await fs.mkdtemp(
     path.join(os.tmpdir(), "synthesis-frontier-db-"),
   );
-  t.after(() => fs.rm(state, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(state, { recursive: true, force: true }));
   let store = new ExplorationStore(path.join(state, "exploration.sqlite"));
-  t.after(() => store.close());
+  cleanupAfter(t, () => store.close());
   const seen = [],
     events = [];
   let calls = 0;
@@ -272,7 +273,7 @@ test("graph-driven investigation searches missing evidence and follows a twelve-
 test("budgets, changed source and graph request validation cannot become silent coverage", async (t) => {
   const f = await fixture(t, 2),
     store = new ExplorationStore();
-  t.after(() => store.close());
+  cleanupAfter(t, () => store.close());
   let calls = 0;
   const fetchImpl = async (_, options) => {
     calls++;
@@ -330,7 +331,7 @@ test("budgets, changed source and graph request validation cannot become silent 
 test("failed or interrupted model requests retain usage and do not poison other repositories", async (t) => {
   const f = await fixture(t, 2),
     store = new ExplorationStore();
-  t.after(() => store.close());
+  cleanupAfter(t, () => store.close());
   let calls = 0;
   const run = await exploreStatic(f.manifest, f.model, {
     sourceRoot: f.root,
@@ -366,7 +367,7 @@ test("saved SQLite graph supplies indexed searches and paginated incident edges"
     graphDatabase: file,
   });
   const graph = new GraphStore(file, { readOnly: true });
-  t.after(() => graph.close());
+  cleanupAfter(t, () => graph.close());
   attachGraph(model.sourceGraph, graph);
   const source = new InvestigationSource(model, f.manifest, f.root);
   assert.equal(source.files("repo0").items.length, 1);
@@ -399,7 +400,7 @@ test("saved SQLite graph supplies indexed searches and paginated incident edges"
 test("interrupted attempts need explicit retry and persisted completed results survive projection loss", async (t) => {
   const f = await fixture(t, 1),
     store = new ExplorationStore();
-  t.after(() => store.close());
+  cleanupAfter(t, () => store.close());
   let calls = 0;
   const opts = {
     sourceRoot: f.root,
@@ -474,7 +475,7 @@ test("STRIDE retrieves cross-repository control evidence, reassesses, and resume
       });
   }
   const store = new ExplorationStore();
-  t.after(() => store.close());
+  cleanupAfter(t, () => store.close());
   const stridePackets = [];
   let calls = 0;
   const options = {

@@ -59,7 +59,9 @@ test("12 repositories connect automatically and support CWE scan, review, export
     await page
       .getByRole("button", { name: "Build source graph", exact: true })
       .click();
-    await expect(page.locator("#workspace")).toBeVisible();
+    // Graph construction is asynchronous and can exceed the 5s locator default
+    // on Windows runners; retain the same success assertion with a bounded wait.
+    await expect(page.locator("#workspace")).toBeVisible({ timeout: 60000 });
     await expect(page.locator(".ws-status")).toContainText(
       "23 discovered connections",
     );
