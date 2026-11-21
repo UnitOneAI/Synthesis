@@ -585,13 +585,26 @@ test("changed source and symlinks cannot supply evidence; malformed model output
   let packet = await investigationPacket(model, manifest, root, issue);
   assert.ok(packet.gaps.some((g) => g.reason === "source-hash-mismatch"));
   await fs.rm(path.join(root, "repo0/app.py"));
-  await fs.symlink(
-    path.join(root, "repo0/control.py"),
-    path.join(root, "repo0/app.py"),
-  );
-  packet = await investigationPacket(model, manifest, root, issue);
-  assert.ok(packet.gaps.some((g) => g.reason === "source-symlink-rejected"));
-  await fs.rm(path.join(root, "repo0/app.py"));
+  await t.test("rejects symbolic-link evidence", async (symlinkTest) => {
+    try {
+      await fs.symlink(
+        path.join(root, "repo0/control.py"),
+        path.join(root, "repo0/app.py"),
+      );
+    } catch (error) {
+      if (process.platform === "win32" && error.code === "EPERM") {
+        symlinkTest.skip("Windows denied creating the symlink fixture; symlink rejection was not tested on this host");
+        return;
+      }
+      throw error;
+    }
+    try {
+      packet = await investigationPacket(model, manifest, root, issue);
+      assert.ok(packet.gaps.some((g) => g.reason === "source-symlink-rejected"));
+    } finally {
+      await fs.rm(path.join(root, "repo0/app.py"));
+    }
+  });
   await fs.writeFile(
     path.join(root, "repo0/app.py"),
     "def run(cursor, value):\n    cursor.execute(value)\n",

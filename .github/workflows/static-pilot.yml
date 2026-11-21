@@ -28,6 +28,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm test
+      - name: Verify assessment tests without symlink privileges
+        if: runner.os == 'Windows'
+        run: >-
+          node --input-type=module -e "import fs from 'node:fs/promises';
+          fs.symlink = async () => { const error = new Error('Simulated Windows fixture permission denial'); error.code = 'EPERM'; throw error; };
+          await import('./test/security-intelligence.test.mjs');"
 
   browser:
     strategy:
