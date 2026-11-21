@@ -1,14 +1,26 @@
 # Windows: static system threat modeling
 
-## Current update: 0.10.0 — reuse and focused exports
+## Current update: source-backed STRIDE and static investigation
 
-Keep the same `--source-root`, `--workspace` and `--graph-storage sqlite` when restarting. A saved 0.9.0 graph can be reused by 0.10.0 without rebuilding: this release does not change extraction rules. In Sources, use **Open saved graph**. Rebuild only for changed source, repository scope, older extraction rules or a deliberate extraction refresh. Restart does not verify current file contents. Historical upgrade sections below describe one-time migrations, not an instruction to rebuild on every start.
+Update `main` and keep the existing local clones and saved workspace. This update does not change extraction rules or require a graph rebuild. Under **Sources**, open the saved graph and enable **Include hash-checked, redacted code context in STRIDE**. STRIDE now verifies unchanged source and retrieves code from local clones after restart. Initial source verification can take time on large repositories. Changed source requires rebuilding; unchanged source does not.
+
+The updated guidance and source-evidence policy make previous STRIDE responses historical until revalidated. The saved graph, prior findings and reviewer decisions are retained. Expect the current completed count to restart for the new review contract; historical completion is not current coverage.
+
+Start with one STRIDE request and one worker. After a successful response, choose up to four workers and **Run until complete** for the remaining scope. Regular STRIDE is parallel and continuous. **Exploration** additionally follows indexed searches and graph paths for missing control evidence and returns it to the originating assessment. Exploration has separate request/token/step/depth/time budgets and requires explicit continuation when those are reached. It is not automatically launched by regular STRIDE or the CWE review.
+
+OWASP Web 2025, eleven selected ASVS 5.0.0 requirements and selected CAPEC patterns supplement the existing methodology. CWE target coverage remains intact. Requirement statuses and evidence gaps do not certify compliance or runtime exploitability. See [architecture and operator workflow](../design/source-backed-stride-investigation.md) and [verification results](../testing/source-backed-stride-investigation.md).
+
+Keep the existing structured-output setting if the gateway has already been qualified for it. Do not turn native schemas on merely because this update supports them; prompt-based JSON remains the default. A direct-Claude validation is not qualification of a customer's Azure gateway.
+
+## Saved graph reuse and focused exports
+
+Keep the same `--source-root`, `--workspace` and `--graph-storage sqlite` when restarting. The source-backed STRIDE update reuses compatible saved graphs without rebuilding; it does not change extraction rules. In Sources, use **Open saved graph**. Rebuild only for changed source, repository scope, older extraction rules or a deliberate extraction refresh. Restart does not verify current file contents. Historical upgrade sections below describe one-time migrations, not an instruction to rebuild on every start.
 
 Open **Source graph → Export graph review package**. Choose repository/component/flow/finding/CWE with findings/system overview. Leave source context off for architecture-only review; enable it when code evidence is needed. Click **Prepare graph package**, then download each numbered transfer ZIP. The transfer ZIPs contain the small review parts. Each ZIP is at most 3 MiB. Its manifest records snapshot IDs, omissions, hashes and scope. Changed source is excluded from optional windows and reported as a gap. This neither rebuilds the graph nor calls a model.
 
 Save downloaded parts under your exports folder outside the clones. Browser downloads use the browser's configured directory; this feature does not silently write them to the trace folder. Inspect the ZIPs before transferring. All numbered parts describe one selected scope; no whole-graph backup is required. The previous full graph and diagnostic exports remain available separately.
 
-Continue STRIDE with metadata from the saved graph. The older optional STRIDE transient-excerpt mode still requires recollection after restart; its excerpts were never persisted. CWE source review reads source again for code validation but reuses the graph. See [export architecture and limits](../design/focused-graph-export.md) and [test specifications](../testing/focused-graph-export.md).
+Continue STRIDE with metadata or explicitly enabled, hash-checked code context from the saved graph. Source windows are retrieved from unchanged local clones when needed; they are not persisted as raw windows. CWE source review likewise reads source for code validation while reusing the graph. See [export architecture and limits](../design/focused-graph-export.md) and [test specifications](../testing/focused-graph-export.md).
 
 Requires a current Node.js 24 release, Git, a current Edge/Chrome browser, and readable local clones. No target application, build, installer, database, container or runtime service is started. Keep the source root, Synthesis checkout, workspace and exports in separate folders.
 
@@ -114,7 +126,7 @@ Remove-Variable gatewaySecret -ErrorAction SilentlyContinue
 4. **STRIDE matrix** provides the request budget and **Run or continue STRIDE analysis** controls in the same view. Start with a small request budget to validate gateway access, then continue. Metadata goes to the configured destination; source excerpts are optional. HTTP/authentication/JSON failures remain visible and completed batches remain saved. **Continue STRIDE review** reuses successful batches; a previously failed schema/evidence batch is retried with stricter response instructions, within the selected request budget. This is explicit continuation, not a hidden retry loop.
 5. Inspect matrix cells and threat details. Record reviewer, rationale, disposition, mitigation owner and severity. A blank cell is not a safe result. A local acceptance annotation is not an authenticated organizational approval.
 6. **Export review package** provides the complete model, registers, DFD and report. Filters do not reduce export scope. Open HTML and Print → Save as PDF. Keep SVG/Mermaid for detailed diagrams.
-7. Stop and restart with the same source root/workspace. Open the new access link. Saved records and completed batches return. Rebuild to inspect changed source; raw excerpts require rebuilding because they are never checkpointed. Review stale references after rebuilding.
+7. Stop and restart with the same source root/workspace. Open the new access link. Saved records and compatible completed batches return. Rebuild to inspect changed source. With source sharing enabled, unchanged local source windows are retrieved again without rebuilding. Review stale references after rebuilding.
 
 ## Push and verify a development change
 
@@ -270,7 +282,7 @@ This applies native JSON schemas to source-review and security-assessment reques
 
 ### Static exploration (0.11.0)
 
-Use the same VM, source root, gateway, exact model deployment and state directory. No target runtime, browser automation against applications or network scanning is introduced. This increment has not been released to main merely because the runbook exists.
+Use the same VM, source root, gateway, exact model deployment and state directory. No target runtime, browser automation against applications or network scanning is introduced. Install the current main branch using the update procedure above.
 
 1. Stop Synthesis and back up the workspace, then install the approved review commit using the existing update procedure. Start with the same `--workspace` and `--trace-dir` arguments. **Open saved graph** reuses the existing source graph; this exploration increment does not require a graph rebuild.
 2. Open **6 · Exploration**. The overview branches into STRIDE, requested CWE checks and candidate assessment. **Browse** filters review records; double-click a card or choose **Open branch** to expand its children. **Show lineage** follows the records that led to the selected finding or observation. Grouped CWE obligations retain each individual outcome.
