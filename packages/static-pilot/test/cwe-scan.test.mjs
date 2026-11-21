@@ -1,3 +1,4 @@
+import { cleanupAfter } from "./cleanup.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -9,7 +10,7 @@ import { serve } from "../src/server.mjs";
 const scanner = process.env.SYNTHESIS_TEST_SEMGREP;
 async function fixture(t, count = 1) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-cwe-test-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(root, { recursive: true, force: true }));
   const manifest = { profile: "test", repositories: [] };
   for (let i = 0; i < count; i++) {
     const name = "repo" + i;
@@ -47,7 +48,7 @@ test("scanner strips provider credentials and obeys cancellation and output limi
   const f = await fixture(t);
   const previous = process.env.CLAUDE_API_KEY;
   process.env.CLAUDE_API_KEY = "must-not-leak";
-  t.after(() => {
+  cleanupAfter(t, () => {
     if (previous === undefined) delete process.env.CLAUDE_API_KEY;
     else process.env.CLAUDE_API_KEY = previous;
   });
@@ -82,7 +83,7 @@ test("CWE API requires a current graph and exports explicit engine failure", asy
       quiet: true,
       cweScanner: process.execPath,
     });
-  t.after(() => app.close());
+  cleanupAfter(t, () => app.close());
   const base = app.url.split("/#")[0];
   const api = async (route, data) =>
     fetch(base + "/api/" + route, {
@@ -174,7 +175,7 @@ test(
     const root = await fs.mkdtemp(
       path.join(os.tmpdir(), "synthesis-rule-test-"),
     );
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    cleanupAfter(t, () => fs.rm(root, { recursive: true, force: true }));
     await fs.cp(
       new URL("./fixtures/cwe", import.meta.url),
       path.join(root, "rules"),

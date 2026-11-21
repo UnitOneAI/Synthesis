@@ -1,3 +1,4 @@
+import { cleanupAfter } from "./cleanup.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -12,7 +13,7 @@ import { reportFixture } from "./report-fixture.mjs";
 
 test("evidence report includes verified scanner/model code, gaps and evidence provenance", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   const html = await cweEvidenceReport(f.model, f.manifest, f.root);
   assert.match(html, /verify=False/);
   assert.match(html, /class="code-line cited"/);
@@ -52,7 +53,7 @@ test("evidence report includes verified scanner/model code, gaps and evidence pr
 
 test("source report export requires workspace access and works with model-only findings", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   delete f.model.cweReview;
   const store = await workspaceStore(f.root, f.workspace);
   await store.save({ manifest: f.manifest, model: f.model });
@@ -64,7 +65,7 @@ test("source report export requires workspace access and works with model-only f
     port: 0,
     quiet: true,
   });
-  t.after(() => app.close());
+  cleanupAfter(t, () => app.close());
   const url = app.url.split("/#")[0] + "/api/export?format=cwe-evidence-html";
   assert.equal((await fetch(url)).status, 401);
   const response = await fetch(url, {
@@ -80,7 +81,7 @@ test("source report export requires workspace access and works with model-only f
 
 test("print projection excludes checklist detail and long code ranges disclose omissions", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   const source = Array.from(
     { length: 500 },
     (_, n) => `# code line ${n + 1}`,
@@ -106,7 +107,7 @@ test("print projection excludes checklist detail and long code ranges disclose o
 
 test("portfolio evidence report includes all twelve repositories and findings without a CWE mapping", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   const bytes = await fs.readFile(path.join(f.root, "service", "app.py"));
   f.model.cweReview.findings = [];
   delete f.model.cweModelReview;
@@ -135,7 +136,7 @@ test("portfolio evidence report includes all twelve repositories and findings wi
 
 test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and explicit snapshot status", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   f.model.aiReview = {
     status: "partial",
     basedOnRevision: f.model.modelRevision,
@@ -172,7 +173,7 @@ test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and expl
 
 test("default shareable reports embed UnitOne branding and omit only requested presentation fields", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   const omitted = [
     "Community Edition does not provide compiler-level cross-file or cross-repository taint resolution.",
     "Requested CWE coverage and STRIDE review remain separate scope obligations.",
@@ -223,7 +224,7 @@ test("default shareable reports embed UnitOne branding and omit only requested p
 
 test("CWE summary counts records once, keeps unmapped issues and counts distinct repositories", async (t) => {
   const f = await reportFixture();
-  t.after(() => fs.rm(f.dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   f.model.cweModelReview.findings.push({
     ...f.model.cweModelReview.findings[0],
     id: "unmapped",

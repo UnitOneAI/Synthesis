@@ -1,3 +1,4 @@
+import { cleanupAfter } from "./cleanup.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -20,7 +21,7 @@ async function fixture(t) {
   const dir = await fs.realpath(
     await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-disk-")),
   );
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  cleanupAfter(t, () => fs.rm(dir, { recursive: true, force: true }));
   const root = path.join(dir, "source"),
     workspace = path.join(dir, "state");
   await fs.mkdir(path.join(root, "one"), { recursive: true });
@@ -212,7 +213,7 @@ diskTest(
       port: 0,
       quiet: true,
     });
-    t.after(() => app.close());
+    cleanupAfter(t, () => app.close());
     const call = async (endpoint, body) =>
       fetch(new URL(endpoint, app.url), {
         headers: {
@@ -423,7 +424,7 @@ diskTest(
       port: 0,
       quiet: true,
     });
-    t.after(() => app.close());
+    cleanupAfter(t, () => app.close());
     const headers = {
       "x-synthesis-token": app.token,
       "content-type": "application/json",
