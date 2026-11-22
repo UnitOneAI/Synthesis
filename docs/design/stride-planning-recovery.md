@@ -2,7 +2,7 @@
 
 ## Problem
 
-The JCI screenshots showed a graph-query timeout, a STRIDE attempt that failed before its first checkpoint, historical results, and a prior action with 410 failed packets and more than 25 million reported tokens. A screenshot does not establish that the preview-query timeout caused the review-worker failure, or explain the model validation failures. The small error export is required to distinguish those causes.
+Large portfolio runs exposed preview-query timeouts, review attempts failing before their first checkpoint, historical results presented alongside current scope, and excessive spending on invalid responses. A screenshot does not establish whether a preview timeout caused a review-worker failure. Compact error exports are required to distinguish planning, worker and provider failures.
 
 ## Changes
 
@@ -25,4 +25,4 @@ Show all current scenarios in the summary and at most twelve in detailed narrati
 
 ## Remaining limits
 
-Static extraction, ambiguous calls, graph traversal bounds and the 50,000-obligation cap remain explicit. The change does not add compiler-level resolution or runtime verification. User decisions about deployment reachability, identity and boundary enforcement cannot be inferred as approved simply because a model returned JSON. The JCI gateway must be checked using its actual error export and a small successful source-backed request before another unattended run.
+Static extraction, ambiguous calls, graph traversal bounds and the 50,000-obligation cap remain explicit. The change does not add compiler-level resolution or runtime verification. User decisions about deployment reachability, identity and boundary enforcement cannot be inferred as approved simply because a model returned JSON. The configured gateway must be checked using its actual error export and a small successful source-backed request before another unattended run.
