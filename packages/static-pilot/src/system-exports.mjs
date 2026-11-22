@@ -524,8 +524,10 @@ export function systemPrintReport(model) {
     ${review?.coverage ? `<p>${stale ? "Historical counts: " : ""}${completed} / ${review.coverage.totalBatches || 0} STRIDE packets completed; ${failed} failed; ${pending} pending.</p>` : "<p>STRIDE analysis has not run.</p>"}
     ${review?.stopReason ? `<p>Last recorded stop reason: ${e(review.stopReason)}.</p>` : ""}
     ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
+  const stageCoverage = hasResults && review?.reviewOrder?.stages
+    ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
   const summary = hasResults
-    ? `<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
+    ? `${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
         ["Threat / affected scope", "Why it matters", "Next action"],
         scenarios.map((t) => [
           `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,

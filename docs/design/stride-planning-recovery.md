@@ -23,6 +23,22 @@ Current partial results remain exportable. Order scenarios by existing explained
 
 Show all current scenarios in the summary and at most twelve in detailed narrative form. Explicitly disclose that detail limit and retain complete records in the HTML/JSON exports. Use source paths and line numbers instead of opaque evidence IDs; omit empty rows and flattened internal objects. The DFD is clearly labeled static context, not evidence that all depicted paths were analyzed. UnitOne branding and the confidentiality notice remain.
 
+## External-first investigation order
+
+The STRIDE coordinator orders existing review packets into five stages:
+
+1. Declared external interfaces: explicit external-party declarations and their interface crossings. Rejected or stale declarations do not establish this priority.
+2. Potential external entry points: production HTTP entry points/integrations, RPC, device interfaces and message consumers. Unknown exposure stays high priority but is not labeled internet-facing.
+3. Entry-point context and internal paths: controls in entry-point components, graph neighborhoods and cross-repository relationships involving entry points. Component association is context, not proof of reachability.
+4. Internal actors and boundaries: remaining internal authority, workers, stores and trust transitions.
+5. Supporting and test code: test/generated/vendor-only packets. These remain in scope; mixed packets retain related context with their higher-priority evidence.
+
+Four workers can operate within a stage. The coordinator waits for active requests in that stage before dispatching the next. A failed stage holds later stages pending; successful packets and usage remain saved. Cancellation drains active requests. Continuation retries outstanding scope and reuses compatible successful results. The existing invalid-response guard can stop a stage sooner.
+
+Scheduling metadata does not alter packet content, hashes, model guidance, or coverage obligations. The original repository round-robin order is preserved within each stage. Existing completed internal work remains valid when compatible; it is not repeated just to enforce the new order. This orders packet execution rather than claiming that every record in a mixed packet is externally exposed.
+
+The matrix shows completed/planned, failed and pending packets per stage. Current partial PDFs include stage coverage; stale/no-result reports do not portray historical stage counts as current analysis. Trace event `review.stage-packet` records packet ID, stage and stage label without source excerpts. Stage completion is distinct from reviewer acceptance of actors and trust boundaries.
+
 ## Remaining limits
 
 Static extraction, ambiguous calls, graph traversal bounds and the 50,000-obligation cap remain explicit. The change does not add compiler-level resolution or runtime verification. User decisions about deployment reachability, identity and boundary enforcement cannot be inferred as approved simply because a model returned JSON. The configured gateway must be checked using its actual error export and a small successful source-backed request before another unattended run.

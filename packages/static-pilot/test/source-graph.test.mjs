@@ -1253,3 +1253,29 @@ test("STRIDE invalid-response guard settles active workers and preserves their r
   assert.equal(model.aiReview.execution.active, 0);
   assert.equal(model.usageLedger.attempts.length, calls);
 });
+
+test('twelve-repository STRIDE dispatches external packets first and resumes without repeating compatible work', async () => {
+  const { root, model } = await portfolio(2);
+  try {
+    const plan = reviewPlan(model);
+    assert.ok(plan.batches.some(b => b.reviewStage === 1));
+    assert.ok(plan.batches.some(b => b.reviewStage === 2));
+    // Deliberately reverse storage order: dispatch must use priority, not array order.
+    plan.batches.reverse();
+    const hashes = plan.batches.map(b => [b.id, b.packetHash]);
+    const stages = [], ids = [];
+    const trace = (event, data) => {
+      if (event === 'review.stage-packet') { stages.push(data.stage); ids.push(data.batchId); }
+    };
+    await enrichGraphModel(model, config, new Map(), async () => response(), { plan, maxBatches: 2, concurrency: 4, trace });
+    assert.deepEqual(stages, [1, 1]);
+    assert.equal(model.aiReview.reviewOrder.stages[1].completed, 2);
+    await enrichGraphModel(model, config, new Map(), async () => response(), { plan, runUntilComplete: true, concurrency: 4, trace });
+    assert.deepEqual(stages, [...stages].sort((a, b) => a - b));
+    assert.equal(new Set(ids).size, plan.batches.length);
+    assert.equal(ids.length, plan.batches.length);
+    assert.equal(model.aiReview.coverage.completedBatches, plan.batches.length);
+    assert.equal(model.aiReview.reviewOrder.stages.reduce((n, s) => n + s.completed, 0), plan.batches.length);
+    assert.deepEqual(plan.batches.map(b => [b.id, b.packetHash]), hashes);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

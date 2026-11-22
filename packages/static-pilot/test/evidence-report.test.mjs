@@ -291,6 +291,7 @@ test("shareable STRIDE report gates findings on current results and explains sou
       pendingBatches: 11,
     },
   };
+  f.model.aiReview.reviewOrder = { policy: "external-first", stages: [{ label: "Potential external entry points", completed: 1, total: 12, failed: 0, pending: 11 }] };
   const before = JSON.stringify({
     review: f.model.aiReview,
     actors: f.model.actors,
@@ -299,6 +300,8 @@ test("shareable STRIDE report gates findings on current results and explains sou
   const html = systemPrintReport(f.model);
   assert.match(html, /1 current returned threat scenarios/);
   assert.match(html, /What needs attention/);
+  assert.match(html, /Review order and coverage/);
+  assert.match(html, /Potential external entry points/);
   assert.match(
     html,
     /<strong>Access and prerequisites:<\/strong> Network intermediary/,
@@ -329,7 +332,7 @@ test("shareable STRIDE report gates findings on current results and explains sou
     assert.match(output, /No current STRIDE results/);
     assert.doesNotMatch(
       output,
-      /Certificate verification bypass|Network intermediary|<h2>STRIDE matrix/,
+      /Certificate verification bypass|Network intermediary|<h2>STRIDE matrix|Review order and coverage/,
     );
   }
   f.model.aiReview.status = "partial";

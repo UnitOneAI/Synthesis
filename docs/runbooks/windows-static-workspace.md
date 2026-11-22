@@ -1,6 +1,6 @@
 # Windows: static system threat modeling
 
-## Current update: faster planning and current-results reports
+## Current update: external-first review, faster planning and current-results reports
 
 This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and reuses successful responses whose packet hashes still match. Repository-wide classification citations are now restricted to submitted evidence; affected scopes are repacked and may need fresh model review. Before starting the next STRIDE action, the server saves the prior successful checkpoint under `review-history/stride-<digest>.json` in the workspace. These historical JSON archives are separate from current coverage and do not replace a full workspace backup. Records already marked stale by an earlier methodology change remain historical.
 
@@ -9,6 +9,8 @@ UI refresh no longer rebuilds the review plan. During startup, **Preparing STRID
 A run now stops new requests after three consecutive invalid responses, or six invalid responses in the last twelve, including evidence-validation and output-limit errors. Already active requests finish and successful checkpoints remain saved. If this happens, use **Export errors**; do not repeatedly restart the same failing run. The token target remains advisory.
 
 After updating, open the saved graph, enable **Include hash-checked, redacted code context in STRIDE**, and verify one request with one worker and **Run until complete** off. If it succeeds, choose four workers and **Run until complete**. Do not rebuild unchanged clones to clear a model error. For an interrupted/failed run, download **Export errors** and save the small JSON under your exports directory.
+
+STRIDE now runs **External interfaces first** automatically. The matrix shows five stages: declared external interfaces, potential entry points, their internal paths/context, remaining internal actors/boundaries, then supporting/test code. Four workers run within a stage; the next stage waits for it to settle. If a stage has failed packets, later scope stays pending until the error is resolved and you continue. Unknown exposure is not labeled internet-facing. This ordering alone does not invalidate compatible completed packets or require rebuilding the graph.
 
 The default PDF now shows current returned results, with a prioritized summary, linked actors/boundaries and readable threat details. If analysis has not produced a current successful checkpoint, it says **No current STRIDE results** and omits static planning registers and stale findings. Partial current results remain exportable. Complete HTML/JSON exports retain full records. See [design and limits](../design/stride-planning-recovery.md).
 

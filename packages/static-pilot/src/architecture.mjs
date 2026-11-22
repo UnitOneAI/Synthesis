@@ -1,6 +1,6 @@
 import path from "node:path";
 
-// Scope labels affect presentation only. They never remove source from analysis.
+// Scope labels affect presentation and scheduling. They never remove source from analysis.
 export function sourceScope(file = "") {
   if (/(^|[/_.-])(tests?|specs?|fixtures?|mocks?)([/_.-]|$)/i.test(file))
     return "test";

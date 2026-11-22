@@ -1,5 +1,6 @@
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
+import { interfacePriorities, batchStage, reviewStageCoverage, REVIEW_STAGES } from "./review-order.mjs";
 import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import {
   GUIDANCE_VERSION,
@@ -57,6 +58,7 @@ export function reviewPlan(model, excerpts = new Map(), { progress } = {}) {
   );
   stage("system-context");
   const flowIndex = interactionFlowIndex(system);
+  const priorities = interfacePriorities(model, system);
   const disk = graphReader(model.sourceGraph),
     generation = model.sourceGraph?.generation;
   if (model.sourceGraph?.storage === "sqlite" && !disk)
@@ -227,6 +229,7 @@ export function reviewPlan(model, excerpts = new Map(), { progress } = {}) {
       packetHash,
       packet,
     };
+    batch.reviewStage = batchStage(batch, priorities);
     batches.push(batch);
     preparedPackets++;
     if (preparedPackets % 100 === 0)
@@ -534,6 +537,7 @@ export async function enrichGraphModel(
     basedOnRevision: model.modelRevision,
   };
   const runKey = sha(JSON.stringify(provenance));
+  const fallbackPriorities = interfacePriorities(model);
   await options.trace?.("review.planned", {
     runKey,
     sourceRevision: model.modelRevision,
@@ -595,12 +599,14 @@ export async function enrichGraphModel(
       planningMs,
       batches: plan.batches.map(({ packet, ...b }) => ({
         ...b,
+        reviewStage: b.reviewStage ?? batchStage({ ...b, packet }, fallbackPriorities),
         interfaceIds: packet.records.map((r) => r.id),
         packetBytes: Buffer.byteLength(JSON.stringify(packet)),
       })),
     },
   };
   review.runControl = runControl;
+  review.reviewOrder = { policy: "external-first", interpretation: "Review order is not deployed exposure. Unknown network entry points remain high priority; internal work is retained." };
   review.runId = beginUsageRun(model);
   model.aiReview = review;
   model.provider = config.provider;
@@ -679,6 +685,7 @@ export async function enrichGraphModel(
       );
     });
   const aggregate = () => {
+    review.reviewOrder.stages = reviewStageCoverage(review.plan.batches, review.batches);
     // Every checkpoint retains compatible successes, including later plan entries.
     review.batches.sort((a, b) => order.get(a.id) - order.get(b.id));
     review.threats = [];
@@ -821,6 +828,7 @@ export async function enrichGraphModel(
     } else if (!options.batchIds || options.batchIds.includes(batch.id))
       pending.push(index);
   }
+  pending.sort((a, b) => review.plan.batches[a].reviewStage - review.plan.batches[b].reviewStage || a - b);
   const selected = continuous ? pending : pending.slice(0, maxBatches);
   const shouldStop = () =>
     coordinationFailure
@@ -832,8 +840,10 @@ export async function enrichGraphModel(
           : Date.now() > deadline
             ? "time-budget"
             : null;
-  await runReviewPool(selected, {
+  const poolResult = await runReviewPool(selected, {
     concurrency,
+    stage: (index) => review.plan.batches[index].reviewStage,
+    shouldAdvanceStage: () => !review.batches.some((b) => b.status === "failed"),
     signal: options.signal,
     shouldStop,
     onState: async (state) => {
@@ -855,7 +865,9 @@ export async function enrichGraphModel(
         agentId,
         interfaceIds: batch.packet.records.map((r) => r.id),
         status: "queued",
+        reviewStage: review.plan.batches[index].reviewStage,
       };
+      await emit("review.stage-packet", { batchId: batch.id, stage: entry.reviewStage, label: REVIEW_STAGES[entry.reviewStage].label });
       review.batches.push(entry);
       let attempt;
       const requestStartedAt = performance.now();
@@ -1077,10 +1089,14 @@ export async function enrichGraphModel(
   if (formatFailureStop)
     review.error =
       "Stopped after repeated invalid model responses (3 consecutive or 6 of the last 12). Successful packets and usage are retained. Export errors and resolve the failure before continuing.";
+  if (poolResult.stopReason === "priority-stage-incomplete")
+    review.error = "The current review stage has failed packets. Later stages remain pending; inspect Export errors and retry the affected stage before continuing.";
   review.stopReason = options.signal?.aborted
     ? "cancelled"
     : formatFailureStop
       ? "repeated-response-format-failure"
+      : poolResult.stopReason === "priority-stage-incomplete"
+        ? "priority-stage-incomplete"
       : terminalFailure
         ? "provider-failure"
         : !continuous && calls >= maxBatches

@@ -21,3 +21,11 @@ Backend suite: 226 passed, 3 conditional scanner tests skipped. Existing qualifi
 A six-page report preview was rendered using the saved November 20 open-autofix response (four scenarios). It is labeled as saved-response layout validation, not a fresh scan. The source data and preview remain outside this public repository. Source code, model output and customer artifacts are not committed.
 
 Fresh customer error JSON and a successful small customer gateway review remain necessary to diagnose and qualify that environment. Screenshots do not identify every model validation failure, gateway policy or deployed control.
+
+## External-first scheduling checks
+
+- Classify declared, unknown-exposure, internal-context, internal-only and supporting/test evidence without asserting deployed internet exposure. Reject stale/rejected external declarations as a basis for stage zero.
+- With four workers, verify every external request settles before internal dispatch; cancellation wakes waiting workers and preserves undispatched scope.
+- A failed stage retains successful results and holds later stages. Continuation finishes outstanding packets without repeating compatible successes.
+- A twelve-repository STRIDE fixture reverses plan storage order, runs a bounded first action, then continuous review. Dispatch follows stage order; every packet is reviewed once and hashes remain unchanged.
+- Browser displays the external-first explanation and no-current-stage-coverage state. PDF includes stage counts only for current successful checkpoints, excluding them for stale or failed-before-checkpoint reviews.
