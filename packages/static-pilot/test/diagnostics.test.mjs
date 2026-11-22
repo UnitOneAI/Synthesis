@@ -696,3 +696,11 @@ test("compact errors retain planning time and safe failure reasons for the saved
   assert.equal(detail.validationRule, "schema-or-reference");
   assert.ok(!JSON.stringify(detail).includes("secret source text"));
 });
+
+test("incomplete or unsupported provider content is counted as an invalid response", () => {
+  for (const message of [
+    "Provider response was incomplete or contained unsupported content",
+    "Provider response was blocked, incomplete or contained unsupported content",
+  ])
+    assert.equal(failureDetail(message).code, "response-format");
+});

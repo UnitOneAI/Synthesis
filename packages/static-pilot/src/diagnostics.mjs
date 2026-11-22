@@ -72,7 +72,11 @@ export function failureDetail(message = "") {
       action:
         "Retry with the validation instructions; evidence requirements are unchanged.",
     };
-  if (/JSON|response-format/i.test(message))
+  if (
+    /JSON|response-format|unsupported content|Provider response was (?:blocked|incomplete)/i.test(
+      message,
+    )
+  )
     return {
       code: "response-format",
       retryable: true,
