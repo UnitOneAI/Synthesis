@@ -14,6 +14,10 @@ STRIDE now runs **External interfaces first** automatically. The matrix shows fi
 
 The default PDF now shows current returned results, with a prioritized summary, linked actors/boundaries and readable threat details. If analysis has not produced a current successful checkpoint, it says **No current STRIDE results** and omits static planning registers and stale findings. Partial current results remain exportable. Complete HTML/JSON exports retain full records. See [design and limits](../design/stride-planning-recovery.md).
 
+### Matrix display
+
+At remote-desktop window widths up to 1200 pixels, the matrix uses the full workspace width and threat details appear below it. Selecting a cell brings those details into view. Headers and row labels remain visible when scrolling. Amber cells count actual threat scenarios; checklist prompts alone do not create a finding highlight. Partial, unreviewed, failed and stale states remain explicit.
+
 ## Previous update: source-backed STRIDE and static investigation
 
 Update `main` and keep the existing local clones and saved workspace. This update does not change extraction rules or require a graph rebuild. Under **Sources**, open the saved graph and enable **Include hash-checked, redacted code context in STRIDE**. STRIDE now verifies unchanged source and retrieves code from local clones after restart. Initial source verification can take time on large repositories. Changed source requires rebuilding; unchanged source does not.

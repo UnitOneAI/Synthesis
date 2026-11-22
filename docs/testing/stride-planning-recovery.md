@@ -29,3 +29,11 @@ Fresh customer error JSON and a successful small customer gateway review remain 
 - A failed stage retains successful results and holds later stages. Continuation finishes outstanding packets without repeating compatible successes.
 - A twelve-repository STRIDE fixture reverses plan storage order, runs a bounded first action, then continuous review. Dispatch follows stage order; every packet is reviewed once and hashes remain unchanged.
 - Browser displays the external-first explanation and no-current-stage-coverage state. PDF includes stage counts only for current successful checkpoints, excluding them for stale or failed-before-checkpoint reviews.
+
+## Matrix display regression
+
+- At 1440, 1280 and 1024 pixels, all seven columns (subject plus STRIDE) fit inside the matrix viewport.
+- At 390 pixels, horizontal matrix scrolling preserves the row label and does not overflow the page.
+- Selecting a cell at 1024 pixels brings its details panel into view.
+- A partial review with one returned scenario highlights exactly one cell. Checklist-only cells remain inspectable without being highlighted as findings.
+- Existing stale-result, request/resume, actor filtering, evidence and PDF tests remain required.
