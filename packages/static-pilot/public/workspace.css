@@ -435,3 +435,34 @@ nav[aria-label="Workflow"] button {
   color: #863c22;
   background: #fff5ee;
 }
+
+/* Keep all STRIDE categories readable on smaller remote-desktop windows. */
+@media (max-width: 1200px) {
+  .ws-matrix-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-matrix-layout .ws-inspector {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+.ws-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f0f4ef;
+}
+.ws-matrix tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #f0f4ef;
+}
+.ws-matrix thead th:first-child {
+  left: 0;
+  z-index: 3;
+}
+.ws-matrix-scroll:focus-visible {
+  outline: 2px solid #1555c4;
+  outline-offset: 2px;
+}

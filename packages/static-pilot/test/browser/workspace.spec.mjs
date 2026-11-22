@@ -289,7 +289,14 @@ test("STRIDE, threat details, evidence and every register export remain connecte
   ).json();
   const actorId = data.systemModel.actors[0].id;
   await page.getByLabel("Actor", { exact: true }).selectOption(actorId);
-  await page.locator(".ws-matrix button.populated").first().click();
+  // Planning prompts remain inspectable, but do not receive finding highlights.
+  await expect(page.locator(".ws-matrix button.populated")).toHaveCount(0);
+  const promptCell = data.systemModel.matrix
+    .filter((row) => row.rowKind === "component")
+    .flatMap((row) => row.cells)
+    .find((cell) => cell.threatIds.some((id) => data.systemModel.threats.find((t) => t.id === id)?.actorIds.includes(actorId)));
+  expect(promptCell).toBeTruthy();
+  await page.locator(`.ws-matrix button[data-select="${promptCell.id}"]`).click();
   const visibleIds = await page
     .locator("#ws-inspector section button[data-select]")
     .evaluateAll((nodes) => nodes.map((n) => n.dataset.select));
@@ -302,7 +309,7 @@ test("STRIDE, threat details, evidence and every register export remain connecte
     ),
   ).toBeTruthy();
   await page.getByLabel("Actor", { exact: true }).selectOption("");
-  await page.locator(".ws-matrix button.populated").first().click();
+  await page.locator(`.ws-matrix button[data-select="${promptCell.id}"]`).click();
   await expect(page.locator("#ws-inspector")).toContainText("Linked scenarios");
   await expect(
     page.locator(".ws-checklist .ws-linked-record").first(),
@@ -842,6 +849,9 @@ test("partial STRIDE results default to component scenarios without requiring de
   );
   await expect(page.locator(".ws-matrix")).toContainText("threat scenario");
   await expect(page.locator(".ws-matrix")).not.toContainText("checklist items");
+  await expect(page.locator(".ws-matrix button.populated")).toHaveCount(1);
+  await expect(page.locator(".ws-matrix button.populated")).toContainText("1");
+  await expect(page.locator(".ws-matrix button:not(.populated)").filter({ hasText: "threat scenario" })).toHaveCount(0);
   await expect(page.locator("#workspace")).toContainText(
     "Request limit reached successfully",
   );
@@ -854,11 +864,40 @@ test("partial STRIDE results default to component scenarios without requiring de
   await expect(page.locator(".ws-matrix")).toContainText(
     /Partially analyzed|Scenarios identified/,
   );
+  for (const width of [1440, 1280, 1024]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const geometry = await page.locator(".ws-matrix").evaluate((table) => {
+      const container = table.parentElement.getBoundingClientRect();
+      return {
+        headers: [...table.querySelectorAll("thead th")].map((cell) => {
+          const bounds = cell.getBoundingClientRect();
+          return bounds.left >= container.left - 1 && bounds.right <= container.right + 1;
+        }),
+        pageFits: document.documentElement.scrollWidth <= innerWidth + 1,
+      };
+    });
+    expect(geometry.headers).toEqual(Array(7).fill(true));
+    expect(geometry.pageFits).toBe(true);
+  }
+  await page.locator(".ws-matrix").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("stride-matrix-1024.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const scrollArea = page.getByRole("region", { name: "STRIDE matrix scroll area" });
+  await scrollArea.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  const sticky = await page.locator(".ws-matrix").evaluate((table) => {
+    const container = table.parentElement.getBoundingClientRect();
+    const rowLabel = table.querySelector("tbody th").getBoundingClientRect();
+    return { labelVisible: rowLabel.left >= container.left - 1, pageFits: document.documentElement.scrollWidth <= innerWidth + 1 };
+  });
+  expect(sticky.labelVisible).toBe(true);
+  expect(sticky.pageFits).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 1000 });
   await page
     .locator(".ws-matrix button")
     .filter({ hasText: "threat scenario" })
     .first()
     .click();
+  await expect(page.locator("#ws-inspector")).toBeInViewport();
   await expect(page.locator("#ws-inspector")).toContainText("T-SCENARIO");
   await page
     .locator('#ws-inspector button[data-select="scenario-fixture"]')
