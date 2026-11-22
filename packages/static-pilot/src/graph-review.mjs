@@ -575,7 +575,7 @@ export async function enrichGraphModel(
     .map((b) => [b.id, b]));
   const retainedFailures = plan.batches.flatMap((b) => {
     const failed = previousFailures.get(b.id);
-    return failed?.packetHash === b.packetHash && !cached.has(b.id)
+    return failed?.packetHash === b.packetHash && cached.get(b.id)?.packetHash !== b.packetHash
       ? [{ ...failed, reviewStage: b.reviewStage ?? batchStage(b, fallbackPriorities) }]
       : [];
   });

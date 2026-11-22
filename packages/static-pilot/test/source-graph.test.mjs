@@ -1307,9 +1307,13 @@ test("STRIDE preserves unselected failures through a bounded retry and saved res
   await enrichGraphModel(model, config, new Map(), async (_, options) => {
     assert.match(JSON.parse(options.body).system, /Validation retry:/);
     return response();
-  }, { plan, maxBatches: 1, concurrency: 1, trace: (event, data) => {
-    if (event === "review.stage-packet") retried.push(data.batchId);
-  } });
+  }, { plan, maxBatches: 1, concurrency: 1,
+    // Recovery records with different evidence must not hide a current failure.
+    recoveredBatches: [{ id: failures.at(-1).id, status: "completed", packetHash: "different-evidence" }],
+    trace: (event, data) => {
+      if (event === "review.stage-packet") retried.push(data.batchId);
+    },
+  });
   assert.equal(model.aiReview.coverage.completedBatches, 1);
   assert.equal(model.aiReview.coverage.failedBatches, 2, "Unselected failures remain visible and retryable");
   assert.equal(new Set(model.aiReview.batches.map(b => b.id)).size, model.aiReview.batches.length);
