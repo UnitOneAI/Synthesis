@@ -14,6 +14,16 @@ STRIDE now runs **External interfaces first** automatically. The matrix shows fi
 
 The default PDF now shows current returned results, with a prioritized summary, linked actors/boundaries and readable threat details. If analysis has not produced a current successful checkpoint, it says **No current STRIDE results** and omits static planning registers and stale findings. Partial current results remain exportable. Complete HTML/JSON exports retain full records. See [design and limits](../design/stride-planning-recovery.md).
 
+### Response reference validation recovery
+
+The native STRIDE response schema now limits connection endpoints to submitted non-control interfaces and standards IDs to submitted requirements. It bounds connection evidence and explains per-interface ownership and standards evidence obligations. A `not-applicable` standards assessment still needs evidence; use `needs-context` when that evidence is missing. Local validation remains mandatory. The retry instructions continue to request no optional connections, allowing the retry to focus on threat scenarios.
+
+A bounded retry now retains all other compatible failed packets and their failure details. They keep the stricter retry instructions across restart; accepted packets are not resubmitted. A prior failure in a later stage does not prevent earlier stages from completing.
+
+This contract correction does not change the prompt/guidance version or invalidate compatible completed packets. Keep the same structured-output setting and saved graph. After updating, use one request, one worker and **Run until complete** off to qualify the next pending packet before resuming continuous review. This is not a guarantee that every model response will satisfy the validator.
+
+**Export errors** now identifies `connection-control-endpoint` separately. A spend-guard stop appears as `invalid-response-guard`, rather than an interruption. The export does not include model response prose or source snippets. Do not repeatedly continue if the same validation failure persists.
+
 ### Matrix display
 
 At remote-desktop window widths up to 1200 pixels, the matrix uses the full workspace width and threat details appear below it. Selecting a cell brings those details into view. Headers and row labels remain visible when scrolling. Amber cells count actual threat scenarios; checklist prompts alone do not create a finding highlight. Partial, unreviewed, failed and stale states remain explicit.

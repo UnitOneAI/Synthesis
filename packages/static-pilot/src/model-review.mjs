@@ -548,7 +548,7 @@ function retryReferenceInstructions(packet) {
   return (
     "\nRetry reference contract (derived from this packet): " +
     JSON.stringify(allowed) +
-    ". analysis.controlEvidenceIds may contain ONLY values in the controlEvidenceIds list above; analysis.boundaryIds may contain ONLY values in the boundaryIds list above. If a list is empty, return [] for that field. Empty lists are also correct when the allowed references do not support the scenario. A record with direction control but kind architecture is NOT a security-control record; deployment bindings, imports, owners and sourceGraph node IDs are not control evidence. interfaceIds use record.id; evidenceIds use evidence[].id belonging to the listed records; never interchange interface IDs, evidence IDs, sourceGraph IDs and boundary IDs. Keep connections exactly []; no control record or architecture record may be used to invent a connection. Retain source-supported threat analysis and explicit gaps; never substitute invented IDs to fill these lists."
+    ". analysis.controlEvidenceIds may contain ONLY values in the controlEvidenceIds list above; analysis.boundaryIds may contain ONLY values in the boundaryIds list above. If a list is empty, return [] for that field. Empty lists are also correct when the allowed references do not support the scenario. A record with direction control but kind architecture is NOT a security-control record; deployment bindings, imports, owners and sourceGraph node IDs are not control evidence. interfaceIds use record.id; evidenceIds use evidence[].id belonging to the listed records; never interchange interface IDs, evidence IDs, sourceGraph IDs and boundary IDs. Keep connections exactly []; no control record or architecture record may be used to invent a connection. For standardsReviews, use only supplied requirement IDs and evidence[].id values. Empty evidenceIds are valid only with needs-context; not-applicable still requires submitted evidence, and source-supported requires cited evidence with an excerpt. Retain source-supported threat analysis and explicit gaps; never substitute invented IDs to fill these lists."
   );
 }
 // Native output constraints use only submitted identifiers; local ownership validation remains authoritative.
@@ -572,6 +572,39 @@ export function boundStrideSchema(schema, packet) {
     records.map((r) => r.id),
   );
   restrict(threat.evidenceIds, evidence);
+  threat.evidenceIds.description =
+    "Cite evidence[].id belonging to the selected interfaceIds only. Include at least one owned evidence ID for EVERY selected interface. Record IDs and source graph node IDs are not evidence IDs.";
+  const connections = value.properties.connections;
+  const endpoints = [
+    ...new Set(records.filter((r) => r.direction !== "control").map((r) => r.id)),
+  ];
+  if (connections) {
+    connections.description =
+      endpoints.length < 2
+        ? "Fewer than two eligible endpoints are supplied. Return an empty array []."
+        : "Use only eligible non-control record IDs as endpoints. Cite submitted evidence for BOTH endpoints; supporting evidence alone does not establish a connection.";
+    for (const key of ["from", "to"]) {
+      if (endpoints.length)
+        connections.items.properties[key] = {
+          ...connections.items.properties[key], enum: endpoints,
+        };
+    }
+    restrict(connections.items.properties.evidenceIds, evidence);
+  }
+  const standards = value.properties.standardsReviews;
+  if (standards) {
+    const requirements = [
+      ...new Set((packet.analysisGuidance?.requirements || []).map((r) => r.id)),
+    ];
+    if (requirements.length)
+      standards.items.properties.id = {
+        ...standards.items.properties.id, enum: requirements,
+      };
+    else
+      standards.description = "No standards requirements are supplied. Return an empty array [].";
+    standards.items.properties.evidenceIds.description =
+      "Use submitted evidence[].id values only. Empty evidence is allowed ONLY for needs-context. not-applicable requires supporting evidence. source-supported requires every cited evidence record to include an excerpt; otherwise use needs-context.";
+  }
   restrict(
     threat.analysis?.properties.controlEvidenceIds,
     records

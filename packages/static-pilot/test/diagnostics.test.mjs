@@ -704,3 +704,12 @@ test("incomplete or unsupported provider content is counted as an invalid respon
   ])
     assert.equal(failureDetail(message).code, "response-format");
 });
+
+test("STRIDE error export identifies control endpoints and validation guard without leaking response text", () => {
+  const detail = failureDetail("Model response failed schema or evidence validation: connection endpoints cannot be control records");
+  assert.equal(detail.validationRule, "connection-control-endpoint");
+  const guard = failureDetail("Stopped after repeated invalid model responses. private response text");
+  assert.equal(guard.code, "invalid-response-guard");
+  assert.equal(guard.retryable, false);
+  assert.ok(!JSON.stringify(guard).includes("private response text"));
+});

@@ -67,6 +67,9 @@ test("saved graph opens after restart and exports a small evidence package witho
       headers: { "X-Synthesis-Token": url.hash.slice(1) },
     })
   ).json();
+  // Stop the old page's background polling before deliberately shutting down
+  // its server. Keep console-error assertions active across the restart.
+  await page.goto("about:blank");
   await app.close();
   app = await serve({
     sourceRoot: root,

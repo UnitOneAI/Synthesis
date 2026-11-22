@@ -964,3 +964,54 @@ test("packet byte accounting preserves the exact UTF-8 boundary with shared inde
     packet,
   );
 });
+
+test("STRIDE native contract restricts connections and standards without changing shared schemas", async () => {
+  const { boundStrideSchema } = await import("../src/model-review.mjs");
+  const { STRIDE_RESPONSE_SCHEMA } = await import("../src/security-schemas.mjs");
+  const { STRIDE_INVESTIGATION_SCHEMA } = await import("../src/stride-evidence.mjs");
+  const packet = reviewPacket(await fixture());
+  packet.records.push({ id: "control-only", kind: "control", direction: "control",
+    evidence: [{ id: "control-proof" }] });
+  packet.analysisGuidance = { ...packet.analysisGuidance,
+    requirements: [{ id: "required-check" }] };
+  for (const schema of [STRIDE_RESPONSE_SCHEMA, STRIDE_INVESTIGATION_SCHEMA]) {
+    const original = JSON.stringify(schema);
+    const bounded = boundStrideSchema(schema, packet);
+    const connection = bounded.properties.connections.items.properties;
+    const eligible = packet.records.filter((r) => r.direction !== "control").map((r) => r.id);
+    assert.deepEqual(connection.from.enum, [...new Set(eligible)]);
+    assert.deepEqual(connection.to.enum, [...new Set(eligible)]);
+    assert.ok(!connection.from.enum.includes("control-only"));
+    assert.ok(connection.evidenceIds.items.enum.includes("control-proof"), "Controls remain supporting evidence");
+    const standards = bounded.properties.standardsReviews.items.properties;
+    assert.deepEqual(standards.id.enum, ["required-check"]);
+    assert.match(standards.evidenceIds.description, /not-applicable requires supporting evidence/);
+    assert.match(bounded.properties.threats.items.properties.evidenceIds.description, /EVERY selected interface/);
+    assert.equal(bounded.properties.threats.items.properties.title.enum, undefined, "Endpoint and requirement restrictions must not leak into prose fields");
+    assert.equal(JSON.stringify(schema), original);
+    for (const records of [[], [packet.records.at(-1)]]) {
+      const empty = boundStrideSchema(schema, { records });
+      assert.match(empty.properties.connections.description, /empty array/);
+      assert.match(empty.properties.standardsReviews.description, /empty array/);
+      assert.ok(!JSON.stringify(empty).includes('"enum":[]'));
+    }
+  }
+  await requestReview({ ...gatewayConfig(), structuredOutputs: true }, packet, async (_, options) => {
+    const schema = JSON.parse(options.body).output_config.format.schema;
+    assert.ok(!schema.properties.connections.items.properties.from.enum.includes("control-only"));
+    assert.deepEqual(schema.properties.standardsReviews.items.properties.id.enum, ["required-check"]);
+    return responseFor("anthropic", suggestion(packet));
+  });
+  const invalidConnection = suggestion(packet);
+  invalidConnection.connections[0].to = "control-only";
+  invalidConnection.connections[0].evidenceIds.push("control-proof");
+  assert.throws(() => validateReview(invalidConnection, packet), /connection endpoints cannot be control records/);
+  const wrongOwner = suggestion(packet);
+  wrongOwner.threats[0].evidenceIds = ["control-proof"];
+  assert.throws(() => validateReview(wrongOwner, packet), /evidence must belong/);
+  const standards = suggestion(packet);
+  standards.standardsReviews = [{ id: "required-check", status: "not-applicable", rationale: "Needs supporting context", evidenceIds: [] }];
+  assert.throws(() => validateReview(standards, packet), /standards assessment requires submitted evidence/);
+  standards.standardsReviews[0].status = "needs-context";
+  assert.doesNotThrow(() => validateReview(standards, packet));
+});

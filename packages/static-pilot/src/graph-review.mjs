@@ -570,6 +570,15 @@ export async function enrichGraphModel(
       cached.get(b.id)?.packetHash === b.packetHash ? cached.get(b.id) : null,
     )
     .filter(Boolean);
+  const previousFailures = new Map(previous
+    .filter((b) => b.status === "failed")
+    .map((b) => [b.id, b]));
+  const retainedFailures = plan.batches.flatMap((b) => {
+    const failed = previousFailures.get(b.id);
+    return failed?.packetHash === b.packetHash && cached.get(b.id)?.packetHash !== b.packetHash
+      ? [{ ...failed, reviewStage: b.reviewStage ?? batchStage(b, fallbackPriorities) }]
+      : [];
+  });
   const order = new Map(plan.batches.map((b, index) => [b.id, index]));
   const review = {
     ...provenance,
@@ -580,7 +589,7 @@ export async function enrichGraphModel(
     status: "pending",
     mode:
       options.prepareBatch || excerpts.size ? "source-excerpts" : "metadata",
-    batches: [...retained],
+    batches: [...retained, ...retainedFailures],
     threats: [],
     connections: [],
     questions: [],
@@ -843,7 +852,9 @@ export async function enrichGraphModel(
   const poolResult = await runReviewPool(selected, {
     concurrency,
     stage: (index) => review.plan.batches[index].reviewStage,
-    shouldAdvanceStage: () => !review.batches.some((b) => b.status === "failed"),
+    shouldAdvanceStage: (stage) => !review.batches.some(
+      (b) => b.status === "failed" && b.reviewStage <= stage,
+    ),
     signal: options.signal,
     shouldStop,
     onState: async (state) => {
@@ -868,6 +879,10 @@ export async function enrichGraphModel(
         reviewStage: review.plan.batches[index].reviewStage,
       };
       await emit("review.stage-packet", { batchId: batch.id, stage: entry.reviewStage, label: REVIEW_STAGES[entry.reviewStage].label });
+      const priorFailure = review.batches.find((b) => b.id === entry.id && b.status === "failed");
+      // Replace only the packet being retried. Other failures must survive
+      // bounded actions/restarts so their errors and retry instructions persist.
+      review.batches = review.batches.filter((b) => b.id !== entry.id);
       review.batches.push(entry);
       let attempt;
       const requestStartedAt = performance.now();
@@ -1022,6 +1037,7 @@ export async function enrichGraphModel(
       } catch (error) {
         if (!attempt) {
           review.batches = review.batches.filter((b) => b !== entry);
+          if (priorFailure) review.batches.push(priorFailure);
           if (coordinationFailure) throw coordinationFailure;
           if (options.signal?.aborted || shouldStop()) {
             await save();
