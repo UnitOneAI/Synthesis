@@ -42,3 +42,8 @@ The matrix shows completed/planned, failed and pending packets per stage. Curren
 ## Remaining limits
 
 Static extraction, ambiguous calls, graph traversal bounds and the 50,000-obligation cap remain explicit. The change does not add compiler-level resolution or runtime verification. User decisions about deployment reachability, identity and boundary enforcement cannot be inferred as approved simply because a model returned JSON. The configured gateway must be checked using its actual error export and a small successful source-backed request before another unattended run.
+
+
+## Proposed next product increment
+
+[Deployment context and system-focused static threat modeling](deployment-context-and-system-review.md) defines evidence/profile views, targeted deployment questions and a distinct architecture-review scope. This is a proposed design, not functionality delivered by the recovery patch.
