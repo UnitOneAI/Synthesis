@@ -37,3 +37,13 @@ Fresh customer error JSON and a successful small customer gateway review remain 
 - Selecting a cell at 1024 pixels brings its details panel into view.
 - A partial review with one returned scenario highlights exactly one cell. Checklist-only cells remain inspectable without being highlighted as findings.
 - Existing stale-result, request/resume, actor filtering, evidence and PDF tests remain required.
+
+
+## Response reference contract regression
+
+- Native STRIDE and investigation schemas constrain both connection endpoints to non-control records, while retaining controls as supporting evidence.
+- Standards IDs and evidence IDs are limited to submitted scope. Per-interface evidence ownership and standards evidence status requirements remain enforced locally.
+- Empty/control-only packets avoid invalid empty enums and request empty connections. Shared schemas and unrelated prose fields must remain unchanged.
+- A mock gateway verifies the actual outgoing schema and exact deployment handling. Invalid control endpoints, wrong-owner evidence and unsupported standards claims remain rejected; needs-context may omit evidence.
+- Small error exports distinguish control endpoints and the invalid-response spend guard without exposing model response text.
+- No live model call is required by these tests. A one-request customer gateway qualification remains required before resuming a large run.

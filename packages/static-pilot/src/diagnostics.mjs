@@ -47,6 +47,14 @@ export function failureDetail(message = "") {
           ? "Wait for quota recovery; consult gateway operator."
           : "Consult gateway operator with the timestamp and request identifiers.",
     };
+  if (
+    /repeated invalid model responses|repeated-response-format-failure/i.test(message)
+  )
+    return {
+      code: "invalid-response-guard",
+      retryable: false,
+      action: "Inspect failed packet validation rules before retrying. Dispatch stopped to avoid further unsuccessful model calls; saved results are retained.",
+    };
   if (/output-token|truncat/i.test(message))
     return {
       code: "output-limit",
@@ -57,17 +65,19 @@ export function failureDetail(message = "") {
     return {
       code: "evidence-validation",
       validationRule:
-        /interface references are missing, duplicated or outside/.test(message)
-          ? "interface-reference"
-          : /evidence must belong to the listed interfaces/.test(message)
-            ? "evidence-ownership"
-            : /standards/.test(message)
-              ? "standards-evidence"
-              : /required object fields/.test(message)
-                ? "object-fields"
-                : /required text field/.test(message)
-                  ? "text-field"
-                  : "schema-or-reference",
+        /connection endpoints cannot be control records/.test(message)
+          ? "connection-control-endpoint"
+          : /interface references are missing, duplicated or outside/.test(message)
+            ? "interface-reference"
+            : /evidence must belong to the listed interfaces/.test(message)
+              ? "evidence-ownership"
+              : /standards/.test(message)
+                ? "standards-evidence"
+                : /required object fields/.test(message)
+                  ? "object-fields"
+                  : /required text field/.test(message)
+                    ? "text-field"
+                    : "schema-or-reference",
       retryable: true,
       action:
         "Retry with the validation instructions; evidence requirements are unchanged.",
