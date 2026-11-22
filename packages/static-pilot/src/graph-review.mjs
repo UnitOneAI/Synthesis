@@ -1,5 +1,6 @@
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
+import { interfacePriorities, batchStage, reviewStageCoverage, REVIEW_STAGES } from "./review-order.mjs";
 import { STRIDE_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import {
   GUIDANCE_VERSION,
@@ -11,11 +12,16 @@ import { graphReader } from "./graph-store.mjs";
 import { failureDetail } from "./diagnostics.mjs";
 import {
   coverageObligations,
+  batchCoverage,
   obligationFits,
   coverageStatus,
 } from "./coverage-plan.mjs";
 import { beginUsageRun, beginAttempt, finishAttempt } from "./token-usage.mjs";
-import { interactionContext, systemModel } from "./system-model.mjs";
+import {
+  interactionContext,
+  interactionFlowIndex,
+  systemModel,
+} from "./system-model.mjs";
 import {
   reviewPacket,
   requestReview,
@@ -36,13 +42,23 @@ export const STRIDE = [
 ];
 export const GRAPH_REVIEW_VERSION = "graph-stride-4";
 
-export function reviewPlan(model, excerpts = new Map()) {
+export function reviewPlan(model, excerpts = new Map(), { progress } = {}) {
+  const started = performance.now();
+  const stage = (name, extra = {}) =>
+    progress?.({
+      stage: name,
+      elapsedMs: Math.round(performance.now() - started),
+      ...extra,
+    });
   // Analysis proposals are outputs, not new inputs on each continuation.
   // Explicit reviewer records remain in the workspace and still affect packets.
   const system = systemModel(
     { ...model, aiReview: undefined },
     { matrix: false },
   );
+  stage("system-context");
+  const flowIndex = interactionFlowIndex(system);
+  const priorities = interfacePriorities(model, system);
   const disk = graphReader(model.sourceGraph),
     generation = model.sourceGraph?.generation;
   if (model.sourceGraph?.storage === "sqlite" && !disk)
@@ -81,10 +97,50 @@ export function reviewPlan(model, excerpts = new Map()) {
       basis: e.basis,
     }));
   const structure = coverageObligations(model, system);
+  stage("coverage-obligations", { obligations: structure.obligations.length });
   const splits = [];
+  let preparedPackets = 0;
+  const coverageIndex = new Map();
+  const packetIndexes = {
+    evidence: new Map(model.evidence.map((e) => [e.id, e])),
+    components: new Map(model.components.map((c) => [c.id, c])),
+  };
+  function split(interfaces, phase, label, obligations, depth) {
+    const middle = Math.ceil(interfaces.length / 2);
+    splits.push({
+      phase,
+      label,
+      depth,
+      records: interfaces.length,
+      reason: "packet-budget",
+    });
+    for (const half of [
+      interfaces.slice(0, middle),
+      interfaces.slice(middle),
+    ]) {
+      const ids = new Set(half.map((i) => i.id));
+      partition(
+        half,
+        phase,
+        label,
+        obligations.filter((o) => o.interfaceIds.every((x) => ids.has(x))),
+        depth + 1,
+      );
+    }
+  }
   function partition(interfaces, phase, label, obligations = [], depth = 0) {
     if (!interfaces.length) return;
-    const packet = reviewPacket({ ...model, interfaces }, excerpts, contexts);
+    // Preserve the same split tree without constructing oversized parent packets.
+    if (interfaces.length > 60) {
+      split(interfaces, phase, label, obligations, depth);
+      return;
+    }
+    const packet = reviewPacket(
+      { ...model, interfaces },
+      excerpts,
+      contexts,
+      packetIndexes,
+    );
     packet.reviewFocus = {
       phase,
       scope: label,
@@ -93,9 +149,10 @@ export function reviewPlan(model, excerpts = new Map()) {
         "Assess relevant categories; no returned threat does not establish safety. Candidate paths and cross-repository cohorts are hypotheses, not established data flows.",
     };
     packet.systemContext = interactionContext(
-      model,
+      { ...model, interfaces },
       packet.records.map((r) => r.id),
       system,
+      flowIndex,
     );
     // Focused requests select the relevant declarations before context limits apply.
     for (const o of obligations.filter((o) => o.contextKind)) {
@@ -112,7 +169,7 @@ export function reviewPlan(model, excerpts = new Map()) {
         ),
       };
       packet.systemContext = interactionContext(
-        model,
+        { ...model, interfaces },
         packet.records.map((r) => r.id),
         focused,
       );
@@ -160,38 +217,26 @@ export function reviewPlan(model, excerpts = new Map()) {
         omitted.push(interfaces[0].id);
         return;
       }
-      const middle = Math.ceil(interfaces.length / 2);
-      splits.push({
-        phase,
-        label,
-        depth,
-        records: interfaces.length,
-        reason: "packet-budget",
-      });
-      // Remove spanning obligations from children; an atomic bridge request is planned below.
-      for (const half of [
-        interfaces.slice(0, middle),
-        interfaces.slice(middle),
-      ]) {
-        const ids = new Set(half.map((i) => i.id));
-        partition(
-          half,
-          phase,
-          label,
-          obligations.filter((o) => o.interfaceIds.every((x) => ids.has(x))),
-          depth + 1,
-        );
-      }
+      split(interfaces, phase, label, obligations, depth);
       return;
     }
     const packetHash = sha(JSON.stringify(packet));
-    batches.push({
+    const batch = {
       id: id(GRAPH_REVIEW_VERSION, phase, packetHash),
       phase,
       label,
       depth,
       packetHash,
       packet,
+    };
+    batch.reviewStage = batchStage(batch, priorities);
+    batches.push(batch);
+    preparedPackets++;
+    if (preparedPackets % 100 === 0)
+      stage("packet-preparation", { preparedPackets });
+    coverageIndex.set(batch.id, {
+      id: batch.id,
+      coverageIndex: batchCoverage(batch),
     });
   }
   const repositories = new Map();
@@ -243,6 +288,7 @@ export function reviewPlan(model, excerpts = new Map()) {
     }
   }
   // Two invalid responses on the same packet trigger deterministic subdivision on continuation.
+  stage("partitions", { batches: batches.length });
   // Persist the parent/child tree so successful children remain reusable after restart.
   const refinements = [];
   const priorRefinements = new Map(
@@ -301,6 +347,7 @@ export function reviewPlan(model, excerpts = new Map()) {
     index--;
   }
   // Recursively split large scopes, then explicitly bridge obligations cut by partitions.
+  stage("refinements", { batches: batches.length });
   // A relationship is never counted as reviewed merely because its endpoints were reviewed separately.
   const byInterface = new Map();
   let indexed = 0;
@@ -309,12 +356,10 @@ export function reviewPlan(model, excerpts = new Map()) {
       const b = batches[indexed++];
       for (const r of b.packet.records) {
         if (!byInterface.has(r.id)) byInterface.set(r.id, []);
-        byInterface.get(r.id).push(indexed - 1);
+        byInterface.get(r.id).push(coverageIndex.get(b.id));
       }
     }
-    return (byInterface.get(obligation.interfaceIds[0]) || []).map(
-      (index) => batches[index],
-    );
+    return byInterface.get(obligation.interfaceIds[0]) || [];
   };
   for (const obligation of structure.obligations.filter(
     (o) => o.kind !== "interface",
@@ -329,6 +374,7 @@ export function reviewPlan(model, excerpts = new Map()) {
     );
   }
   const uniqueBatches = new Set();
+  stage("coverage-bridges", { batches: batches.length });
   for (let index = batches.length - 1; index >= 0; index--) {
     if (uniqueBatches.has(batches[index].id)) batches.splice(index, 1);
     else uniqueBatches.add(batches[index].id);
@@ -345,6 +391,10 @@ export function reviewPlan(model, excerpts = new Map()) {
         subject: obligation.id,
       });
   }
+  stage("completed", {
+    batches: batches.length,
+    obligations: structure.obligations.length,
+  });
   return {
     batches,
     omitted: [...new Set(omitted)],
@@ -437,7 +487,32 @@ export async function enrichGraphModel(
   const maxBatches = options.maxBatches ?? 12;
   if (!Number.isInteger(maxBatches) || maxBatches < 1 || maxBatches > 100)
     throw new Error("Model batch budget must be 1–100 requests");
-  const plan = options.plan || reviewPlan(model, excerpts);
+  const planningStarted = performance.now();
+  if (!options.plan) {
+    options.progress?.(
+      "Preparing STRIDE review plan from the saved graph; no model calls yet",
+    );
+    await options.trace?.("review.planning-started", {
+      interfaces: model.interfaces.length,
+      repositories: model.sources.length,
+    });
+  }
+  const plan =
+    options.plan ||
+    reviewPlan(model, excerpts, {
+      progress: (state) =>
+        options.progress?.(
+          `Preparing STRIDE plan: ${state.stage}${state.preparedPackets ? " · " + state.preparedPackets + " packets prepared" : ""} · ${Math.round(state.elapsedMs / 1000)}s · no model calls yet`,
+        ),
+    });
+  const planningMs = Math.round(performance.now() - planningStarted);
+  if (!options.plan)
+    await options.trace?.("review.planning-completed", {
+      elapsedMs: planningMs,
+      batches: plan.batches.length,
+      obligations: plan.obligations.length,
+      gaps: plan.gaps.length,
+    });
   const provenance = {
     ...publicModelConfig(config),
     ...(options.evidencePolicy
@@ -462,6 +537,7 @@ export async function enrichGraphModel(
     basedOnRevision: model.modelRevision,
   };
   const runKey = sha(JSON.stringify(provenance));
+  const fallbackPriorities = interfacePriorities(model);
   await options.trace?.("review.planned", {
     runKey,
     sourceRevision: model.modelRevision,
@@ -520,14 +596,17 @@ export async function enrichGraphModel(
       gaps: plan.gaps,
       limits: plan.limits,
       semantics: plan.semantics,
+      planningMs,
       batches: plan.batches.map(({ packet, ...b }) => ({
         ...b,
+        reviewStage: b.reviewStage ?? batchStage({ ...b, packet }, fallbackPriorities),
         interfaceIds: packet.records.map((r) => r.id),
         packetBytes: Buffer.byteLength(JSON.stringify(packet)),
       })),
     },
   };
   review.runControl = runControl;
+  review.reviewOrder = { policy: "external-first", interpretation: "Review order is not deployed exposure. Unknown network entry points remain high priority; internal work is retained." };
   review.runId = beginUsageRun(model);
   model.aiReview = review;
   model.provider = config.provider;
@@ -537,6 +616,24 @@ export async function enrichGraphModel(
     terminalFailure = false,
     consecutiveFormatFailures = 0,
     formatFailureStop = false;
+  const recentOutcomes = [];
+  const recordOutcome = (invalid) => {
+    recentOutcomes.push(invalid);
+    if (recentOutcomes.length > 12) recentOutcomes.shift();
+    consecutiveFormatFailures = invalid ? consecutiveFormatFailures + 1 : 0;
+    const invalidResponses = recentOutcomes.filter(Boolean).length;
+    formatFailureStop ||=
+      consecutiveFormatFailures >= 3 ||
+      (recentOutcomes.length === 12 && invalidResponses >= 6);
+    review.failureGuard = {
+      recentResponses: recentOutcomes.length,
+      invalidResponses,
+      consecutiveInvalidResponses: consecutiveFormatFailures,
+      stopped: formatFailureStop,
+      policy:
+        "Stop new requests after 3 consecutive invalid responses or 6 invalid responses in the last 12. In-flight requests may finish.",
+    };
+  };
   const deadline = continuous ? Infinity : Date.now() + 24 * 60 * 1000;
   // Compute immutable packet and repository metadata once, rather than serializing
   // the whole portfolio again at every concurrent request checkpoint.
@@ -588,6 +685,7 @@ export async function enrichGraphModel(
       );
     });
   const aggregate = () => {
+    review.reviewOrder.stages = reviewStageCoverage(review.plan.batches, review.batches);
     // Every checkpoint retains compatible successes, including later plan entries.
     review.batches.sort((a, b) => order.get(a.id) - order.get(b.id));
     review.threats = [];
@@ -648,12 +746,16 @@ export async function enrichGraphModel(
     const sentBatches = new Set(
       review.batches.filter((b) => b.status !== "queued").map((b) => b.id),
     );
-    const sentPackets = plan.batches.filter((b) => sentBatches.has(b.id));
+    // Checkpoints use compact metrics, not deserialized SQLite packet payloads.
+    const sentPacketIds = [...metrics.keys()].filter((id) =>
+      sentBatches.has(id),
+    );
     review.coverage = {
       obligations: (() => {
         const { obligations, gaps, ...summary } = coverageStatus(
           plan,
           review.batches,
+          { details: false },
         );
         return { ...summary, gapCount: gaps.length };
       })(),
@@ -697,12 +799,12 @@ export async function enrichGraphModel(
       packetBytes: plannedPacketBytes,
     };
     review.coverage.plannedPacketBytes = plannedPacketBytes;
-    review.coverage.packetBytes = sentPackets.reduce(
-      (n, b) => n + metrics.get(b.id).bytes,
+    review.coverage.packetBytes = sentPacketIds.reduce(
+      (n, id) => n + metrics.get(id).bytes,
       0,
     );
     review.coverage.excerptCount = new Set(
-      sentPackets.flatMap((b) => metrics.get(b.id).excerpts),
+      sentPacketIds.flatMap((id) => metrics.get(id).excerpts),
     ).size;
     review.responseHash = sha(
       review.batches
@@ -726,6 +828,7 @@ export async function enrichGraphModel(
     } else if (!options.batchIds || options.batchIds.includes(batch.id))
       pending.push(index);
   }
+  pending.sort((a, b) => review.plan.batches[a].reviewStage - review.plan.batches[b].reviewStage || a - b);
   const selected = continuous ? pending : pending.slice(0, maxBatches);
   const shouldStop = () =>
     coordinationFailure
@@ -737,8 +840,10 @@ export async function enrichGraphModel(
           : Date.now() > deadline
             ? "time-budget"
             : null;
-  await runReviewPool(selected, {
+  const poolResult = await runReviewPool(selected, {
     concurrency,
+    stage: (index) => review.plan.batches[index].reviewStage,
+    shouldAdvanceStage: () => !review.batches.some((b) => b.status === "failed"),
     signal: options.signal,
     shouldStop,
     onState: async (state) => {
@@ -760,7 +865,9 @@ export async function enrichGraphModel(
         agentId,
         interfaceIds: batch.packet.records.map((r) => r.id),
         status: "queued",
+        reviewStage: review.plan.batches[index].reviewStage,
       };
+      await emit("review.stage-packet", { batchId: batch.id, stage: entry.reviewStage, label: REVIEW_STAGES[entry.reviewStage].label });
       review.batches.push(entry);
       let attempt;
       const requestStartedAt = performance.now();
@@ -896,7 +1003,7 @@ export async function enrichGraphModel(
             await save();
           },
         });
-        consecutiveFormatFailures = 0;
+        recordOutcome(false);
         finishAttempt(attempt, "succeeded");
         Object.assign(entry, {
           status: "completed",
@@ -931,11 +1038,11 @@ export async function enrichGraphModel(
         }
         entry.status = "failed";
         entry.error = error.message;
-        consecutiveFormatFailures =
-          failureDetail(error.message).code === "response-format"
-            ? consecutiveFormatFailures + 1
-            : 0;
-        formatFailureStop ||= consecutiveFormatFailures >= 3;
+        recordOutcome(
+          ["response-format", "evidence-validation", "output-limit"].includes(
+            failureDetail(error.message).code,
+          ),
+        );
         terminalFailure ||= /HTTP \d{3}|request failed or timed out/.test(
           error.message,
         );
@@ -981,11 +1088,15 @@ export async function enrichGraphModel(
             : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
   if (formatFailureStop)
     review.error =
-      "Stopped after three consecutive response-format failures. Check the provider output contract and export errors before retrying.";
+      "Stopped after repeated invalid model responses (3 consecutive or 6 of the last 12). Successful packets and usage are retained. Export errors and resolve the failure before continuing.";
+  if (poolResult.stopReason === "priority-stage-incomplete")
+    review.error = "The current review stage has failed packets. Later stages remain pending; inspect Export errors and retry the affected stage before continuing.";
   review.stopReason = options.signal?.aborted
     ? "cancelled"
     : formatFailureStop
       ? "repeated-response-format-failure"
+      : poolResult.stopReason === "priority-stage-incomplete"
+        ? "priority-stage-incomplete"
       : terminalFailure
         ? "provider-failure"
         : !continuous && calls >= maxBatches

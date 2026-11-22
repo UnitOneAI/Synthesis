@@ -934,11 +934,26 @@ export function editSystem(model, input) {
 }
 
 // Only the bounded interaction subjects relevant to submitted interface IDs are sent.
-export function interactionContext(model, ids, projection) {
+export function interactionFlowIndex(projection) {
+  const byInterface = new Map();
+  projection.flows.forEach((flow, index) => {
+    for (const id of flow.interfaceIds || []) {
+      if (!byInterface.has(id)) byInterface.set(id, []);
+      byInterface.get(id).push(index);
+    }
+  });
+  return byInterface;
+}
+export function interactionContext(model, ids, projection, flowIndex) {
   const s = projection || systemModel(model, { matrix: false }),
     included = new Set(ids),
     relevant = (f) => f.interfaceIds?.some((i) => included.has(i));
-  const flows = s.flows.filter(relevant).slice(0, 20),
+  const relevantFlows = flowIndex
+    ? [...new Set(ids.flatMap((id) => flowIndex.get(id) || []))]
+        .sort((a, b) => a - b)
+        .map((index) => s.flows[index])
+    : s.flows.filter(relevant);
+  const flows = relevantFlows.slice(0, 20),
     nodes = new Set(flows.flatMap((f) => [f.source, f.target]));
   const allowedEvidence = new Set(
     model.interfaces
@@ -956,7 +971,11 @@ export function interactionContext(model, ids, projection) {
           k,
           k === "interfaceIds"
             ? v.filter((id) => included.has(id))
-            : ["evidenceIds", "counterEvidenceIds"].includes(k)
+            : [
+                  "evidenceIds",
+                  "counterEvidenceIds",
+                  "classificationEvidenceIds",
+                ].includes(k)
               ? v.filter((id) => allowedEvidence.has(id))
               : v,
         ]),
@@ -971,10 +990,7 @@ export function interactionContext(model, ids, projection) {
       .slice(0, 20)
       .map(trim),
     controls: s.securityControls.filter(relevant).slice(0, 20).map(trim),
-    omittedFlowCount: Math.max(
-      0,
-      s.flows.filter(relevant).length - flows.length,
-    ),
+    omittedFlowCount: Math.max(0, relevantFlows.length - flows.length),
     flows: flows.map(trim),
     actors: s.actors
       .filter(

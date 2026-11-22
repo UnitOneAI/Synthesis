@@ -647,3 +647,60 @@ test("stale review diagnostics preserve reason and a later failed attempt withou
   assert.equal(failed.stride.staleReason.code, "stale-analysis");
   assert.ok(!JSON.stringify([stale, failed]).includes("PRIVATE_"));
 });
+
+test("compact errors retain planning time and safe failure reasons for the saved STRIDE run only", async () => {
+  const model = await fixture();
+  model.aiReview = {
+    status: "partial",
+    runId: "stride-run",
+    plan: { planningMs: 5432 },
+    failureGuard: { recentResponses: 12, invalidResponses: 6, stopped: true },
+    batches: [
+      {
+        id: "failed",
+        status: "failed",
+        error:
+          "Model response failed schema or evidence validation: evidence must belong to the listed interfaces and support every listed interface",
+      },
+    ],
+  };
+  model.usageLedger = {
+    attempts: [
+      {
+        status: "failed",
+        runId: "stride-run",
+        batchId: "failed",
+        failure: { code: "evidence-validation" },
+      },
+      {
+        status: "failed",
+        runId: "cwe-run",
+        batchId: "cwe",
+        failure: { code: "response-format" },
+      },
+    ],
+  };
+  const report = await errorReport({ model });
+  assert.equal(report.stride.planningMs, 5432);
+  assert.equal(report.stride.failureGuard.stopped, true);
+  assert.deepEqual(report.stride.failedAttemptCountsForSavedReviewRun, {
+    "evidence-validation": 1,
+  });
+  assert.equal(
+    report.stride.batches.items[0].failure.validationRule,
+    "evidence-ownership",
+  );
+  const detail = failureDetail(
+    "Model response failed schema or evidence validation: secret source text should not escape",
+  );
+  assert.equal(detail.validationRule, "schema-or-reference");
+  assert.ok(!JSON.stringify(detail).includes("secret source text"));
+});
+
+test("incomplete or unsupported provider content is counted as an invalid response", () => {
+  for (const message of [
+    "Provider response was incomplete or contained unsupported content",
+    "Provider response was blocked, incomplete or contained unsupported content",
+  ])
+    assert.equal(failureDetail(message).code, "response-format");
+});

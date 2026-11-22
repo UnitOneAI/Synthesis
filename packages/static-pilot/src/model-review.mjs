@@ -180,9 +180,12 @@ export function reviewPacket(
   model,
   excerpts = new Map(),
   contexts = new Map(),
+  indexes,
 ) {
-  const evidence = new Map(model.evidence.map((e) => [e.id, e]));
-  const components = new Map(model.components.map((c) => [c.id, c]));
+  const evidence =
+    indexes?.evidence || new Map(model.evidence.map((e) => [e.id, e]));
+  const components =
+    indexes?.components || new Map(model.components.map((c) => [c.id, c]));
   const packet = {
     version: REVIEW_VERSION,
     profile: redact(model.profile),
@@ -221,6 +224,7 @@ export function reviewPacket(
     return packet;
   }
   const groups = new Map();
+  let recordBytes = 0;
   for (const i of model.interfaces) {
     if (!groups.has(i.repository)) groups.set(i.repository, []);
     groups.get(i.repository).push(i);
@@ -265,9 +269,14 @@ export function reviewPacket(
         ...(contexts.has(i.id) ? { sourceGraph: contexts.get(i.id) } : {}),
       };
       packet.records.push(record);
+      recordBytes += Buffer.byteLength(JSON.stringify(record));
       packet.analysisGuidance = analysisGuidance(packet.records);
       if (
-        Buffer.byteLength(JSON.stringify(packet)) > REVIEW_LIMITS.packetBytes
+        // Exact JSON byte accounting without serializing all prior records again.
+        Buffer.byteLength(JSON.stringify({ ...packet, records: [] })) +
+          recordBytes +
+          Math.max(0, packet.records.length - 1) >
+        REVIEW_LIMITS.packetBytes
       ) {
         packet.records.pop();
         packet.analysisGuidance = analysisGuidance(packet.records);

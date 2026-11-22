@@ -896,7 +896,7 @@ test("late CWE completion preserves the DFD selected while review metadata is lo
   const requested = new Promise((resolve) => {
     announce = resolve;
   });
-  await page.route("**/api/review-plan", async (route) => {
+  await page.route("**/api/review-plan?summary=1", async (route) => {
     const response = await route.fetch();
     announce();
     await gate;
@@ -914,7 +914,7 @@ test("late CWE completion preserves the DFD selected while review metadata is lo
       .click();
     await expect(page.locator("#ws-canvas svg")).toBeVisible();
     const completed = page.waitForResponse((r) =>
-      r.url().endsWith("/api/review-plan"),
+      r.url().endsWith("/api/review-plan?summary=1"),
     );
     release();
     await completed;

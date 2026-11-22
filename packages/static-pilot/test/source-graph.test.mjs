@@ -1114,15 +1114,16 @@ for(let i=0;i<450;i++){
 const parse=JSON.parse,seen=[];
 JSON.parse=function(...args){const value=parse.apply(this,args);if(value?.packet?.records)seen.push(new WeakRef(value));return value;};
 const model={modelRevision:"revision",profile:"test",interfaces:[{id:"interface-1",repository:"service",evidence:["evidence-1"]}],sources:[{name:"service",status:"read"}],sourceGraph:{fingerprint:"graph"}};
-let liveAtDispatch=0,calls=0;
+let liveAtDispatch=0,calls=0,packetReadsAtFirstDispatch;
 try{
  await enrichGraphModel(model,${JSON.stringify(config)},new Map(),async()=>{
   calls++;
+  packetReadsAtFirstDispatch ??= seen.length;
   await new Promise(resolve=>setImmediate(resolve)); global.gc();
   liveAtDispatch=Math.max(liveAtDispatch,seen.filter(ref=>ref.deref()).length);
   return Response.json({stop_reason:"end_turn",usage:{input_tokens:100,output_tokens:10},content:[{type:"text",text:JSON.stringify({summary:"Static retention test",threats:[],connections:[],questions:[]})}]});
  },{maxBatches:2,concurrency:2,plan:{batches,omitted:[],splits:[],refinements:[],obligations:[],gaps:[],limits:{},semantics:"test"}});
- console.log(JSON.stringify({liveAtDispatch,calls,total:model.aiReview.coverage.totalBatches,completed:model.aiReview.coverage.completedBatches}));
+ console.log(JSON.stringify({liveAtDispatch,calls,checkpointPacketReads:seen.length-packetReadsAtFirstDispatch,total:model.aiReview.coverage.totalBatches,completed:model.aiReview.coverage.completedBatches}));
 }finally{JSON.parse=parse;graph.close();}
 `,
   );
@@ -1152,7 +1153,129 @@ try{
   assert.equal(output.calls, 2);
   assert.equal(output.completed, 2);
   assert.ok(
+    output.checkpointPacketReads <= 2,
+    `Checkpoints must not reload pending packets: ${output.checkpointPacketReads}`,
+  );
+  assert.ok(
     output.liveAtDispatch <= 4,
     `Only active workers may retain packet payloads; observed ${output.liveAtDispatch}`,
   );
+});
+
+test("STRIDE stops alternating validation failures without discarding successful packets or usage", async (t) => {
+  const { root, model } = await portfolio();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let calls = 0;
+  await enrichGraphModel(
+    model,
+    config,
+    new Map(),
+    async () => {
+      calls++;
+      return Response.json({
+        stop_reason: "end_turn",
+        usage: { input_tokens: 20, output_tokens: 10 },
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              summary: "Test",
+              threats:
+                calls % 2
+                  ? []
+                  : [
+                      {
+                        title: "Invalid scenario",
+                        category: "Spoofing",
+                        actor: "Caller",
+                        startingAccess: "Network",
+                        asset: "Identity",
+                        scenario: "Unverified",
+                        prerequisites: "Unknown",
+                        controls: "Unknown",
+                        mitigation: "Review",
+                        interfaceIds: ["invented"],
+                        evidenceIds: ["invented"],
+                      },
+                    ],
+              connections: [],
+              questions: [],
+            }),
+          },
+        ],
+      });
+    },
+    { runUntilComplete: true, concurrency: 1 },
+  );
+  assert.equal(calls, 12);
+  assert.equal(model.aiReview.coverage.completedBatches, 6);
+  assert.equal(model.aiReview.coverage.failedBatches, 6);
+  assert.equal(model.aiReview.failureGuard.stopped, true);
+  assert.equal(model.aiReview.failureGuard.invalidResponses, 6);
+  assert.equal(model.aiReview.stopReason, "repeated-response-format-failure");
+  assert.equal(
+    model.usageLedger.attempts.reduce((n, a) => n + a.usage.totalTokens, 0),
+    360,
+  );
+  assert.ok(
+    model.usageLedger.attempts
+      .filter((a) => a.status === "failed")
+      .every((a) => a.failure.code === "evidence-validation"),
+  );
+});
+
+test("STRIDE invalid-response guard settles active workers and preserves their results", async (t) => {
+  const { root, model } = await portfolio();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let calls = 0;
+  await enrichGraphModel(
+    model,
+    config,
+    new Map(),
+    async () => {
+      const ordinal = ++calls;
+      await new Promise((r) => setTimeout(r, ordinal === 4 ? 40 : 2));
+      if (ordinal === 4) return response();
+      return Response.json({
+        stop_reason: "max_tokens",
+        usage: { input_tokens: 20, output_tokens: 10 },
+        content: [{ type: "text", text: "truncated" }],
+      });
+    },
+    { runUntilComplete: true, concurrency: 4 },
+  );
+  assert.ok(
+    calls >= 4 && calls <= 6,
+    `bounded in-flight requests, received ${calls}`,
+  );
+  assert.equal(model.aiReview.failureGuard.stopped, true);
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  assert.equal(model.aiReview.execution.active, 0);
+  assert.equal(model.usageLedger.attempts.length, calls);
+});
+
+test('twelve-repository STRIDE dispatches external packets first and resumes without repeating compatible work', async () => {
+  const { root, model } = await portfolio(2);
+  try {
+    const plan = reviewPlan(model);
+    assert.ok(plan.batches.some(b => b.reviewStage === 1));
+    assert.ok(plan.batches.some(b => b.reviewStage === 2));
+    // Deliberately reverse storage order: dispatch must use priority, not array order.
+    plan.batches.reverse();
+    const hashes = plan.batches.map(b => [b.id, b.packetHash]);
+    const stages = [], ids = [];
+    const trace = (event, data) => {
+      if (event === 'review.stage-packet') { stages.push(data.stage); ids.push(data.batchId); }
+    };
+    await enrichGraphModel(model, config, new Map(), async () => response(), { plan, maxBatches: 2, concurrency: 4, trace });
+    assert.deepEqual(stages, [1, 1]);
+    assert.equal(model.aiReview.reviewOrder.stages[1].completed, 2);
+    await enrichGraphModel(model, config, new Map(), async () => response(), { plan, runUntilComplete: true, concurrency: 4, trace });
+    assert.deepEqual(stages, [...stages].sort((a, b) => a - b));
+    assert.equal(new Set(ids).size, plan.batches.length);
+    assert.equal(ids.length, plan.batches.length);
+    assert.equal(model.aiReview.coverage.completedBatches, plan.batches.length);
+    assert.equal(model.aiReview.reviewOrder.stages.reduce((n, s) => n + s.completed, 0), plan.batches.length);
+    assert.deepEqual(plan.batches.map(b => [b.id, b.packetHash]), hashes);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

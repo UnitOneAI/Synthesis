@@ -581,12 +581,24 @@ export class GraphStore {
     };
   }
   contexts(generation) {
+    const nodes = new Map(),
+      owners = new Map();
+    const remember = (cache, key, value) => {
+      if (cache.size >= 2000) cache.delete(cache.keys().next().value);
+      cache.set(key, value);
+      return value;
+    };
+    const node = (key) =>
+      nodes.has(key)
+        ? nodes.get(key)
+        : remember(nodes, key, this.node(generation, key));
     return {
-      has: (key) => this.node(generation, key)?.kind === "interface",
+      has: (key) => node(key)?.kind === "interface",
       get: (key) => {
-        const n = this.node(generation, key);
+        const n = node(key);
         if (!n) return undefined;
-        const owner = this.node(generation, n.parent);
+        if (owners.has(n.parent)) return owners.get(n.parent);
+        const owner = node(n.parent);
         const peers = this.rows("nodes", generation, { parent: n.parent });
         const calls = [],
           interfaces = [];
@@ -608,7 +620,7 @@ export class GraphStore {
             if (interfaces.length < 12) interfaces.push(p.id);
           }
         }
-        return {
+        return remember(owners, n.parent, {
           owner: owner
             ? {
                 id: owner.id,
@@ -624,7 +636,7 @@ export class GraphStore {
           omittedNearbyInterfaces: Math.max(0, interfaceCount - 12),
           basis:
             "syntax association; dispatch, enforcement and data flow unverified",
-        };
+        });
       },
     };
   }

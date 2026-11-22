@@ -13,7 +13,11 @@ try {
     workerData.mode === "review" &&
     workerData.model?.sourceGraph?.storage === "sqlite"
   ) {
-    graphStore = new GraphStore(workerData.options.graphDatabase);
+    // Review only reads the published graph. Traversal and packet scratch tables
+    // stay temporary instead of committing each planner operation to the WAL.
+    graphStore = new GraphStore(workerData.options.graphDatabase, {
+      readOnly: true,
+    });
     attachGraph(workerData.model.sourceGraph, graphStore);
   }
   let excerpts = new Map(workerData.excerpts || []);

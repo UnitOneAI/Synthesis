@@ -270,6 +270,8 @@ test("parallel STRIDE controls submit workers and restore interrupted pool state
     await page
       .getByRole("button", { name: "4 · STRIDE matrix", exact: true })
       .click();
+    await expect(page.getByRole("heading", { name: "External interfaces first" })).toBeVisible();
+    await expect(page.locator(".ws-review-order").getByRole("row").filter({ hasText: "Potential external entry points" })).toContainText("1 / 1");
     await expect(page.locator("#ws-review-workers")).toHaveValue("2");
     await expect(page.locator("#ws-run-progress")).toContainText(
       "0 active / 3 limit; 6 queued this action",

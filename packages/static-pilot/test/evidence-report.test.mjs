@@ -98,11 +98,11 @@ test("print projection excludes checklist detail and long code ranges disclose o
   assert.match(html, /1 limited by report budgets/);
   assert.doesNotMatch(html, /# code line 499/);
   const printed = systemPrintReport(f.model);
-  assert.match(printed, /excludes repeated checklist text/);
+  assert.match(printed, /planning inputs, not completed threat analysis/);
   assert.match(printed, /STRIDE analysis has not run/);
-  assert.match(printed, /No threat scenarios recorded/);
-  assert.match(printed, /Security controls/);
-  assert.match(printed, /Trust domains and data assets/);
+  assert.match(printed, /No current threat scenarios recorded/);
+  assert.doesNotMatch(printed, /<h2>Security controls/);
+  assert.doesNotMatch(printed, /<h2>Trust domains and data assets/);
 });
 
 test("portfolio evidence report includes all twelve repositories and findings without a CWE mapping", async (t) => {
@@ -134,7 +134,7 @@ test("portfolio evidence report includes all twelve repositories and findings wi
     assert.ok(html.includes(`repo${n} / app.py:3-3`));
 });
 
-test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and explicit snapshot status", async (t) => {
+test("partial STRIDE PDFs show results context; stale exports omit findings and planning registers", async (t) => {
   const f = await reportFixture();
   cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
   f.model.aiReview = {
@@ -169,6 +169,11 @@ test("partial and stale STRIDE PDFs retain coverage, actors, boundaries and expl
   assert.match(stale, /Historical STRIDE review/);
   assert.match(stale, /historical, not current valid coverage/);
   assert.match(stale, /2 \/ 450 STRIDE packets/);
+  assert.match(stale, /No current STRIDE results/);
+  assert.doesNotMatch(
+    stale,
+    /<h2>Threat actors|<h2>Trust boundaries|<h2>STRIDE matrix|<h2>Threat details/,
+  );
 });
 
 test("default shareable reports embed UnitOne branding and omit only requested presentation fields", async (t) => {
@@ -250,4 +255,127 @@ test("CWE summary counts records once, keeps unmapped issues and counts distinct
     html,
     /Counts describe candidate records, not confirmed vulnerabilities/,
   );
+});
+
+test("shareable STRIDE report gates findings on current results and explains source, actor and action", async (t) => {
+  const f = await reportFixture();
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
+  const iface = f.model.interfaces.find((i) => i.kind !== "architecture");
+  assert.ok(iface);
+  const threat = {
+    id: "returned-threat",
+    title: "Certificate verification bypass",
+    category: "Information Disclosure",
+    actor: "Network intermediary",
+    startingAccess: "Access to the outbound network path",
+    asset: "API response",
+    scenario:
+      "A network intermediary could alter the response if verification is disabled.",
+    prerequisites: "Traffic interception capability",
+    controls: "Certificate verification is disabled at the cited call",
+    mitigation: "Enable certificate verification",
+    interfaceIds: [iface.id],
+    evidenceIds: iface.evidence,
+  };
+  f.model.aiReview = {
+    status: "partial",
+    basedOnRevision: f.model.modelRevision,
+    threats: [threat],
+    connections: [],
+    questions: [],
+    batches: [],
+    coverage: {
+      completedBatches: 1,
+      totalBatches: 12,
+      failedBatches: 0,
+      pendingBatches: 11,
+    },
+  };
+  f.model.aiReview.reviewOrder = { policy: "external-first", stages: [{ label: "Potential external entry points", completed: 1, total: 12, failed: 0, pending: 11 }] };
+  const before = JSON.stringify({
+    review: f.model.aiReview,
+    actors: f.model.actors,
+    boundaries: f.model.boundaries,
+  });
+  const html = systemPrintReport(f.model);
+  assert.match(html, /1 current returned threat scenarios/);
+  assert.match(html, /What needs attention/);
+  assert.match(html, /Review order and coverage/);
+  assert.match(html, /Potential external entry points/);
+  assert.match(
+    html,
+    /<strong>Access and prerequisites:<\/strong> Network intermediary/,
+  );
+  assert.match(
+    html,
+    /<strong>Supporting source:<\/strong> service \/ app.py:3/,
+  );
+  assert.match(html, /Enable certificate verification/);
+  assert.match(html, /awaiting reviewer confirmation/);
+  assert.doesNotMatch(
+    html,
+    /Record ID:|<td>Analysis Quality<\/td>|<td>Assumptions<\/td>/,
+  );
+  assert.equal(
+    JSON.stringify({
+      review: f.model.aiReview,
+      actors: f.model.actors,
+      boundaries: f.model.boundaries,
+    }),
+    before,
+    "report cannot approve or mutate evidence",
+  );
+  for (const status of ["stale", "failed"]) {
+    f.model.aiReview.status = status;
+    if (status === "failed") f.model.aiReview.coverage.completedBatches = 0;
+    const output = systemPrintReport(f.model);
+    assert.match(output, /No current STRIDE results/);
+    assert.doesNotMatch(
+      output,
+      /Certificate verification bypass|Network intermediary|<h2>STRIDE matrix|Review order and coverage/,
+    );
+  }
+  f.model.aiReview.status = "partial";
+  f.model.aiReview.coverage.completedBatches = 1;
+  f.model.aiReview.basedOnRevision = "older-source";
+  assert.doesNotMatch(
+    systemPrintReport(f.model),
+    /Certificate verification bypass/,
+  );
+});
+
+test("architecture-only STRIDE responses become context questions, not detailed findings", async (t) => {
+  const f = await reportFixture();
+  cleanupAfter(t, () => fs.rm(f.dir, { recursive: true, force: true }));
+  const iface = f.model.interfaces[0];
+  iface.kind = "architecture";
+  delete iface.connection;
+  f.model.aiReview = {
+    status: "partial",
+    basedOnRevision: f.model.modelRevision,
+    coverage: { completedBatches: 1, totalBatches: 2, pendingBatches: 1 },
+    batches: [],
+    connections: [],
+    questions: [],
+    threats: [
+      {
+        id: "metadata-only",
+        title: "Unverified architecture concern",
+        category: "Information Disclosure",
+        actor: "Caller",
+        startingAccess: "Unknown",
+        interfaceIds: [iface.id],
+        evidenceIds: iface.evidence,
+        scenario: "Need implementation evidence",
+      },
+    ],
+  };
+  const html = systemPrintReport(f.model);
+  assert.match(
+    html,
+    /0 current returned threat scenarios; 1 architecture-only questions/,
+  );
+  assert.match(html, /Questions requiring implementation evidence/);
+  assert.match(html, /Unverified architecture concern/);
+  assert.doesNotMatch(html, /<article id=/);
 });

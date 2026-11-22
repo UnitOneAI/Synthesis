@@ -7,7 +7,7 @@ export function reviewConcurrency(value = 2) {
 }
 export async function runReviewPool(
   items,
-  { concurrency = 2, signal, shouldStop = () => false, run, onState } = {},
+  { concurrency = 2, signal, shouldStop = () => false, stage, shouldAdvanceStage = () => true, run, onState } = {},
 ) {
   concurrency = reviewConcurrency(concurrency);
   const state = {
@@ -23,11 +23,26 @@ export async function runReviewPool(
     stopReason: null,
   };
   let next = 0,
-    fatal;
+    fatal, activeStage, stageBlocked = false;
+  const waiters = new Set();
+  const wake = () => { for (const resolve of waiters) resolve(); waiters.clear(); };
   const publish = () => onState?.({ ...state });
-  const stopped = () => signal?.aborted || fatal || shouldStop();
+  const stopped = () => signal?.aborted || fatal || stageBlocked || shouldStop();
   async function worker(workerIndex) {
     while (next < items.length && !stopped()) {
+      const nextStage = stage?.(items[next]);
+      if (stage && activeStage !== undefined && nextStage !== activeStage) {
+        if (state.active > 0) {
+          await new Promise((resolve) => waiters.add(resolve));
+          continue;
+        }
+        if (!shouldAdvanceStage(activeStage, nextStage, { ...state })) {
+          stageBlocked = true;
+          wake();
+          break;
+        }
+      }
+      if (stage) state.stage = activeStage = nextStage;
       const index = next++;
       state.started++;
       state.active++;
@@ -60,6 +75,7 @@ export async function runReviewPool(
         } catch (error) {
           fatal ||= error;
         }
+        wake();
       }
     }
   }
@@ -73,7 +89,7 @@ export async function runReviewPool(
     ? "cancelled"
     : fatal
       ? "coordinator-failure"
-      : shouldStop() || null;
+      : shouldStop() || (stageBlocked ? "priority-stage-incomplete" : null);
   await publish();
   if (fatal) throw fatal;
   return state;

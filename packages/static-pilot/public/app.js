@@ -330,9 +330,13 @@ async function refresh() {
   manifestDeclarations = model.declarations;
   page = 0;
   renderModel();
-  const plan = await api("review-plan");
+  // A refresh must not rebuild a potentially large review plan or compete with
+  // the active review worker. Planning happens when the review starts.
+  const plan = await api("review-plan?summary=1");
   $("review-plan").textContent =
-    `${plan.repositories} repositories · ${plan.batches} planned batches · ${plan.obligations} review obligations · ${plan.gaps} recorded gaps (metadata estimate)`;
+    plan.status === "not-prepared"
+      ? `${plan.repositories} repositories · Review plan is prepared when STRIDE starts. No model calls are made during planning.`
+      : `${plan.status === "historical" ? "Historical plan · " : ""}${plan.repositories} repositories · ${plan.batches} planned batches · ${plan.obligations} review obligations · ${plan.gaps} recorded gaps`;
 }
 $("refresh").onclick = () => refresh().catch((e) => message(e.message, true));
 function renderModel() {

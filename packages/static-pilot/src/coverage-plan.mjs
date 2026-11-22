@@ -231,8 +231,25 @@ export function coverageObligations(model, system) {
   };
 }
 
+export function batchCoverage(batch) {
+  return {
+    id: batch.id,
+    interfaceIds: new Set(batch.packet.records.map((r) => r.id)),
+    graphObligationIds: new Set(
+      (batch.packet.graphPaths || []).map((p) => p.obligationId),
+    ),
+    contextIds: Object.fromEntries(
+      ["flows", "actors", "boundaries"].map((kind) => [
+        kind,
+        new Set((batch.packet.systemContext?.[kind] || []).map((r) => r.id)),
+      ]),
+    ),
+  };
+}
+
 export function obligationFits(obligation, batch) {
-  const ids = new Set(batch.packet.records.map((r) => r.id));
+  const coverage = batch.coverageIndex || batchCoverage(batch);
+  const ids = coverage.interfaceIds;
   if (
     !obligation.interfaceIds.length ||
     !obligation.interfaceIds.every((id) => ids.has(id))
@@ -240,26 +257,27 @@ export function obligationFits(obligation, batch) {
     return false;
   if (
     obligation.graphNodeIds?.length &&
-    !batch.packet.graphPaths?.some((p) => p.obligationId === obligation.id)
+    !coverage.graphObligationIds.has(obligation.id)
   )
     return false;
   if (
     obligation.contextKind &&
-    !batch.packet.systemContext?.[obligation.contextKind]?.some(
-      (x) => x.id === (obligation.contextId || obligation.subject),
+    !coverage.contextIds[obligation.contextKind]?.has(
+      obligation.contextId || obligation.subject,
     )
   )
     return false;
   return true;
 }
 
-export function coverageStatus(plan, completed = []) {
+export function coverageStatus(plan, completed = [], { details = true } = {}) {
   const successful = new Set(
     completed.filter((b) => b.status === "completed").map((b) => b.id),
   );
   const counts = { total: 0, reviewed: 0, pending: 0, blocked: 0 };
   const byKind = {};
-  const obligations = plan.obligations.map((o) => {
+  const obligations = [];
+  for (const o of plan.obligations) {
     const status = !o.batchIds.length
       ? "blocked"
       : o.batchIds.some((x) => successful.has(x))
@@ -275,8 +293,8 @@ export function coverageStatus(plan, completed = []) {
     counts[status]++;
     group.total++;
     group[status]++;
-    return { ...o, status };
-  });
+    if (details) obligations.push({ ...o, status });
+  }
   return {
     ...counts,
     byKind,

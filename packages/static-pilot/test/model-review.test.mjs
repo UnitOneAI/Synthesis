@@ -26,11 +26,12 @@ const config = modelConfig("anthropic", "approved-model", {
   ANTHROPIC_API_KEY: "synthetic-provider-key",
 });
 const fixture = () => analyze(manifest, { sourceRoot });
-const gatewayConfig = () => modelConfig("anthropic-gateway", "example-deployment-v1", {
-  CLAUDE_API_KEY: "synthetic-gateway-key",
-  ANTHROPIC_API_KEY: "different-direct-key",
-  SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic/",
-});
+const gatewayConfig = () =>
+  modelConfig("anthropic-gateway", "example-deployment-v1", {
+    CLAUDE_API_KEY: "synthetic-gateway-key",
+    ANTHROPIC_API_KEY: "different-direct-key",
+    SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic/",
+  });
 function suggestion(packet) {
   const [a, b] = packet.records.filter((r) => r.direction !== "control");
   return {
@@ -185,18 +186,43 @@ test("Claude and Gemini adapters use configured models, fixed hosts, header keys
 test("direct Claude, gateway and Gemini accept whole-response JSON fences without weakening validation", async () => {
   const packet = reviewPacket(await fixture());
   const json = JSON.stringify(suggestion(packet));
-  for (const cfg of [config, gatewayConfig(), { ...config, provider: "gemini" }]) {
-    for (const text of [json, `\uFEFF ${json}\n`, `\`\`\`json\n${json}\n\`\`\``, `\`\`\`\r\n${json}\r\n\`\`\``, ` \`\`\`JSON\n${json}\n\`\`\`\n`]) {
+  for (const cfg of [
+    config,
+    gatewayConfig(),
+    { ...config, provider: "gemini" },
+  ]) {
+    for (const text of [
+      json,
+      `\uFEFF ${json}\n`,
+      `\`\`\`json\n${json}\n\`\`\``,
+      `\`\`\`\r\n${json}\r\n\`\`\``,
+      ` \`\`\`JSON\n${json}\n\`\`\`\n`,
+    ]) {
       let calls = 0;
       const result = await requestReview(cfg, packet, async () => {
         calls++;
-        return Response.json(cfg.provider === "gemini"
-          ? { candidates: [{ finishReason: "STOP", content: { parts: [{ text }] } }] }
-          : { stop_reason: "end_turn", content: [{ type: "text", text: text.slice(0, 20) }, { type: "text", text: text.slice(20) }] });
+        return Response.json(
+          cfg.provider === "gemini"
+            ? {
+                candidates: [
+                  { finishReason: "STOP", content: { parts: [{ text }] } },
+                ],
+              }
+            : {
+                stop_reason: "end_turn",
+                content: [
+                  { type: "text", text: text.slice(0, 20) },
+                  { type: "text", text: text.slice(20) },
+                ],
+              },
+        );
       });
       assert.equal(calls, 1);
       assert.equal(result.review.threats[0].status, "needs-review");
-      assert.deepEqual(result.review, validateReview(suggestion(packet), packet));
+      assert.deepEqual(
+        result.review,
+        validateReview(suggestion(packet), packet),
+      );
     }
   }
 });
@@ -211,21 +237,36 @@ test("gateway format errors remain safe and ambiguous or invalid responses are r
     [`Here is the review: ${json}`, /text outside/],
     [`${json}\n${json}`, /invalid or incomplete/],
     [`\`\`\`json\n${json}\n\`\`\`\nExplanation`, /text outside/],
-    [`\`\`\`json\n${json}\n\`\`\`\n\`\`\`json\n${json}\n\`\`\``, /invalid JSON inside/],
-    ['```json\n{"summary":"private-source-content",}\n```', /invalid JSON inside/],
-    [`\`\`\`json\n${JSON.stringify(invalidEvidence)}\n\`\`\``, /schema or evidence/],
-    ['```json\n[]\n```', /schema or evidence/],
+    [
+      `\`\`\`json\n${json}\n\`\`\`\n\`\`\`json\n${json}\n\`\`\``,
+      /invalid JSON inside/,
+    ],
+    [
+      '```json\n{"summary":"private-source-content",}\n```',
+      /invalid JSON inside/,
+    ],
+    [
+      `\`\`\`json\n${JSON.stringify(invalidEvidence)}\n\`\`\``,
+      /schema or evidence/,
+    ],
+    ["```json\n[]\n```", /schema or evidence/],
   ];
   for (const [text, expected] of cases) {
     let calls = 0;
-    await assert.rejects(requestReview(gatewayConfig(), packet, async () => {
-      calls++;
-      return Response.json({ stop_reason: "end_turn", content: [{ type: "text", text }] });
-    }), (error) => {
-      assert.match(error.message, expected);
-      assert.ok(!error.message.includes("private-source-content"));
-      return true;
-    });
+    await assert.rejects(
+      requestReview(gatewayConfig(), packet, async () => {
+        calls++;
+        return Response.json({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text }],
+        });
+      }),
+      (error) => {
+        assert.match(error.message, expected);
+        assert.ok(!error.message.includes("private-source-content"));
+        return true;
+      },
+    );
     assert.equal(calls, 1);
   }
 });
@@ -360,10 +401,7 @@ test("server exposes configured model without key and refuses requested inferenc
     ).json();
     assert.ok(!JSON.stringify(status).includes(config.apiKey));
     assert.ok(!JSON.stringify(status).includes("synthetic-gateway-key"));
-    assert.equal(
-      status.inference?.provider,
-      configured?.provider,
-    );
+    assert.equal(status.inference?.provider, configured?.provider);
     if (!configured) {
       const response = await fetch(base + "/api/analyze", {
         method: "POST",
@@ -458,18 +496,81 @@ test("gateway configuration separates credentials, validates destinations and pe
   assert.equal(gateway.apiKey, "synthetic-gateway-key");
   assert.equal(gateway.apiVersion, "2023-06-01");
   assert.equal(gateway.baseUrl, "https://test-gateway.example/anthropic");
-  assert.equal(publicModelConfig(gateway).endpoint, "https://test-gateway.example/anthropic/v1/messages");
-  assert.ok(!JSON.stringify(publicModelConfig(gateway)).includes(gateway.apiKey));
-  assert.throws(() => modelConfig("anthropic-gateway", "example-deployment-v1", { ANTHROPIC_API_KEY: "wrong-key" }), /CLAUDE_API_KEY/);
-  for (const baseUrl of [undefined, "http://test.example/anthropic", "https://user:secret@test.example/anthropic", "https://test.example/path?key=secret", "https://test.example/#secret", "https://test.example/%2e%2e/path", "https://test.example/v1/messages", "https://test.example/anthropic/v1", "https://test.example\\evil"]) {
-    assert.throws(() => modelConfig("anthropic-gateway", "example-deployment-v1", { CLAUDE_API_KEY: "key" }, { baseUrl }), /Gateway requires|base URL/);
+  assert.equal(
+    publicModelConfig(gateway).endpoint,
+    "https://test-gateway.example/anthropic/v1/messages",
+  );
+  assert.ok(
+    !JSON.stringify(publicModelConfig(gateway)).includes(gateway.apiKey),
+  );
+  assert.throws(
+    () =>
+      modelConfig("anthropic-gateway", "example-deployment-v1", {
+        ANTHROPIC_API_KEY: "wrong-key",
+      }),
+    /CLAUDE_API_KEY/,
+  );
+  for (const baseUrl of [
+    undefined,
+    "http://test.example/anthropic",
+    "https://user:secret@test.example/anthropic",
+    "https://test.example/path?key=secret",
+    "https://test.example/#secret",
+    "https://test.example/%2e%2e/path",
+    "https://test.example/v1/messages",
+    "https://test.example/anthropic/v1",
+    "https://test.example\\evil",
+  ]) {
+    assert.throws(
+      () =>
+        modelConfig(
+          "anthropic-gateway",
+          "example-deployment-v1",
+          { CLAUDE_API_KEY: "key" },
+          { baseUrl },
+        ),
+      /Gateway requires|base URL/,
+    );
   }
-  assert.throws(() => modelConfig("anthropic-gateway", "example-deployment-v1", { CLAUDE_API_KEY: "key" }, { baseUrl: gateway.baseUrl, apiVersion: "2023-06-01\r\nx: y" }), /API version/);
-  assert.throws(() => modelConfig("anthropic", "approved-model", { ANTHROPIC_API_KEY: "key" }, { baseUrl: gateway.baseUrl }), /require --provider/);
-  const explicit = modelConfig("anthropic-gateway", "example-deployment-v1", { CLAUDE_API_KEY: "key", SYNTHESIS_LLM_BASE_URL: "https://environment.example", SYNTHESIS_LLM_API_VERSION: "2023-01-01" }, { baseUrl: "https://explicit.example/prefix", apiVersion: "2023-06-01" });
+  assert.throws(
+    () =>
+      modelConfig(
+        "anthropic-gateway",
+        "example-deployment-v1",
+        { CLAUDE_API_KEY: "key" },
+        { baseUrl: gateway.baseUrl, apiVersion: "2023-06-01\r\nx: y" },
+      ),
+    /API version/,
+  );
+  assert.throws(
+    () =>
+      modelConfig(
+        "anthropic",
+        "approved-model",
+        { ANTHROPIC_API_KEY: "key" },
+        { baseUrl: gateway.baseUrl },
+      ),
+    /require --provider/,
+  );
+  const explicit = modelConfig(
+    "anthropic-gateway",
+    "example-deployment-v1",
+    {
+      CLAUDE_API_KEY: "key",
+      SYNTHESIS_LLM_BASE_URL: "https://environment.example",
+      SYNTHESIS_LLM_API_VERSION: "2023-01-01",
+    },
+    { baseUrl: "https://explicit.example/prefix", apiVersion: "2023-06-01" },
+  );
   assert.equal(explicit.baseUrl, "https://explicit.example/prefix");
   assert.equal(explicit.apiVersion, "2023-06-01");
-  assert.equal(modelConfig("anthropic", "approved-model", { ANTHROPIC_API_KEY: "direct", SYNTHESIS_LLM_BASE_URL: gateway.baseUrl }).baseUrl, undefined);
+  assert.equal(
+    modelConfig("anthropic", "approved-model", {
+      ANTHROPIC_API_KEY: "direct",
+      SYNTHESIS_LLM_BASE_URL: gateway.baseUrl,
+    }).baseUrl,
+    undefined,
+  );
 });
 
 test("APIM gateway matches the supplied Messages contract and retains safe provenance", async () => {
@@ -491,11 +592,17 @@ test("APIM gateway matches the supplied Messages contract and retains safe prove
     assert.equal(body.max_tokens, REVIEW_LIMITS.outputTokens);
     assert.equal(body.tools, undefined);
     assert.ok(!options.body.includes(gateway.apiKey));
-    return responseFor("anthropic", suggestion(JSON.parse(body.messages[0].content)));
+    return responseFor(
+      "anthropic",
+      suggestion(JSON.parse(body.messages[0].content)),
+    );
   });
   assert.equal(calls, 1);
   assert.equal(model.aiReview.status, "completed-needs-review");
-  assert.equal(model.aiReview.endpoint, "https://test-gateway.example/anthropic/v1/messages");
+  assert.equal(
+    model.aiReview.endpoint,
+    "https://test-gateway.example/anthropic/v1/messages",
+  );
   assert.equal(model.aiReview.apiVersion, "2023-06-01");
   assert.equal(model.flows.length, 0);
   assert.ok(!JSON.stringify(model).includes(gateway.apiKey));
@@ -506,12 +613,20 @@ test("gateway policy errors and redirects fail visibly without fallback or crede
   for (const status of [403, 302]) {
     const model = await fixture();
     let calls = 0;
-    await enrichModel(model, gatewayConfig(), new Map(), async (url, options) => {
-      calls++;
-      assert.equal(options.redirect, "error");
-      assert.ok(url.startsWith("https://test-gateway.example/"));
-      return new Response("private gateway diagnostic synthetic-gateway-key", { status, headers: { Location: "https://another.example/" } });
-    });
+    await enrichModel(
+      model,
+      gatewayConfig(),
+      new Map(),
+      async (url, options) => {
+        calls++;
+        assert.equal(options.redirect, "error");
+        assert.ok(url.startsWith("https://test-gateway.example/"));
+        return new Response(
+          "private gateway diagnostic synthetic-gateway-key",
+          { status, headers: { Location: "https://another.example/" } },
+        );
+      },
+    );
     assert.equal(calls, 1);
     assert.equal(model.aiReview.status, "failed");
     assert.match(model.aiReview.error, new RegExp(`HTTP ${status}`));
@@ -528,32 +643,75 @@ test("CLI supports gateway flags and environment configuration end to end", asyn
   const path = await import("node:path");
   const { pathToFileURL } = await import("node:url");
   const { execFileSync } = await import("node:child_process");
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "synthesis-gateway-"));
+  const temporary = await fs.mkdtemp(
+    path.join(os.tmpdir(), "synthesis-gateway-"),
+  );
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const manifestFile = path.join(temporary, "scope.json");
   const mockFile = path.join(temporary, "mock.mjs");
   await fs.writeFile(manifestFile, JSON.stringify(manifest));
-  await fs.writeFile(mockFile, `import assert from 'node:assert/strict';
+  await fs.writeFile(
+    mockFile,
+    `import assert from 'node:assert/strict';
     globalThis.fetch = async (url, options) => {
       assert.equal(url, 'https://test-gateway.example/anthropic/v1/messages');
       assert.equal(options.headers['Ocp-Apim-Subscription-Key'], 'synthetic-gateway-key');
       assert.equal(options.headers['anthropic-version'], '2023-06-01');
       assert.equal(JSON.parse(options.body).model, 'example-deployment-v1');
       return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({summary:'Synthetic protocol test only.',threats:[],connections:[],questions:[]})}]});
-    };`);
+    };`,
+  );
   for (const mode of ["flags", "environment"]) {
     const out = path.join(temporary, mode);
-    const env = { ...process.env, CLAUDE_API_KEY: "synthetic-gateway-key", SYNTHESIS_LLM_PROVIDER: "anthropic-gateway", SYNTHESIS_LLM_MODEL: "example-deployment-v1", SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic", SYNTHESIS_LLM_API_VERSION: "2023-06-01" };
-    const flags = mode === "flags" ? ["--provider", "anthropic-gateway", "--model", "example-deployment-v1", "--base-url", env.SYNTHESIS_LLM_BASE_URL, "--api-version", "2023-06-01"] : [];
+    const env = {
+      ...process.env,
+      CLAUDE_API_KEY: "synthetic-gateway-key",
+      SYNTHESIS_LLM_PROVIDER: "anthropic-gateway",
+      SYNTHESIS_LLM_MODEL: "example-deployment-v1",
+      SYNTHESIS_LLM_BASE_URL: "https://test-gateway.example/anthropic",
+      SYNTHESIS_LLM_API_VERSION: "2023-06-01",
+    };
+    const flags =
+      mode === "flags"
+        ? [
+            "--provider",
+            "anthropic-gateway",
+            "--model",
+            "example-deployment-v1",
+            "--base-url",
+            env.SYNTHESIS_LLM_BASE_URL,
+            "--api-version",
+            "2023-06-01",
+          ]
+        : [];
     if (mode === "flags") {
       env.SYNTHESIS_LLM_PROVIDER = "none";
       env.SYNTHESIS_LLM_BASE_URL = "https://unused.example";
       env.SYNTHESIS_LLM_MODEL = "unused-model";
       env.SYNTHESIS_LLM_API_VERSION = "2023-01-01";
     }
-    const output = execFileSync(process.execPath, ["--import", pathToFileURL(mockFile).href, fileURLToPath(new URL("../src/cli.mjs", import.meta.url)), "analyze", "--source-root", sourceRoot, "--manifest", manifestFile, "--out", out, ...(sqliteSupported() ? [] : ["--graph-storage", "memory"]), ...flags], { env, encoding: "utf8", timeout: 30000 });
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--import",
+        pathToFileURL(mockFile).href,
+        fileURLToPath(new URL("../src/cli.mjs", import.meta.url)),
+        "analyze",
+        "--source-root",
+        sourceRoot,
+        "--manifest",
+        manifestFile,
+        "--out",
+        out,
+        ...(sqliteSupported() ? [] : ["--graph-storage", "memory"]),
+        ...flags,
+      ],
+      { env, encoding: "utf8", timeout: 30000 },
+    );
     assert.ok(!output.includes(env.CLAUDE_API_KEY));
-    const model = JSON.parse(await fs.readFile(path.join(out, "model.json"), "utf8"));
+    const model = JSON.parse(
+      await fs.readFile(path.join(out, "model.json"), "utf8"),
+    );
     assert.equal(model.aiReview.status, "completed-needs-review");
     assert.equal(model.aiReview.model, "example-deployment-v1");
     assert.equal(model.aiReview.apiVersion, "2023-06-01");
@@ -640,46 +798,169 @@ test("native STRIDE gateway schema preserves deployment and still rejects invent
   });
 });
 
-test("STRIDE validation retry excludes optional connections without relaxing evidence validation",async()=>{
- const packet=reviewPacket(await fixture());
- await requestReview(config,packet,async(_,options)=>{
-  assert.match(JSON.parse(options.body).system,/connections as an empty array exactly/);
-  return responseFor("anthropic",{summary:"Review still requires source assessment.",threats:[],connections:[],questions:[]});
- },{validationRetry:true});
- const result=suggestion(packet);result.threats[0].evidenceIds=["invented"];
- await assert.rejects(requestReview(config,packet,async()=>responseFor("anthropic",result),{validationRetry:true}),/evidence/);
+test("STRIDE validation retry excludes optional connections without relaxing evidence validation", async () => {
+  const packet = reviewPacket(await fixture());
+  await requestReview(
+    config,
+    packet,
+    async (_, options) => {
+      assert.match(
+        JSON.parse(options.body).system,
+        /connections as an empty array exactly/,
+      );
+      return responseFor("anthropic", {
+        summary: "Review still requires source assessment.",
+        threats: [],
+        connections: [],
+        questions: [],
+      });
+    },
+    { validationRetry: true },
+  );
+  const result = suggestion(packet);
+  result.threats[0].evidenceIds = ["invented"];
+  await assert.rejects(
+    requestReview(
+      config,
+      packet,
+      async () => responseFor("anthropic", result),
+      { validationRetry: true },
+    ),
+    /evidence/,
+  );
 });
 
-test('STRIDE failed retry supplies exact security-control and boundary references without weakening validation',async()=>{
- const packet=reviewPacket(await fixture());
- packet.records.push({id:'security-control',kind:'control',direction:'control',evidence:[{id:'control-evidence'}]});
- packet.records.push({id:'deployment-binding',kind:'architecture',direction:'control',evidence:[{id:'architecture-evidence'}]});
- packet.systemContext={boundaries:[{id:'boundary-one'}]};
- const result=suggestion(packet);result.connections=[];
- result.threats[0].analysis={attackSteps:['If caller access is granted, inspect the privileged operation.'],impact:'Potential service authority misuse.',assumptions:[],controlEvidenceIds:['control-evidence'],boundaryIds:['boundary-one'],mappings:[]};
- let normal;
- await requestReview(config,packet,async(_,options)=>{normal=JSON.parse(options.body).system;return responseFor('anthropic',result);});
- assert.doesNotMatch(normal,/Retry reference contract/);
- await requestReview(config,packet,async(_,options)=>{
-   const system=JSON.parse(options.body).system;
-   assert.ok(system.startsWith(normal));
-   assert.match(system,/Retry reference contract/);
-   assert.match(system,/"controlEvidenceIds":\[[^\]]*"control-evidence"/);
-   assert.match(system,/"boundaryIds":\["boundary-one"\]/);
-   assert.doesNotMatch(system,/"architecture-evidence"/);
-   assert.match(system,/connections exactly \[\]/);
-   return responseFor('anthropic',result);
- },{validationRetry:true});
- for(const bad of ['architecture-evidence','security-control','invented']) {
-   result.threats[0].analysis.controlEvidenceIds=[bad];
-   assert.throws(()=>validateReview(result,packet),/controlEvidenceIds references are outside/);
- }
- result.threats[0].analysis.controlEvidenceIds=['control-evidence'];
- result.threats[0].analysis.boundaryIds=['invented'];
- assert.throws(()=>validateReview(result,packet),/boundaryIds references are outside/);
- const empty=structuredClone(packet);empty.records=empty.records.filter(r=>r.kind!=='control');delete empty.systemContext;
- await requestReview(config,empty,async(_,options)=>{
-   assert.match(JSON.parse(options.body).system,/"controlEvidenceIds":\[\],"boundaryIds":\[\]/);
-   return responseFor('anthropic',{summary:'Context requires review.',threats:[],connections:[],questions:[]});
- },{validationRetry:true});
+test("STRIDE failed retry supplies exact security-control and boundary references without weakening validation", async () => {
+  const packet = reviewPacket(await fixture());
+  packet.records.push({
+    id: "security-control",
+    kind: "control",
+    direction: "control",
+    evidence: [{ id: "control-evidence" }],
+  });
+  packet.records.push({
+    id: "deployment-binding",
+    kind: "architecture",
+    direction: "control",
+    evidence: [{ id: "architecture-evidence" }],
+  });
+  packet.systemContext = { boundaries: [{ id: "boundary-one" }] };
+  const result = suggestion(packet);
+  result.connections = [];
+  result.threats[0].analysis = {
+    attackSteps: [
+      "If caller access is granted, inspect the privileged operation.",
+    ],
+    impact: "Potential service authority misuse.",
+    assumptions: [],
+    controlEvidenceIds: ["control-evidence"],
+    boundaryIds: ["boundary-one"],
+    mappings: [],
+  };
+  let normal;
+  await requestReview(config, packet, async (_, options) => {
+    normal = JSON.parse(options.body).system;
+    return responseFor("anthropic", result);
+  });
+  assert.doesNotMatch(normal, /Retry reference contract/);
+  await requestReview(
+    config,
+    packet,
+    async (_, options) => {
+      const system = JSON.parse(options.body).system;
+      assert.ok(system.startsWith(normal));
+      assert.match(system, /Retry reference contract/);
+      assert.match(system, /"controlEvidenceIds":\[[^\]]*"control-evidence"/);
+      assert.match(system, /"boundaryIds":\["boundary-one"\]/);
+      assert.doesNotMatch(system, /"architecture-evidence"/);
+      assert.match(system, /connections exactly \[\]/);
+      return responseFor("anthropic", result);
+    },
+    { validationRetry: true },
+  );
+  for (const bad of ["architecture-evidence", "security-control", "invented"]) {
+    result.threats[0].analysis.controlEvidenceIds = [bad];
+    assert.throws(
+      () => validateReview(result, packet),
+      /controlEvidenceIds references are outside/,
+    );
+  }
+  result.threats[0].analysis.controlEvidenceIds = ["control-evidence"];
+  result.threats[0].analysis.boundaryIds = ["invented"];
+  assert.throws(
+    () => validateReview(result, packet),
+    /boundaryIds references are outside/,
+  );
+  const empty = structuredClone(packet);
+  empty.records = empty.records.filter((r) => r.kind !== "control");
+  delete empty.systemContext;
+  await requestReview(
+    config,
+    empty,
+    async (_, options) => {
+      assert.match(
+        JSON.parse(options.body).system,
+        /"controlEvidenceIds":\[\],"boundaryIds":\[\]/,
+      );
+      return responseFor("anthropic", {
+        summary: "Context requires review.",
+        threats: [],
+        connections: [],
+        questions: [],
+      });
+    },
+    { validationRetry: true },
+  );
+});
+
+test("packet byte accounting preserves the exact UTF-8 boundary with shared indexes", () => {
+  const model = {
+    profile: "Unicode packet",
+    limitations: [],
+    components: [{ id: "c", name: "Service" }],
+    flows: [],
+    boundaries: [],
+    interfaces: [],
+    evidence: [],
+  };
+  for (let n = 0; n < 40; n++) {
+    model.interfaces.push({
+      id: `i${n}`,
+      component: "c",
+      repository: "repo",
+      kind: "http-inbound",
+      direction: "inbound",
+      protocol: "HTTP",
+      operation: '入口"\\'.repeat(300),
+      evidence: [`e${n}`],
+    });
+    model.evidence.push({
+      id: `e${n}`,
+      repository: "repo",
+      path: `Service${n}.cs`,
+      line: 1,
+      basis: "source",
+    });
+  }
+  const packet = reviewPacket(model);
+  assert.ok(packet.records.length > 0 && packet.records.length < 40);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(packet)) <= REVIEW_LIMITS.packetBytes,
+  );
+  const next = reviewPacket({
+    ...model,
+    interfaces: [model.interfaces[packet.records.length]],
+  }).records[0];
+  assert.ok(
+    Buffer.byteLength(
+      JSON.stringify({ ...packet, records: [...packet.records, next] }),
+    ) > REVIEW_LIMITS.packetBytes,
+  );
+  assert.deepEqual(
+    reviewPacket(model, new Map(), new Map(), {
+      evidence: new Map(model.evidence.map((e) => [e.id, e])),
+      components: new Map(model.components.map((c) => [c.id, c])),
+    }),
+    packet,
+  );
 });
