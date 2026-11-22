@@ -56,6 +56,18 @@ export function failureDetail(message = "") {
   if (/schema or evidence/i.test(message))
     return {
       code: "evidence-validation",
+      validationRule:
+        /interface references are missing, duplicated or outside/.test(message)
+          ? "interface-reference"
+          : /evidence must belong to the listed interfaces/.test(message)
+            ? "evidence-ownership"
+            : /standards/.test(message)
+              ? "standards-evidence"
+              : /required object fields/.test(message)
+                ? "object-fields"
+                : /required text field/.test(message)
+                  ? "text-field"
+                  : "schema-or-reference",
       retryable: true,
       action:
         "Retry with the validation instructions; evidence requirements are unchanged.",
@@ -450,6 +462,28 @@ export async function errorReport({
       job: pick(job, ["status", "mode", "message"]),
       stride: {
         ...review(model?.aiReview),
+        failedAttemptCountsForSavedReviewRun: Object.fromEntries(
+          [...(model?.usageLedger?.attempts || [])]
+            .filter(
+              (a) =>
+                a.status === "failed" &&
+                model?.aiReview?.runId &&
+                a.runId === model.aiReview.runId,
+            )
+            .reduce((counts, a) => {
+              const key = a.failure?.code || "unclassified";
+              counts.set(key, (counts.get(key) || 0) + 1);
+              return counts;
+            }, new Map()),
+        ),
+        planningMs: model?.aiReview?.plan?.planningMs,
+        failureGuard: pick(model?.aiReview?.failureGuard, [
+          "recentResponses",
+          "invalidResponses",
+          "consecutiveInvalidResponses",
+          "stopped",
+          "policy",
+        ]),
         coverage: pick(model?.aiReview?.coverage, [
           "completedBatches",
           "failedBatches",

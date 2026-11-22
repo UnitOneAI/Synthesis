@@ -232,6 +232,10 @@ diskTest(
     assert.equal(status.status, "ready", status.message);
     const model = await (await call("/api/model")).json();
     assert.equal(model.sourceGraph.storage, "sqlite");
+    const summary = await (await call("/api/review-plan?summary=1")).json();
+    assert.equal(summary.status, "not-prepared");
+    assert.equal(summary.batches, null, "refresh must not construct a plan");
+    assert.equal(summary.repositories, 2);
     const page = await (await call("/api/graph?kind=function&limit=1")).json();
     assert.equal(page.items.length, 1);
     assert.ok(page.next);

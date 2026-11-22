@@ -5,7 +5,7 @@ import { reportFixture } from "../report-fixture.mjs";
 import { workspaceStore } from "../../src/workspace-store.mjs";
 import { serve } from "../../src/server.mjs";
 
-test("CWE and threat model PDF previews show verified evidence and printable registers", async ({
+test("CWE PDF retains verified evidence; unrun STRIDE PDF does not present planning registers as results", async ({
   page,
   context,
 }, testInfo) => {
@@ -128,6 +128,12 @@ test("CWE and threat model PDF previews show verified evidence and printable reg
     await expect(
       threat.getByRole("button", { name: "Print / Save as PDF", exact: true }),
     ).toBeEnabled();
+    await expect(
+      threat.getByRole("heading", {
+        name: "No current STRIDE results",
+        exact: true,
+      }),
+    ).toBeVisible();
     for (const name of [
       "Overall system DFD",
       "STRIDE matrix",
@@ -136,7 +142,7 @@ test("CWE and threat model PDF previews show verified evidence and printable reg
     ])
       await expect(
         threat.getByRole("heading", { name, exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
     await expect(threat.locator(".report-confidential")).toHaveText(
       "Confidential — Do not share",
     );
@@ -299,10 +305,10 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
     ).toBeEnabled();
     for (const name of [
       "Overall system DFD",
-      "Threat actors",
-      "Trust boundaries",
+      "Threat actors linked to returned scenarios",
+      "Trust boundaries linked to returned scenarios",
       "STRIDE matrix",
-      "Threat register",
+      "Threat details",
     ])
       await expect(
         report.getByRole("heading", { name, exact: true }),
@@ -311,7 +317,7 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
     await expect(content).toContainText(
       "1 / 4 STRIDE packets completed; 0 failed; 3 pending",
     );
-    await expect(content).toContainText("Status: partial");
+    await expect(content).toContainText("Partial STRIDE review");
     await expect(content).toContainText("External untrusted caller");
     await expect(content).toContainText("Caller to service identity");
     await expect(content).toContainText("Conditional caller identity bypass");

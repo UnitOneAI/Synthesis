@@ -433,159 +433,213 @@ export function systemReport(model) {
 // A review-oriented print projection. Detailed registers remain in the complete
 // HTML/JSON/CSV exports; checklist prompts never become threat scenarios.
 export function systemPrintReport(model) {
-  const s = systemModel(model);
-  const review = model.aiReview;
+  const s = systemModel(model),
+    review = model.aiReview;
   const stale =
-    review?.status === "stale" || s.analysisStatus?.state === "stale";
-  const incomplete =
-    !review ||
-    review.status !== "completed" ||
-    (review.coverage?.pendingBatches || 0) > 0 ||
-    (review.coverage?.failedBatches || 0) > 0;
-  const snapshotNotice = `<section class="review-snapshot"><h2>${stale ? "Historical STRIDE review" : incomplete ? "Partial STRIDE review" : "STRIDE review snapshot"}</h2><p>Exported from the latest available review checkpoint. Requests still in progress are not included. Exporting does not stop or restart analysis.</p><p>${stale ? "Saved scenarios and packet counts are historical, not current valid coverage. Revalidate changed evidence before relying on these conclusions." : incomplete ? "The planned scope is not complete. Pending, failed and unreviewed areas are not cleared by this report. Returned scenarios remain available for review." : "Planned packet completion does not establish absence of threats or reviewer acceptance."}</p>${review?.stopReason ? `<p>Last recorded stop reason: ${e(review.stopReason)}.</p>` : ""}${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
-  const scenarios = s.threats
-    .filter((t) => t.origin !== "review checklist")
+    review?.status === "stale" ||
+    (review?.basedOnRevision && review.basedOnRevision !== model.modelRevision);
+  const completed = review?.coverage?.completedBatches || 0;
+  const hasResults = !stale && completed > 0;
+  const allScenarios = s.threats.filter((t) => t.origin === "analysis");
+  const current = hasResults
+    ? allScenarios.filter((t) => t.reviewState !== "stale")
+    : [];
+  const metadataOnly = (t) =>
+    t.metadataOnly ||
+    review?.mode === "metadata" ||
+    /metadata.only/i.test(display(t.analysisQuality?.gaps));
+  const scenarios = current
+    .filter((t) => !metadataOnly(t))
     .sort(
       (a, b) =>
         a.reviewPriority.rank - b.reviewPriority.rank ||
         a.id.localeCompare(b.id),
     );
+  const contextQuestions = current.filter(metadataOnly);
+  const currentScenarioIds = new Set(scenarios.map((t) => t.id));
+  const detailed = scenarios.slice(0, 12);
   const table = (headers, rows) =>
-    `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-  const boundaryGroups = new Map();
-  for (const b of s.boundaries) {
-    const key = JSON.stringify([
-      b.name,
-      b.dimension,
-      b.before,
-      b.after,
-      b.enforcement,
-      b.basis,
-      b.reviewState,
-    ]);
-    if (!boundaryGroups.has(key))
-      boundaryGroups.set(key, { ...b, members: [] });
-    boundaryGroups.get(key).members.push(b.reference);
-    boundaryGroups.get(key).crossingDetails = [
-      ...(boundaryGroups.get(key).crossingDetails || []),
-      ...(b.crossings || []).map(
-        (c) =>
-          `${b.reference} / ${c.reference}: ${c.from} → ${c.to} (${c.basis}; ${c.reviewState})`,
-      ),
-    ];
+    rows.length
+      ? `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+      : "<p>None recorded for the current completed review scope.</p>";
+  const evidence = new Map(model.evidence.map((r) => [r.id, r]));
+  const records = new Map(
+    [...s.actors, ...s.boundaries, ...s.flows].map((r) => [r.id, r]),
+  );
+  const names = (ids, fallback) =>
+    (ids || [])
+      .map((id) => {
+        const r = records.get(id);
+        return r
+          ? `${r.reference ? r.reference + ": " : ""}${r.name}`
+          : "Unresolved reference";
+      })
+      .join("; ") || fallback;
+  const citations = (t) =>
+    (t.evidenceIds || [])
+      .map((id) => {
+        const r = evidence.get(id);
+        return r
+          ? `${r.repository} / ${r.path}:${r.line}`
+          : "Source reference unavailable";
+      })
+      .join("; ") || "No source citation recorded";
+  const disposition = (r) =>
+    r.reviewState === "pending"
+      ? `${r.basis}; awaiting reviewer confirmation`
+      : `${r.basis}; ${r.reviewState}`;
+  const linkedActors = new Set(scenarios.flatMap((t) => t.actorIds || []));
+  const linkedBoundaries = new Set(
+    scenarios.flatMap((t) => t.boundaryIds || []),
+  );
+  const threatRefs = (kind, id) => {
+    const refs = scenarios
+      .filter((t) => t[kind]?.includes(id))
+      .map((t) => t.reference);
+    return (
+      refs.slice(0, 8).join(", ") +
+      (refs.length > 8
+        ? `; ${refs.length - 8} further links in complete export`
+        : "")
+    );
+  };
+  const pending = review?.coverage?.pendingBatches || 0,
+    failed = review?.coverage?.failedBatches || 0;
+  const partial =
+    pending > 0 ||
+    failed > 0 ||
+    !["completed", "completed-needs-review"].includes(review?.status);
+  const state = !hasResults
+    ? "No current STRIDE results"
+    : partial
+      ? "Partial STRIDE review"
+      : "STRIDE review snapshot";
+  const snapshot = `<section class="review-snapshot"><h2>${state}</h2><p>Exported from the latest available review checkpoint. Requests still in progress are not included. Exporting does not stop or restart analysis.</p>${
+    stale
+      ? `<p>Historical STRIDE review: ${allScenarios.length} saved scenarios and ${completed} completed packets are historical, not current valid coverage. Their details are excluded from this report. Revalidate before relying on them; the complete HTML/JSON export retains the historical records.</p>`
+      : !hasResults
+        ? "<p>STRIDE analysis has not produced a successful current review checkpoint. Static checklist prompts, candidate actors and inferred boundaries are planning inputs, not completed threat analysis; they are excluded here.</p>"
+        : `<p>${scenarios.length} current returned threat scenarios; ${contextQuestions.length} architecture-only questions. These are conditional analysis results, not confirmed vulnerabilities. ${partial ? "Pending, failed and unreviewed areas are not cleared by this report." : "Completion covers planned packets, not proof of complete security coverage."}</p>`
   }
-  const d = diagramModel(s, {});
-  const nodes = new Map(d.nodes.map((n) => [n.id, n.name]));
-  const refs = new Set(scenarios.flatMap((t) => t.evidenceIds || []));
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshotNotice}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories; ${s.components.length} components; ${s.actors.length} actor profiles; ${s.boundaries.length} boundary records; ${scenarios.length} threat scenarios. ${s.coverage.unresolvedFlows} unresolved relationships and ${s.coverage.pendingBoundaries} boundary decisions pending.</p><p>${model.aiReview?.coverage ? `${model.aiReview.coverage.completedBatches || 0} / ${model.aiReview.coverage.totalBatches || 0} STRIDE packets completed; ${model.aiReview.coverage.failedBatches || 0} failed; ${model.aiReview.coverage.pendingBatches || 0} pending. Status: ${e(model.aiReview.status)}.` : "STRIDE analysis has not run."} Empty results do not establish absence of threats. Source observations, inferred actors/boundaries and reviewer declarations remain distinct. No target execution or runtime validation.</p><p>This printable review includes all recorded threat scenarios, component STRIDE rows and grouped boundary records. It excludes repeated checklist text, detailed flow properties and the complete evidence ledger. Use Complete HTML report and CSV/JSON exports for those records. ${s.threats.length - scenarios.length} checklist items are not threat scenarios.</p>${table(
-    ["Repository", "Status", "Snapshot"],
-    model.sources.map((r) => [r.name, r.status, r.snapshot || "not recorded"]),
-  )}<h2>System context</h2>${systemSvg(model, { level: "context" })}<h2>Overall system DFD</h2>${systemSvg(model)}<p>Diagram uses the default service view and its disclosed node/connection limits. Unresolved destinations are coverage gaps, not invented connections. Full flow data remains in the flow register export.</p><h2>Connected flow summary</h2>${table(
-    ["From", "To", "Protocol / label", "Member flows", "Basis / review"],
-    d.connections.map((c) => [
-      nodes.get(c.source) || c.source,
-      nodes.get(c.target) || c.target,
-      c.name || c.protocol || "",
-      c.flowIds?.length || 1,
-      `${c.basis} / ${c.reviewState}`,
-    ]),
-  )}<h2>Threat actors</h2>${table(
-    ["Actor", "Access / prerequisites", "Basis / review"],
-    s.actors.map((a) => [
-      a.name,
-      a.startingAccess || a.description || "Unspecified",
-      `${a.basis} / ${a.reviewState}`,
-    ]),
-  )}<h2>Trust boundaries</h2><p>${s.boundaries.length} boundary records grouped into ${boundaryGroups.size} equivalent transition descriptions. Every boundary reference maps to the named flow crossing. TB identifies a change in trust, not a repository or automatically verified enforcement. Inferred boundaries require review; repository boundaries do not establish trust boundaries.</p>${table(
-    [
-      "Boundary / dimension",
-      "Transition / enforcement",
-      "Basis / review / boundary references",
-      "Crossings",
-    ],
-    [...boundaryGroups.values()].map((b) => [
-      `${b.name} (${b.dimension})`,
-      `${b.before} → ${b.after}. ${b.enforcement || ""}`,
-      `${b.basis} / ${b.reviewState}. Members: ${b.members.join(", ")}`,
-      b.crossingDetails.join("; "),
-    ]),
-  )}<h2>Components</h2>${table(
-    ["Component", "Type", "Basis / review"],
-    s.components.map((c) => [c.name, c.type, `${c.basis} / ${c.reviewState}`]),
-  )}<h2>Trust domains and data assets</h2>${table(["Type", "Name", "Basis / review"], [...s.domains.map((r) => ["Trust domain", r.name, `${r.basis} / ${r.reviewState}`]), ...s.assets.map((r) => ["Data asset", r.name, `${r.basis} / ${r.reviewState}`])])}<h2>Security controls</h2>${table(
-    ["Control", "Basis / review", "Evidence IDs"],
-    s.securityControls.map((r) => [
-      r.name,
-      `${r.basis} / ${r.reviewState}`,
-      (r.evidenceIds || []).join(", "),
-    ]),
-  )}<h2>STRIDE matrix</h2><p>Component rows. Each cell reports scenario count and review state; checklist prompts are excluded from scenario counts.</p>${table(
+    ${review?.coverage ? `<p>${stale ? "Historical counts: " : ""}${completed} / ${review.coverage.totalBatches || 0} STRIDE packets completed; ${failed} failed; ${pending} pending.</p>` : "<p>STRIDE analysis has not run.</p>"}
+    ${review?.stopReason ? `<p>Last recorded stop reason: ${e(review.stopReason)}.</p>` : ""}
+    ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
+  const summary = hasResults
+    ? `<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
+        ["Threat / affected scope", "Why it matters", "Next action"],
+        scenarios.map((t) => [
+          `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,
+          `${t.analysis?.impact || t.asset || t.scenario} ${t.reviewPriority.label}: ${t.reviewPriority.reasons.join(" ")}`,
+          `${t.mitigation || "Establish controls and applicability."} Severity: ${!t.decision?.stale ? t.decision?.severity || "unassessed" : "unassessed"}. Owner: ${!t.decision?.stale ? t.decision?.owner || "unassigned" : "unassigned"}.`,
+        ]),
+      )}<h2>System context from static extraction</h2><p>The DFD below is code/configuration context for the analysis. It is not proof that every depicted path was reviewed. Dashed or inferred connections and boundaries require confirmation.</p><h3>Overall system DFD</h3>${systemSvg(model)}
+  <h2>STRIDE matrix</h2><p>Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
     ["Component", ...CATEGORIES],
     s.matrix
-      .filter((r) => r.rowKind === "component")
+      .filter(
+        (r) =>
+          r.rowKind === "component" &&
+          (r.reviewedInterfaces || r.cells.some((c) => c.failedEvidence)),
+      )
       .map((r) => [
         r.name,
         ...r.cells.map(
           (c) =>
-            `${c.analysisLabel}; ${c.scenarioCount} scenarios${c.failedEvidence ? "; failed packets" : ""}${c.decision ? "; reviewer: " + c.state : ""}`,
+            `${c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.failedEvidence ? "; failed packets" : ""}`,
         ),
       ]),
-  )}<h2>Prioritized threats</h2><p>Review order is explained for each scenario. It is not a severity score or proof of exploitability. Source scope and reviewer decisions affect ordering.</p>${table(
-    [
-      "Threat reference / scenario",
-      "Review priority / reason",
-      "Impact / source scope / severity",
-    ],
-    scenarios.map((t) => [
-      `${t.reference} - ${t.name}`,
-      `${t.reviewPriority.label}: ${t.reviewPriority.reasons.join(" ")}`,
-      `${t.analysis?.impact || t.asset}. ${(t.sourceScopes || []).join(", ")}. Severity: ${!t.decision?.stale ? t.decision?.severity || "unassessed" : "unassessed (stale decision)"}`,
-    ]),
-  )}<h2>Threat register</h2>${
-    scenarios.length
-      ? scenarios
-          .map(
-            (t) =>
-              `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p>Record ID: ${e(t.id)} · ${e(t.categories.join(", "))} · ${e(t.reviewState)}</p><p>${e(t.reviewPriority.label)}: ${e(t.reviewPriority.reasons.join(" "))}</p><p>${e(t.scenario)}</p>${table(
-                ["Field", "Detail"],
-                [
-                  "actorIds",
-                  "asset",
-                  "prerequisites",
-                  "flowIds",
-                  "boundaryIds",
-                  "controls",
-                  "mitigation",
-                  "analysis",
-                  "analysisQuality",
-                  "evidenceStatus",
-                  "boundaryLinkBasis",
-                  "evidenceIds",
-                  "decision",
-                  "assumptions",
-                ].map((k) => [
-                  fieldName(k),
-                  ["flowIds", "boundaryIds", "actorIds"].includes(k)
-                    ? (t[k] || [])
-                        .map((id) => {
-                          const r = [
-                            ...s.flows,
-                            ...s.boundaries,
-                            ...s.actors,
-                          ].find((r) => r.id === id);
-                          return r ? `${r.reference || r.id}: ${r.name}` : id;
-                        })
-                        .join("; ")
-                    : display(t[k]),
-                ]),
-              )}</article>`,
-          )
+  )}<h2>Threat actors linked to returned scenarios</h2><p>These profiles describe the access assumed by the scenarios. Awaiting reviewer confirmation means the access assumption has not been accepted; it does not mean a model request is still running.</p>${table(
+    ["Actor / initial access", "Related threats", "Evidence / review"],
+    s.actors
+      .filter((a) => linkedActors.has(a.id))
+      .map((a) => [
+        `${a.name}. ${a.startingAccess || "Initial access not established"}`,
+        threatRefs("actorIds", a.id),
+        disposition(a),
+      ]),
+  )}<h2>Trust boundaries linked to returned scenarios</h2><p>A boundary describes a change of trust at a flow crossing, not a repository boundary. These links are inferred through shared interfaces; validate their relevance and enforcement for each threat.</p>${table(
+    ["Boundary / transition", "Flow crossing", "Enforcement / related threats"],
+    s.boundaries
+      .filter((b) => linkedBoundaries.has(b.id))
+      .flatMap((b) =>
+        (b.crossings?.length ? b.crossings : [null]).map((c) => [
+          `${b.reference}: ${b.name} (${b.dimension}). ${b.before} → ${b.after}`,
+          c
+            ? `${c.reference}: ${c.from} → ${c.to}`
+            : "No resolved crossing established",
+          `${b.enforcement || "Enforcement not established"}. ${disposition(b)}. Threats: ${threatRefs("boundaryIds", b.id)}`,
+        ]),
+      ),
+  )}<h2>Threat details</h2><p>${detailed.length} of ${scenarios.length} scenarios shown in detail, ordered by review priority. Every current scenario is in the summary above; complete details remain in the HTML/JSON exports. This report excludes repeated checklist text and empty property rows.</p>${
+    detailed.length
+      ? detailed
+          .map((t) => {
+            const paragraphs = [
+              ["Impact", t.analysis?.impact || t.asset],
+              [
+                "Access and prerequisites",
+                `${names(t.actorIds, "Actor not established")}. ${t.prerequisites || "Access prerequisites need confirmation."}`,
+              ],
+              [
+                "Code path",
+                names(
+                  t.flowIds,
+                  "No connected flow established for this scenario",
+                ),
+              ],
+              [
+                "Trust crossing",
+                names(
+                  t.boundaryIds,
+                  "No trust boundary established for this scenario",
+                ),
+              ],
+              [
+                "Controls and counterevidence",
+                t.controls || "Control effectiveness is not established",
+              ],
+              ["Recommended action", t.mitigation],
+              ["Supporting source", citations(t)],
+              [
+                "Evidence limits",
+                `${t.evidenceStatus}. ${display(t.analysisQuality?.gaps || "")}`,
+              ],
+              [
+                "Unresolved assumptions",
+                display(t.analysis?.assumptions || t.assumptions),
+              ],
+              [
+                "Reviewer decision",
+                t.decision && !t.decision.stale
+                  ? display(t.decision)
+                  : "Awaiting reviewer assessment",
+              ],
+            ];
+            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${paragraphs
+              .filter(([, v]) => v)
+              .map(
+                ([label, value]) =>
+                  `<p><strong>${label}:</strong> ${e(value)}</p>`,
+              )
+              .join("")}</article>`;
+          })
           .join("")
-      : "<p>No threat scenarios recorded. Complete STRIDE review and inspect pending coverage; this is not a clean security assessment.</p>"
-  }<h2>Supporting evidence</h2><p>Evidence cited by the threat scenarios above. The complete source evidence ledger is in the full HTML/JSON export.</p>${table(
-    ["ID", "Repository", "File / line", "Basis"],
-    model.evidence
-      .filter((r) => refs.has(r.id))
-      .map((r) => [r.id, r.repository, `${r.path}:${r.line}`, r.basis]),
-  )}<h2>Assumptions and open questions</h2><ul>${[...model.limitations, ...s.questions].map((q) => `<li>${e(q)}</li>`).join("")}</ul>${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
+      : "<p>No current threat scenarios recorded. Completed packets did not establish a scenario; inspect remaining coverage and context questions.</p>"
+  }
+  ${
+    contextQuestions.length
+      ? `<h2>Questions requiring implementation evidence</h2><p>These returned records cite architecture metadata only. They are not included in the threat scenario count or presented as implementation findings.</p>${table(
+          ["Reference / question", "Evidence needed"],
+          contextQuestions.map((t) => [
+            `${t.reference}: ${t.name}`,
+            `${t.reviewPriority.reasons.join(" ")} Source: ${citations(t)}`,
+          ]),
+        )}`
+      : ""
+  }`
+    : "<p>No current threat scenarios recorded in this report. Resume a successful STRIDE review before producing a findings report. Historical records and static planning inputs remain available in the workspace and complete exports.</p>";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories selected. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
+    ["Repository", "Collection status"],
+    model.sources.map((r) => [r.name, r.status]),
+  )}${summary}${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
 }

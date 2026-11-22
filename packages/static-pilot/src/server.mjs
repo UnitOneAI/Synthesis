@@ -181,18 +181,47 @@ export async function serve({
       });
     });
   const pendingPlans = new Map();
+  let completedPlan;
   const queryPlan = () => {
+    const failedAttempts = (model.usageLedger?.attempts || [])
+      .filter((a) => a.status === "failed")
+      .map(({ batchId, status, failure }) => ({
+        batchId,
+        status,
+        failure: { code: failure?.code },
+      }));
     const key = sha(
       JSON.stringify([
         model.modelRevision,
         model.sourceGraph.generation,
         model.architecture,
+        model.aiReview?.plan?.refinements,
+        failedAttempts,
       ]),
     );
+    if (completedPlan?.key === key)
+      return Promise.resolve(completedPlan.result);
     if (!pendingPlans.has(key)) {
-      const pending = queryGraph({ operation: "plan", model }).finally(() =>
-        pendingPlans.delete(key),
-      );
+      const {
+        aiReview,
+        usageLedger,
+        cweReview,
+        cweModelReview,
+        securityReview,
+        explorationRun,
+        ...staticModel
+      } = model;
+      const planningModel = {
+        ...staticModel,
+        aiReview: { plan: { refinements: aiReview?.plan?.refinements || [] } },
+        usageLedger: { attempts: failedAttempts },
+      };
+      const pending = queryGraph({ operation: "plan", model: planningModel })
+        .then((result) => {
+          completedPlan = { key, result };
+          return result;
+        })
+        .finally(() => pendingPlans.delete(key));
       pendingPlans.set(key, pending);
     }
     return pendingPlans.get(key);
@@ -871,6 +900,21 @@ export async function serve({
       }
       if (req.method === "GET" && url.pathname === "/api/review-plan") {
         if (!model) return send(409, { error: "Build the source graph first" });
+        if (url.searchParams.get("summary") === "1") {
+          const plan = model.aiReview?.plan;
+          return send(200, {
+            modelRevision: model.modelRevision,
+            status: plan
+              ? model.aiReview.status === "stale"
+                ? "historical"
+                : "prepared"
+              : "not-prepared",
+            repositories: model.sources.length,
+            batches: plan?.batches?.length ?? null,
+            obligations: plan?.obligations?.length ?? null,
+            gaps: plan?.gaps?.length ?? null,
+          });
+        }
         if (model.sourceGraph?.storage === "sqlite")
           return send(200, await queryPlan());
         const plan = reviewPlan(model);

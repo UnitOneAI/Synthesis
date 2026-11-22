@@ -717,3 +717,33 @@ test("retry checkpoints retain successful batches later in the plan", async () =
     );
   assert.equal(m.aiReview.coverage.completedBatches, retained.length + 1);
 });
+
+test("indexed interaction context preserves flow ordering, omissions and evidence filtering", async () => {
+  const { interactionFlowIndex } = await import("../src/system-model.mjs");
+  const model = {
+    interfaces: [
+      { id: "i1", evidence: ["e1"] },
+      { id: "i2", evidence: ["e2"] },
+    ],
+  };
+  const s = {
+    components: [],
+    entities: [],
+    assets: [],
+    securityControls: [],
+    actors: [],
+    boundaries: [],
+    flows: Array.from({ length: 60 }, (_, n) => ({
+      id: `flow${n}`,
+      source: "from",
+      target: "to",
+      interfaceIds: n % 2 ? ["i1", "i2"] : ["i2"],
+      evidenceIds: ["e1", "e2"],
+    })),
+  };
+  const actual = interactionContext(model, ["i1"], s, interactionFlowIndex(s));
+  assert.deepEqual(actual, interactionContext(model, ["i1"], s));
+  assert.equal(actual.flows.length, 20);
+  assert.equal(actual.omittedFlowCount, 10);
+  assert.deepEqual(actual.flows[0].evidenceIds, ["e1"]);
+});

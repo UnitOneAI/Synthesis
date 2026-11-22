@@ -1,6 +1,18 @@
 # Windows: static system threat modeling
 
-## Current update: source-backed STRIDE and static investigation
+## Current update: faster planning and current-results reports
+
+This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and does not force compatible successful responses to be rerun. Records already marked stale by an earlier methodology change remain historical.
+
+UI refresh no longer rebuilds the review plan. During startup, **Preparing STRIDE review plan … no model calls yet** distinguishes local preparation from provider requests. Planning time is included in diagnostics. Review progress no longer rereads every pending disk packet.
+
+A run now stops new requests after three consecutive invalid responses, or six invalid responses in the last twelve, including evidence-validation and output-limit errors. Already active requests finish and successful checkpoints remain saved. If this happens, use **Export errors**; do not repeatedly restart the same failing run. The token target remains advisory.
+
+After updating, open the saved graph, enable **Include hash-checked, redacted code context in STRIDE**, and verify one request with one worker and **Run until complete** off. If it succeeds, choose four workers and **Run until complete**. Do not rebuild unchanged clones to clear a model error. For an interrupted/failed run, download **Export errors** and save the small JSON under your exports directory.
+
+The default PDF now shows current returned results, with a prioritized summary, linked actors/boundaries and readable threat details. If analysis has not produced a current successful checkpoint, it says **No current STRIDE results** and omits static planning registers and stale findings. Partial current results remain exportable. Complete HTML/JSON exports retain full records. See [design and limits](../design/stride-planning-recovery.md).
+
+## Previous update: source-backed STRIDE and static investigation
 
 Update `main` and keep the existing local clones and saved workspace. This update does not change extraction rules or require a graph rebuild. Under **Sources**, open the saved graph and enable **Include hash-checked, redacted code context in STRIDE**. STRIDE now verifies unchanged source and retrieves code from local clones after restart. Initial source verification can take time on large repositories. Changed source requires rebuilding; unchanged source does not.
 
@@ -40,7 +52,10 @@ For an existing checkout, stop Synthesis with Ctrl+C and back up its workspace f
 ```powershell
 Set-Location C:/Tools/Synthesis
 git switch main
-git pull --ff-only origin main
+git fetch origin main
+if ($LASTEXITCODE -ne 0) { throw "GitHub fetch failed. Resolve network or GitHub access before continuing." }
+git merge --ff-only FETCH_HEAD
+if ($LASTEXITCODE -ne 0) { throw "Update did not apply. Preserve local changes and resolve the branch state before continuing." }
 Set-Location packages/static-pilot
 node --version
 node -p "process.versions.sqlite"
