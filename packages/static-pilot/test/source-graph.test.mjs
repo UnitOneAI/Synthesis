@@ -1279,3 +1279,61 @@ test('twelve-repository STRIDE dispatches external packets first and resumes wit
     assert.deepEqual(plan.batches.map(b => [b.id, b.packetHash]), hashes);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test("STRIDE preserves unselected failures through a bounded retry and saved restart, then completes all repositories", async (t) => {
+  const { root, model } = await portfolio(2);
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const plan = reviewPlan(model);
+  await enrichGraphModel(model, config, new Map(), async () => Response.json({
+    stop_reason: "end_turn", usage: { input_tokens: 20, output_tokens: 10 },
+    content: [{ type: "text", text: "not JSON" }],
+  }), { plan, runUntilComplete: true, concurrency: 1 });
+  assert.equal(model.aiReview.coverage.failedBatches, 3);
+  const failures = model.aiReview.batches.filter(b => b.status === "failed");
+  const cancellation = new AbortController();
+  let cancelledDispatches = 0;
+  await enrichGraphModel(model, config, new Map(), async () => {
+    cancelledDispatches++;
+    return response();
+  }, { plan, maxBatches: 1, concurrency: 1, signal: cancellation.signal,
+    prepareBatch: async (batch) => {
+      cancellation.abort();
+      return { packet: batch.packet, context: { records: [], gaps: [] } };
+    },
+  });
+  assert.equal(cancelledDispatches, 0);
+  assert.equal(model.aiReview.coverage.failedBatches, 3, "Cancellation before dispatch retains the prior failure");
+  const retried = [];
+  await enrichGraphModel(model, config, new Map(), async (_, options) => {
+    assert.match(JSON.parse(options.body).system, /Validation retry:/);
+    return response();
+  }, { plan, maxBatches: 1, concurrency: 1, trace: (event, data) => {
+    if (event === "review.stage-packet") retried.push(data.batchId);
+  } });
+  assert.equal(model.aiReview.coverage.completedBatches, 1);
+  assert.equal(model.aiReview.coverage.failedBatches, 2, "Unselected failures remain visible and retryable");
+  assert.equal(new Set(model.aiReview.batches.map(b => b.id)).size, model.aiReview.batches.length);
+  const remainingFailed = failures.filter(b => !retried.includes(b.id));
+  const saved = JSON.parse(JSON.stringify(model));
+  // A failure from an older scheduling order may now belong to a later stage.
+  // It must not prevent the coordinator from completing earlier stages first.
+  plan.batches.find(b => b.id === remainingFailed.at(-1).id).reviewStage = 4;
+  let strictRetries = 0;
+  const dispatched = [];
+  await enrichGraphModel(saved, config, new Map(), async (_, options) => {
+    if (JSON.parse(options.body).system.includes("Validation retry:")) strictRetries++;
+    return response();
+  }, { plan, runUntilComplete: true, concurrency: 4, trace: (event, data) => {
+    if (event === "review.stage-packet") dispatched.push(data.batchId);
+  } });
+  assert.equal(strictRetries, remainingFailed.length);
+  assert.ok(!dispatched.includes(retried[0]), "Accepted packet must not be charged again");
+  assert.equal(dispatched.length, plan.batches.length - 1);
+  assert.equal(saved.aiReview.coverage.completedBatches, plan.batches.length);
+  assert.equal(saved.aiReview.coverage.failedBatches, 0);
+  assert.equal(saved.aiReview.coverage.pendingBatches, 0);
+  assert.equal(saved.aiReview.stopReason, "plan-exhausted");
+  assert.equal(saved.aiReview.coverage.repositories.length, 12);
+  assert.ok(saved.aiReview.coverage.repositories.every(r => r.state === "submitted"));
+  assert.equal(saved.usageLedger.attempts.filter(a => a.status === "failed").length, 3);
+});

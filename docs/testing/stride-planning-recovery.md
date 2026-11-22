@@ -47,3 +47,10 @@ Fresh customer error JSON and a successful small customer gateway review remain 
 - A mock gateway verifies the actual outgoing schema and exact deployment handling. Invalid control endpoints, wrong-owner evidence and unsupported standards claims remain rejected; needs-context may omit evidence.
 - Small error exports distinguish control endpoints and the invalid-response spend guard without exposing model response text.
 - No live model call is required by these tests. A one-request customer gateway qualification remains required before resuming a large run.
+
+
+## Completion and recovery acceptance
+
+A twelve-repository regression injects three invalid responses and verifies the spend guard. Cancellation during source preparation makes no request and preserves all prior failures. A bounded one-request retry accepts one packet while retaining the other two failures. A serialized restart then runs four workers until every planned packet finishes, applying stricter retry instructions to both remaining failures and never resubmitting the accepted packet. A failure moved to a later priority stage must not block earlier stages. Final failed and pending counts are zero, all twelve repository interface sets are submitted, and failed-attempt usage remains recorded.
+
+This test establishes execution and accounting behavior with simulated responses, not model reasoning quality or completeness of a customer's threat model. Product acceptance also requires returned source-cited scenarios, linked actor/boundary assessments, correct partial/current matrix states and readable exports. The existing source-graph, review-presentation, evidence-report and browser tests cover those projections separately. Pending reviewer decisions are not automatically approved by packet completion.
