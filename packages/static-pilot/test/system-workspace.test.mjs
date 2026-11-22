@@ -747,3 +747,82 @@ test("indexed interaction context preserves flow ordering, omissions and evidenc
   assert.equal(actual.omittedFlowCount, 10);
   assert.deepEqual(actual.flows[0].evidenceIds, ["e1"]);
 });
+
+test("prior STRIDE checkpoints are archived once before replacement and tampering fails closed", async (t) => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "synthesis-review-history-"),
+  );
+  const source = path.join(dir, "sources");
+  await fs.mkdir(source);
+  const store = await workspaceStore(source, path.join(dir, "state"));
+  t.after(async () => {
+    await store.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const model = {
+    modelRevision: "revision",
+    sources: [{ name: "service", snapshot: "source-hash" }],
+    aiReview: {
+      status: "stale",
+      coverage: { completedBatches: 2 },
+      threats: [{ title: "Retained historical finding" }],
+    },
+  };
+  const archived = await store.archiveReview(model);
+  assert.deepEqual(await store.archiveReview(model), archived);
+  const files = await fs.readdir(path.join(store.dir, "review-history"));
+  assert.deepEqual(files, [archived.file]);
+  const file = path.join(store.dir, "review-history", archived.file);
+  const saved = JSON.parse(await fs.readFile(file, "utf8"));
+  assert.equal(saved.review.threats[0].title, "Retained historical finding");
+  assert.match(saved.interpretation, /not current review coverage/);
+  model.aiReview.threats = [];
+  assert.equal(
+    JSON.parse(await fs.readFile(file, "utf8")).review.threats.length,
+    1,
+  );
+  model.aiReview.threats = saved.review.threats;
+  await fs.writeFile(file, "tampered archive");
+  await assert.rejects(store.archiveReview(model), /integrity validation/);
+  assert.equal(
+    await store.archiveReview({
+      ...model,
+      aiReview: { coverage: { completedBatches: 0 } },
+    }),
+    null,
+  );
+});
+
+test("interaction packets omit unrelated component classification citations", async () => {
+  const { interactionFlowIndex } = await import("../src/system-model.mjs");
+  const model = { interfaces: [{ id: "i", evidence: ["submitted"] }] };
+  const s = {
+    components: [
+      {
+        id: "service",
+        classificationEvidenceIds: [
+          "submitted",
+          ...Array.from({ length: 4000 }, (_, n) => `outside-${n}`),
+        ],
+      },
+    ],
+    entities: [],
+    assets: [],
+    securityControls: [],
+    actors: [],
+    boundaries: [],
+    flows: [
+      { id: "f", source: "service", target: "peer", interfaceIds: ["i"] },
+    ],
+  };
+  const packet = interactionContext(model, ["i"], s, interactionFlowIndex(s));
+  assert.deepEqual(packet.components[0].classificationEvidenceIds, [
+    "submitted",
+  ]);
+  assert.ok(!JSON.stringify(packet).includes("outside-"));
+  assert.equal(
+    s.components[0].classificationEvidenceIds.length,
+    4001,
+    "source model retains complete classification evidence",
+  );
+});

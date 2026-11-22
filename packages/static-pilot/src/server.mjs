@@ -956,6 +956,13 @@ export async function serve({
           throw Error("Choose 1–4 parallel review workers");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
+        // Keep prior successful responses outside the active snapshot before a
+        // repacked or changed-method review can replace its current projection.
+        await store?.archiveReview(model);
+        if (["running", "cancelling"].includes(job.status))
+          return send(409, { error: "An analysis is already running" });
+        if (input.modelRevision !== model.modelRevision)
+          return send(409, { error: "Model changed; refresh before review" });
         await startJob("review", {
           model,
           manifest,

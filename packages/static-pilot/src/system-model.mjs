@@ -971,7 +971,11 @@ export function interactionContext(model, ids, projection, flowIndex) {
           k,
           k === "interfaceIds"
             ? v.filter((id) => included.has(id))
-            : ["evidenceIds", "counterEvidenceIds"].includes(k)
+            : [
+                  "evidenceIds",
+                  "counterEvidenceIds",
+                  "classificationEvidenceIds",
+                ].includes(k)
               ? v.filter((id) => allowedEvidence.has(id))
               : v,
         ]),

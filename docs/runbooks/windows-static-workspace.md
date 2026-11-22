@@ -2,7 +2,7 @@
 
 ## Current update: faster planning and current-results reports
 
-This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and does not force compatible successful responses to be rerun. Records already marked stale by an earlier methodology change remain historical.
+This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and reuses successful responses whose packet hashes still match. Repository-wide classification citations are now restricted to submitted evidence; affected scopes are repacked and may need fresh model review. Before starting the next STRIDE action, the server saves the prior successful checkpoint under `review-history/stride-<digest>.json` in the workspace. These historical JSON archives are separate from current coverage and do not replace a full workspace backup. Records already marked stale by an earlier methodology change remain historical.
 
 UI refresh no longer rebuilds the review plan. During startup, **Preparing STRIDE review plan … no model calls yet** distinguishes local preparation from provider requests. Planning time is included in diagnostics. Review progress no longer rereads every pending disk packet.
 

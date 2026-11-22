@@ -89,10 +89,61 @@ export async function workspaceStore(root, folder) {
     pending = pending.catch(() => {}).then(write);
     return pending;
   }
+  async function archiveReview(model) {
+    if (!model?.aiReview?.coverage?.completedBatches) return null;
+    const data = {
+      version: 1,
+      interpretation:
+        "Prior saved STRIDE response checkpoint; not current review coverage",
+      sourceRevision: model.modelRevision,
+      graphGeneration: model.sourceGraph?.generation,
+      graphFingerprint: model.sourceGraph?.fingerprint,
+      sources: model.sources.map(({ name, snapshot, revision }) => ({
+        name,
+        snapshot,
+        revision,
+      })),
+      architecture: model.architecture,
+      review: model.aiReview,
+    };
+    const json = JSON.stringify(data);
+    if (Buffer.byteLength(json) > MAX)
+      throw Error("Prior review exceeds archive size limit");
+    const digest = sha(json),
+      directory = path.join(real, "review-history");
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    if (
+      (await fs.lstat(directory)).isSymbolicLink() ||
+      !within(real, await fs.realpath(directory))
+    )
+      throw Error("Review archive directory must remain inside the workspace");
+    const target = path.join(directory, `stride-${digest}.json`);
+    try {
+      const stat = await fs.lstat(target);
+      if (
+        !stat.isFile() ||
+        stat.isSymbolicLink() ||
+        stat.size > MAX ||
+        sha(await fs.readFile(target, "utf8")) !== digest
+      )
+        throw Error("Existing review archive failed integrity validation");
+      return { file: path.basename(target), digest };
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const temp = path.join(directory, randomUUID() + ".tmp");
+    try {
+      await fs.writeFile(temp, json, { flag: "wx", mode: 0o600 });
+      await fs.rename(temp, target);
+    } finally {
+      await fs.rm(temp, { force: true });
+    }
+    return { file: path.basename(target), digest };
+  }
   async function close() {
     await pending.catch(() => {});
     await lock.close();
     await fs.unlink(lockFile).catch(() => {});
   }
-  return { dir: real, load, save, close };
+  return { dir: real, load, save, archiveReview, close };
 }
