@@ -35,7 +35,7 @@ try {
           : resolve();
       };
       parentPort.on("message", ack);
-      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger });
+      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes });
     });
   const trace = (event, data) =>
     new Promise((resolve, reject) => {
@@ -95,6 +95,7 @@ try {
                     prepareStrideEvidence(batch.packet, source),
                 }
               : {}),
+            reviewScope: workerData.options.reviewScope,
             maxBatches: workerData.options.reviewBatches,
             concurrency: workerData.options.concurrency,
             runUntilComplete: workerData.options.runUntilComplete,

@@ -466,3 +466,13 @@ nav[aria-label="Workflow"] button {
   outline: 2px solid #1555c4;
   outline-offset: 2px;
 }
+/* Deployment review stays optional and readable in remote desktop windows. */
+.dc-header { padding: 18px; background: #f2f6fb; border: 1px solid #cad8ea; border-radius: 8px; }
+.dc-question { padding: 18px; margin: 16px 0; border: 1px solid #cad8ea; border-radius: 8px; background: white; }
+.dc-question fieldset { border: 0; margin: 14px 0; padding: 0; }
+.dc-choice { display: flex; gap: 10px; align-items: baseline; padding: 9px; margin: 5px 0; border: 1px solid #dce3ed; border-radius: 6px; }
+.dc-choice:has(input:checked) { background: #eef4ff; border-color: #6c91c6; }
+.dc-choice input { width: auto; }
+.dc-question textarea { display: block; width: 100%; min-height: 64px; }
+.dc-evidence { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; margin: 4px 0; font-size: 12px; }
+#dc-code pre { max-height: 440px; overflow: auto; background: #f3f6fa; padding: 16px; white-space: pre-wrap; }

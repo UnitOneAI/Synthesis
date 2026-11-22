@@ -1,6 +1,22 @@
 # Deployment context and system-focused static threat modeling
 
-Status: proposed design and implementation contract. This document does not claim the feature is implemented. The STRIDE response/retry recovery release is separate (main commit `63d18ab`).
+Status: implemented on `codex/deployment-system-review`, pending review and main merge. The implementation is static only and reuses the saved graph. Qualification and remaining limits are recorded in [tests](../testing/deployment-system-review.md).
+
+## Delivered behavior
+
+- The UI defaults to **System threat model**, with explicit deep code-path STRIDE still selectable. Existing API clients default to the prior deep scope unless they request `reviewScope: system`.
+- `system-review-units.mjs` groups saved production interfaces and flows by endpoints, protocol and declared control/identity context. Each unit retains member interfaces; grouping never establishes equivalent authorization. Units have at most eight primary records plus six related controls, a 72 KiB base packet limit and explicit split/omission accounting. Source windows use the existing verified retrieval limits.
+- `deployment-context.mjs` indexes source declarations into five topics, discovers named configuration profiles, persists optional answers and supplies explicit assumptions to review packets. The UI shows three cards initially, with the remaining cards available on demand. Selecting a profile supplies analysis context; it does not select or prove the effective deployed configuration.
+- `deployment-artifacts.mjs` accepts up to eight small JSON/XML/configuration artifacts. It retains recognized declaration names and hashes only, never raw values or executable content. This is evidence of declarations being present, not interpretation of actual effective accounts, grants or policy values.
+- Source windows are fetched by saved evidence ID, with existing access-token, containment, hash and redaction checks. Answers are scoped to source fingerprints, and changed source makes the answer stale.
+- An answer change invalidates dependent system-review packets and conclusions. Other completed packets remain reusable. Profile/artifact changes conservatively invalidate the system scope. System and deep scope checkpoints are retained separately so switching does not discard prior paid review; unchanged compatible packets make no new calls.
+- Current partial results populate the existing priority register and STRIDE matrix. Reports include the active scope and explicit deployment assumptions. No successful model response automatically approves a boundary or establishes deployed actor access.
+
+## Limits in this increment
+
+Claim rows group declarations by component and topic. They do not yet derive a complete policy/ACL interpretation or automatically resolve contradictory deployment profiles. Questions are grouped into five topics, not individually ranked by risk for every component; an operator can keep the conservative assumption or report mixed/unknown when settings differ. Source-linked threat/boundary details remain available in the existing model. Evidence gaps, unresolved destinations and per-window limits remain explicit; system-scope completion is not exhaustive code coverage or deployment verification. Saved source hashes and review contracts still control compatibility; this does not waive source-change invalidation.
+
+The sections below retain the longer-term design contract. Items beyond the delivered behavior above are design targets, not implemented claims.
 
 ## Product outcome
 

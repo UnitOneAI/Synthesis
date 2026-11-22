@@ -1,6 +1,22 @@
 # Windows: static system threat modeling
 
-## Current update: external-first review, faster planning and current-results reports
+## System threat model and optional deployment review
+
+Available on `codex/deployment-system-review` pending qualification and main merge. Do not assume a main checkout contains this change until the merge is recorded.
+
+1. Restart with the same source root and workspace. In Sources choose **Open saved graph**. No extraction rebuild is required for unchanged compatible source.
+2. Enable **Include hash-checked, redacted code context in STRIDE** in Sources for source-backed review. Restarted graphs retrieve hash-checked windows from the local clones; the model does not need stored raw excerpts.
+3. Open **4 · STRIDE matrix**. Set **Review scope → System threat model** and click **Preview system scope**. It reports the smaller system-unit plan and the code scope deferred to deeper review, without making a model call.
+4. Start with one request and one worker. After a valid result appears, use up to four workers and **Run until complete**. The request budget is disabled in this mode. The token target is advisory; the invalid-response and provider-error guards still stop a broken run.
+5. Review current threats, their priorities, evidence, actors and boundary transitions. Partial current results can be exported immediately using **Export STRIDE review · PDF**.
+6. **System model → Deployment context** is optional. Keep assumptions and run now, or answer the few cards. A non-default deployment statement requires a reviewer name. Answering a card reopens only dependent system units; choosing a profile or importing configuration conservatively reopens system review. None of these actions approves a trust boundary or verifies deployed access.
+7. Use **Deep code-path STRIDE** separately when deeper callable/path coverage is needed. Scope checkpoints are retained independently and compatible completed results are reused. System review deliberately does not mark deferred deep interfaces complete. CWE review remains unchanged.
+
+Optional configuration import accepts JSON, XML, `.config`, `.wxs` and `.wxi`, up to 256 KiB each and eight artifacts. Only recognized declaration names and the file hash are retained; values and credentials are discarded. File content is never executed. Selection of a discovered configuration profile is analysis context, not a claim that it is deployed.
+
+See [design and limits](../design/deployment-context-and-system-review.md) and [qualification](../testing/deployment-system-review.md).
+
+## Previous update: external-first review, faster planning and current-results reports
 
 This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and reuses successful responses whose packet hashes still match. Repository-wide classification citations are now restricted to submitted evidence; affected scopes are repacked and may need fresh model review. Before starting the next STRIDE action, the server saves the prior successful checkpoint under `review-history/stride-<digest>.json` in the workspace. These historical JSON archives are separate from current coverage and do not replace a full workspace backup. Records already marked stale by an earlier methodology change remain historical.
 

@@ -714,6 +714,8 @@ test("optional OWASP risk assessment leaves missing factors unknown", async ({
   page,
 }) => {
   await tab(page, "Threat register");
+  // This static fixture has no returned scenarios. Explicitly inspect a checklist item.
+  await page.getByLabel("Threat record type", { exact: true }).selectOption("checklist");
   await page.locator(".ws-record").first().click();
   await page
     .locator("#ws-inspector summary")

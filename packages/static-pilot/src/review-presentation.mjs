@@ -46,8 +46,9 @@ export function addReviewPresentation(s, model) {
             interfaces.get(id)?.connection?.role !== "symbol-call",
         ),
     );
-    t.boundaryLinkBasis =
-      "Boundaries associated through shared interfaces; verify relevance to this scenario.";
+    t.boundaryLinkBasis = t.candidateFlowIds?.length
+      ? "Candidate boundaries associated through shared interfaces. Some flow peers remain unresolved; access, crossing relevance and enforcement are assumptions requiring review."
+      : "Boundaries associated through shared interfaces; verify relevance to this scenario.";
     const reasons = [];
     let rank = 3,
       label = "Establish context";

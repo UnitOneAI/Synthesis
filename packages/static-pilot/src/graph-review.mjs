@@ -1,3 +1,4 @@
+import { systemReviewPlan } from './system-review-units.mjs';
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
 import { interfacePriorities, batchStage, reviewStageCoverage, REVIEW_STAGES } from "./review-order.mjs";
@@ -499,12 +500,12 @@ export async function enrichGraphModel(
   }
   const plan =
     options.plan ||
-    reviewPlan(model, excerpts, {
+    (options.reviewScope === 'system' ? systemReviewPlan(model, excerpts) : reviewPlan(model, excerpts, {
       progress: (state) =>
         options.progress?.(
           `Preparing STRIDE plan: ${state.stage}${state.preparedPackets ? " · " + state.preparedPackets + " packets prepared" : ""} · ${Math.round(state.elapsedMs / 1000)}s · no model calls yet`,
         ),
-    });
+    }));
   const planningMs = Math.round(performance.now() - planningStarted);
   if (!options.plan)
     await options.trace?.("review.planning-completed", {
@@ -515,6 +516,7 @@ export async function enrichGraphModel(
     });
   const provenance = {
     ...publicModelConfig(config),
+    ...(plan.reviewScope === 'system' ? { reviewScope: 'system' } : {}),
     ...(options.evidencePolicy
       ? { evidencePolicy: options.evidencePolicy }
       : {}),
@@ -555,8 +557,17 @@ export async function enrichGraphModel(
     runControl,
     concurrency,
   });
+  // Keep the other review scope resumable; switching views must not discard paid work.
+  const selectedScope = plan.reviewScope === 'system' ? 'system' : 'deep';
+  const priorScope = model.aiReview?.reviewScope === 'system' ? 'system' : 'deep';
+  let activePrior = model.aiReview;
+  if (model.aiReview && priorScope !== selectedScope) {
+    model.savedStrideScopes = { ...model.savedStrideScopes, [priorScope]: model.aiReview };
+    activePrior = model.savedStrideScopes[selectedScope];
+    delete model.savedStrideScopes[selectedScope];
+  }
   const previous =
-    model.aiReview?.runKey === runKey ? model.aiReview.batches || [] : [];
+    activePrior?.runKey === runKey ? activePrior.batches || [] : [];
   const cached = new Map(
     [...previous, ...(options.recoveredBatches || [])]
       .filter(
@@ -596,7 +607,9 @@ export async function enrichGraphModel(
     summary:
       "Graph-based review in bounded repository and cross-repository batches.",
     coverage: {},
+    ...(plan.scope ? { scope: plan.scope } : {}),
     plan: {
+      ...(plan.scope ? { scope: plan.scope } : {}),
       basedOnRevision: model.modelRevision,
       version: GRAPH_REVIEW_VERSION,
       splits: plan.splits,
@@ -877,6 +890,7 @@ export async function enrichGraphModel(
         interfaceIds: batch.packet.records.map((r) => r.id),
         status: "queued",
         reviewStage: review.plan.batches[index].reviewStage,
+        ...(batch.deploymentQuestionIds ? { deploymentQuestionIds: batch.deploymentQuestionIds } : {}),
       };
       await emit("review.stage-packet", { batchId: batch.id, stage: entry.reviewStage, label: REVIEW_STAGES[entry.reviewStage].label });
       const priorFailure = review.batches.find((b) => b.id === entry.id && b.status === "failed");
