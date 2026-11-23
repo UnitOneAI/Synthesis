@@ -1,6 +1,6 @@
 import { sha } from './sources.mjs';
 import { sourceScope } from './architecture.mjs';
-export const THREAT_VALIDATION_VERSION = 'threat-control-review-4';
+export const THREAT_VALIDATION_VERSION = 'threat-control-review-5';
 export function threatValidationKey(model) {
   return sha(JSON.stringify([THREAT_VALIDATION_VERSION, model.modelRevision, model.sourceGraph?.fingerprint, model.architecture, model.deploymentContext]));
 }

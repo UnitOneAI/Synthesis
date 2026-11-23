@@ -7,15 +7,23 @@ import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mj
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
 
+const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 export const THREAT_ASSESSMENT_SCHEMA = {
   ...SECURITY_RESPONSE_SCHEMA,
-  properties: {...SECURITY_RESPONSE_SCHEMA.properties, deploymentAssumptions:{type:'array',items:{type:'string'}}},
-  required:[...SECURITY_RESPONSE_SCHEMA.required,'deploymentAssumptions'],
+  properties: {...SECURITY_RESPONSE_SCHEMA.properties, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
+  required:[...SECURITY_RESPONSE_SCHEMA.required,'deploymentAssumptions','inputEvidence','sinkEvidence'],
 };
 export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + `
-For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment.`;
+For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
 export function validateThreatAssessment(value, packet) {
-  const {deploymentAssumptions,...rest}=value || {};
+  const {deploymentAssumptions,inputEvidence,sinkEvidence,...rest}=value || {};
+  const trace=Array.isArray(rest.trace)?[...rest.trace]:[];
+  for(const [ref,role] of [[inputEvidence,'input'],[sinkEvidence,'sink']]) {
+    if(ref===null)continue;
+    if(!ref || typeof ref!=='object' || Array.isArray(ref))throw Error('Security assessment failed schema or evidence validation (inputEvidence and sinkEvidence must be a citation or null)');
+    if(!trace.some(r=>r.role===role && r.recordId===ref.recordId && r.startLine===ref.startLine && r.endLine===ref.endLine))trace.push({...ref,role});
+  }
+  rest.trace=trace;
   if(!Array.isArray(deploymentAssumptions) || deploymentAssumptions.length>8 || deploymentAssumptions.some(x=>typeof x!=='string'||!x.trim()||x.length>1600)) throw Error('Security assessment failed schema or evidence validation (deploymentAssumptions must contain at most eight bounded statements)');
   return {...validateSecurityAssessment(rest,packet),deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
 }
@@ -67,7 +75,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // Supply declarations before repeating the same middle-of-file window. Explicit
   // follow-up paths must still resolve to selected, hash-matched graph files.
-  if(/initial|declar|environment|config|startup|before|full .*implementation/i.test(missing.join(' '))) {
+  if(/initial|declar|environment|config|startup|before|full/i.test(missing.join(' '))) {
     const seen=new Set();
     for(const r of [...followUp,...refs,...issue.locations]) {
       const k=r.repository+'\0'+r.path;

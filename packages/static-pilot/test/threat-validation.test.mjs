@@ -33,7 +33,7 @@ export async function threatFixture(t, extraFiles=[]) {
 function answer(packet, filename = 'PermissionFilter.cs') {
  const r=packet.records.find(r=>r.path===filename);assert.ok(r,'The named control in the twelfth repository must be retrieved');
  const ref={recordId:r.id,startLine:r.startLine,endLine:r.startLine,reason:'PermissionFilter checks authority on this fixture path'};
- return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
+ return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({inputEvidence:null,sinkEvidence:null,deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
 }
 test('saved SQLite graph finds named cross-repository controls, preserves STRIDE, and reuses validated results after restart',async t=>{
  const f=await threatFixture(t), before=JSON.stringify(f.model.aiReview);let calls=0;
@@ -111,6 +111,11 @@ test('deployment assumptions do not suppress a cited conditional code concern; m
  v.deploymentAssumptions=['Endpoint is reachable in the selected deployment.'];
  assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
  assert.equal(validateThreatAssessment(v,p).deploymentStatus,'unverified-assumptions');
+ v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'Entry point'};
+ v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'Sensitive operation'};v.trace=[];
+ assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
+ assert.equal(validateThreatAssessment(v,p).trace.length,2);
+ assert.throws(()=>validateThreatAssessment({...v,inputEvidence:{...v.inputEvidence,recordId:'invented'}},p),/unknown record/);
  v.missingEvidence=['Authorization middleware implementation is unavailable.'];
  assert.equal(validateThreatAssessment(v,p).assessment,'needs-context');
  v.missingEvidence=[];p.gaps=[{reason:'source-hash-mismatch'}];
