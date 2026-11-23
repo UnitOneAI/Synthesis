@@ -187,3 +187,11 @@ test('repository matrix distinguishes untouched, partially assessed and reviewed
  f.model.aiReview.batches=[];f.model.aiReview.coverage={...f.model.aiReview.coverage,completedBatches:0};
  const cells=systemModel(f.model).matrix.flatMap(r=>r.cells);assert.ok(cells.some(c=>c.analysisStatus==='not-analyzed'));assert.ok(cells.every(c=>c.analysisStatus!=='partially-analyzed'));
 });
+test('an isolated repository packet failure does not suppress later internal review stages',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Primary app',profile:'Static',repositories:['app']};
+ const plan=pocReviewPlan(f.model);assert.ok(plan.batches.length>1);plan.batches.forEach((b,n)=>{b.reviewStage=n?2:1;});
+ const first=new Set(plan.batches[0].packet.reviewUnit.primaryInterfaceIds),source=await verifiedStrideSource(f.model,f.manifest,f.root);
+ const fetchImpl=async(url,options)=>{const packet=JSON.parse(JSON.parse(options.body).messages[0].content),response=categoryResponse(packet);if(packet.reviewUnit.primaryInterfaceIds.some(id=>first.has(id)))response.categoryReviews[0].citations[0].recordId='unknown';return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(response)}],usage:{input_tokens:2,output_tokens:2}});};
+ await enrichGraphModel(f.model,modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'}),new Map(),fetchImpl,{plan,reviewScope:'poc',runUntilComplete:true,concurrency:1,recoveryDelayMs:0,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
+ assert.equal(f.model.aiReview.coverage.failedBatches,1);assert.equal(f.model.aiReview.coverage.pendingBatches,0);assert.ok(f.model.aiReview.batches.some(b=>b.reviewStage===2&&b.status==='completed'));
+});

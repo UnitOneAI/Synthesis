@@ -880,7 +880,7 @@ export async function enrichGraphModel(
     stage: (index) => review.plan.batches[index].reviewStage,
     // System review must reach the other components even when an isolated unit
     // remains unresolved. Failed units stay failed; global failure guards still stop.
-    shouldAdvanceStage: (stage) => selectedScope === 'system' || !review.batches.some(
+    shouldAdvanceStage: (stage) => selectedScope === 'system' || plan.scope?.poc?.kind === 'repositories' || !review.batches.some(
       (b) => b.status === "failed" && b.reviewStage <= stage,
     ),
     signal: options.signal,
