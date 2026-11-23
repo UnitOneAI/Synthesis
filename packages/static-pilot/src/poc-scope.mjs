@@ -1,7 +1,9 @@
+import {resolveRepositoryScope,repositoryInventory} from './repository-scope.mjs';
 import {sourceScope} from './architecture.mjs';
 import { sha } from './sources.mjs';
 import { systemReviewPlan,operationSignature } from './system-review-units.mjs';
 export function resolvePocScope(model, input = model.pocScope) {
+  if(input?.kind==='repositories') return resolveRepositoryScope(model,input);
   if (!input || typeof input !== 'object' || !Array.isArray(input.operations) || !input.operations.length || input.operations.length > 12)
     throw Error('Import a POC scope with 1–12 operation selectors');
   const text = (v, name) => { if (typeof v !== 'string' || !v.trim() || v.length > 240) throw Error(`Invalid POC ${name}`); return v.trim(); };
@@ -28,12 +30,13 @@ export function resolvePocScope(model, input = model.pocScope) {
 }
 export function pocReviewPlan(model, excerpts = new Map()) {
   const poc = resolvePocScope(model);
-  const plan = systemReviewPlan(model, excerpts, {interfaceIds:poc.interfaceIds,profile:poc.profile});
-  if (plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
+  const plan = systemReviewPlan(model, excerpts, {interfaceIds:poc.interfaceIds,profile:poc.profile,repositoryScope:poc.kind==='repositories'});
+  if (poc.kind!=='repositories' && plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
   const covered = new Set(plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds));
   if (poc.interfaceIds.some(id=>!covered.has(id))) throw Error('POC has an operation that cannot fit a review packet; narrow the scope before running');
   plan.scope.poc = poc;
-  plan.scope.version += ':poc-2';
+  plan.scope.version += poc.kind==='repositories' ? ':repositories-1' : ':poc-2';
+  if(poc.kind==='repositories'){plan.scope.repositoryInventory=repositoryInventory(model,poc);plan.semantics='All identified security surfaces in selected primary repositories, including internal, configuration and supporting/test surfaces. Cross-repository evidence remains available. File and category gaps prevent a claim of complete repository assessment.';return plan;}
   plan.semantics = 'Selected inbound operations and directly supplied controls only. Other repositories remain available for evidence retrieval, not full review.';
   return plan;
 }

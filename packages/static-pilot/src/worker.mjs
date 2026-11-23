@@ -116,7 +116,7 @@ try {
             excerpts = value;
           },
         });
-  if (workerData.mode === 'review' && workerData.options.reviewScope === 'poc' &&
+  if (workerData.mode === 'review' && workerData.options.reviewScope === 'poc' && model.pocScope?.kind !== 'repositories' &&
       !model.aiReview.coverage.pendingBatches && !model.aiReview.coverage.failedBatches && model.aiReview.threats.length) {
     progress('POC STRIDE packets saved; assessing scenarios against code and shared controls');
     await assessCompletedPoc(workerData.manifest, model, {

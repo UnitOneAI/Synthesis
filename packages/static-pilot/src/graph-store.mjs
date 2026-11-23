@@ -373,6 +373,10 @@ export class GraphStore {
       .all(generation)
       .map((r) => r.extractor);
   }
+  *inventoryEntries(generation) {
+    for (const r of this.db.prepare("SELECT repository,data FROM inventory WHERE generation=? ORDER BY repository,path").iterate(generation))
+      yield {...parse(r), repository:r.repository};
+  }
   *files(generation) {
     for (const r of this.db
       .prepare(

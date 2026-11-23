@@ -1,3 +1,4 @@
+import {REPOSITORY_PROMPT} from './repository-assessment.mjs';
 import {resolvePocScope,pocReviewPlan} from './poc-scope.mjs';
 import { reviewThreatScenarios } from './threat-validation.mjs';
 import { deploymentContext, updateDeploymentContext } from './deployment-context.mjs';
@@ -284,7 +285,7 @@ export async function serve({
           (model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
             model.aiReview.promptHash !==
               sha(
-                model.aiReview.promptKind === "static-investigation"
+                model.aiReview.promptKind === "repository-assessment" ? REPOSITORY_PROMPT : model.aiReview.promptKind === "static-investigation"
                   ? STRIDE_INVESTIGATION_PROMPT
                   : SYSTEM_PROMPT,
               ))
@@ -299,7 +300,7 @@ export async function serve({
                 : []),
               ...(model.aiReview.promptHash !==
               sha(
-                model.aiReview.promptKind === "static-investigation"
+                model.aiReview.promptKind === "repository-assessment" ? REPOSITORY_PROMPT : model.aiReview.promptKind === "static-investigation"
                   ? STRIDE_INVESTIGATION_PROMPT
                   : SYSTEM_PROMPT,
               )
@@ -512,7 +513,7 @@ export async function serve({
               model.aiReview.guidance?.hash !== GUIDANCE_HASH ||
               model.aiReview.promptHash !==
                 sha(
-                  model.aiReview.promptKind === "static-investigation"
+                  model.aiReview.promptKind === "repository-assessment" ? REPOSITORY_PROMPT : model.aiReview.promptKind === "static-investigation"
                     ? STRIDE_INVESTIGATION_PROMPT
                     : SYSTEM_PROMPT,
                 )
@@ -1470,7 +1471,7 @@ export async function serve({
         const scope = resolvePocScope(model,input.scope);
         const candidate = {...model,pocScope:scope};
         const plan = pocReviewPlan(candidate);
-        if (plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
+        if (scope.kind !== 'repositories' && plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
         model.pocScope = scope;
         await checkpoint(); if (persistenceError) throw Error('POC scope could not be saved');
         return send(200,outputModel());

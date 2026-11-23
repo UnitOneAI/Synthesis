@@ -1,5 +1,11 @@
 # Windows: static system threat modeling
 
+## Selected repositories: smaller scope without an endpoint cutoff
+
+After updating, reuse the existing graph. In STRIDE, open **Select primary repositories**, select the repositories to assess, and save the scope. Leave other loaded clones available as supporting evidence. Enable source context, preview the scope, then run **Selected repositories** with up to four workers and **Run until complete**. Repository mode covers extracted internal definitions and interfaces as well as external routes; it has no operation-POC packet cutoff. The six-category table separates cited conclusions, evidence gaps, pending work and failures. See the [scope contract and full UI procedure](../selected-repository-review.md).
+
+The new category contract does not convert old responses into conclusive assessments. Earlier reviews remain saved; compatible work within the new scope resumes. No source graph rebuild is needed for this review-selection change.
+
 ## System threat model and optional deployment review
 
 Update from `main` using the commands below. The saved graph and compatible completed reviews are retained.

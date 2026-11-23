@@ -1,3 +1,5 @@
+import {citationCoversEvidence} from './source-citation.mjs';
+import {repositoryAssessmentSummary} from './repository-assessment-summary.mjs';
 import {actorAccess, threatAccess} from './threat-access.mjs';
 import { threatAssessment } from './threat-validation-state.mjs';
 import { sourceScope } from "./architecture.mjs";
@@ -24,6 +26,8 @@ export function addReviewPresentation(s, model) {
   const interfaces = new Map((model.interfaces || []).map((i) => [i.id, i]));
   const nodes = new Map([...s.components, ...s.entities].map((n) => [n.id, n]));
   const flows = new Map(s.flows.map((f) => [f.id, f]));
+  const sourceThreats=new Map((model.aiReview?.threats||[]).map(t=>[t.id,t]));
+  const sourceBatches=new Map((model.aiReview?.batches||[]).filter(b=>b.status==='completed').map(b=>[b.id,b]));
   for (const b of s.boundaries)
     b.crossings = (b.flowIds || [])
       .map((id) => flows.get(id))
@@ -113,6 +117,15 @@ export function addReviewPresentation(s, model) {
         ? 'Dependency / build review obligation' : null;
     if (t.followUpKind && !severity) {rank=4;label=t.followUpKind;reasons.push('Preserved follow-up; not a demonstrated current exploitable path.');}
     t.validation = threatAssessment(model, t.id);
+    const sourceThreat=sourceThreats.get(t.id);
+    const sourceBatch=sourceBatches.get(sourceThreat?.batchId);
+    const categoryAssessment=sourceBatch?.review?.categoryReviews?.find(c=>t.categories.includes(c.category));
+    if(categoryAssessment && t.reviewState!=='stale'){
+      t.categoryAssessment={...categoryAssessment,citations:categoryAssessment.citations.map(c=>({...c,...sourceBatch.evidenceContext?.records?.find(r=>r.id===c.recordId),windowEndLine:sourceBatch.evidenceContext?.records?.find(r=>r.id===c.recordId)?.endLine,line:c.line,endLine:c.endLine}))};
+      if(model.aiReview.mode==='source-excerpts'&&t.categoryAssessment.citations.some(c=>refs.some(r=>citationCoversEvidence(c,{...c,endLine:c.windowEndLine||c.endLine},r))))t.metadataOnly=false;
+      if(categoryAssessment.status==='supported-conditional'&&rank<4){rank=1;label='Conditional concern — source assessment';reasons.unshift(categoryAssessment.rationale);}
+      if(categoryAssessment.status==='ruled-out'){rank=5;label='Category ruled out with cited counterevidence';reasons.unshift(categoryAssessment.rationale);}
+    }
     if (t.validation.assessment === 'ruled-out') { rank = 5; label = 'Counterevidence found'; reasons.unshift('A separate source assessment found a control that rules out this stated path; reviewer confirmation is still required.'); }
     else if (t.validation.assessment === 'static-supported' && rank < 4) { rank = Math.min(rank, 1); label = 'Source-supported concern'; reasons.unshift('Separate assessment cites input and sink evidence; deployed exploitability remains unverified.'); }
     // Actor selection is a scenario hypothesis, not attribution or proof of access.
@@ -125,6 +138,7 @@ export function addReviewPresentation(s, model) {
       proposedPath: (t.analysis?.attackSteps || []).join(' → ') || 'No attack path recorded.',
       interpretation: 'This profile represents a capability relevant to the stated path. It is not evidence of an actual attacker, malicious intent, or deployed reachability. Legitimate users become part of a threat scenario only under the stated misuse or compromise conditions.',
     };
+    if(!entrySteps.length && t.categoryAssessment?.citations.some(c=>c.role==='input'))t.actorRationale.entryEvidence=t.categoryAssessment.citations.filter(c=>c.role==='input').map(c=>`${c.repository} / ${c.path}:${c.line}–${c.endLine} — category source assessment; deployed access unverified`).join('; ');
     const conclusion = model.sourceConclusions?.[t.id];
     if (conclusion?.issueHash && conclusion.issueHash === t.validation.issueHash &&
         conclusion.contextKey === t.validation.contextKey &&
@@ -171,12 +185,17 @@ export function addReviewPresentation(s, model) {
     failed: coverage?.failedBatches || 0,
     total: coverage?.totalBatches || 0,
   };
+  s.repositoryAssessment = repositoryAssessmentSummary(review);
+  if(s.repositoryAssessment && !s.repositoryAssessment.stale && s.analysisStatus.state==='analyzed' && !s.repositoryAssessment.complete) s.analysisStatus.state='reviewed-with-gaps';
   const failed = new Set(
     (review?.batches || [])
       .filter((b) => b.status === "failed")
       .flatMap((b) => b.interfaceIds || []),
   );
   const threatById = new Map(s.threats.map((t) => [t.id, t]));
+  const categoryIndex=new Map();
+  for(const b of sourceBatches.values())for(const c of b.review?.categoryReviews||[])for(const id of c.interfaceIds){const key=JSON.stringify([c.category,id]);if(!categoryIndex.has(key))categoryIndex.set(key,[]);categoryIndex.get(key).push(c);}
+  const primaryScope=new Set(review?.scope?.poc?.interfaceIds||[]);
   for (const row of s.matrix || [])
     for (const cell of row.cells) {
       const scenarios = cell.threatIds.map(id => threatById.get(id)).filter(t => t && t.origin !== 'review checklist');
@@ -196,7 +215,16 @@ export function addReviewPresentation(s, model) {
               : hasFailed
                 ? "failed"
                 : "not-analyzed";
+      if(s.repositoryAssessment && review?.status!=='stale'){
+        const selected=row.interfaceIds.filter(id=>primaryScope.has(id));
+        const assessments=[...new Set(selected.flatMap(id=>categoryIndex.get(JSON.stringify([cell.category,id]))||[]))];
+        const accounted=new Set(assessments.flatMap(c=>c.interfaceIds));
+        cell.analysisStatus=!selected.length?'outside-scope':!selected.some(id=>accounted.has(id))?(hasFailed?'failed':'not-analyzed'):selected.some(id=>!accounted.has(id))?'partially-analyzed':assessments.some(c=>c.status==='evidence-gap')?'evidence-gap':assessments.some(c=>c.status==='supported-conditional')?'scenarios-identified':assessments.every(c=>c.status==='ruled-out')?'ruled-out':'analyzed-no-scenario';
+      }
       cell.analysisLabel = {
+        'outside-scope':'Supporting context — outside primary scope',
+        'evidence-gap':'Reviewed — evidence gap',
+        'ruled-out':'Reviewed — cited counterevidence',
         stale: "Stale analysis",
         "scenarios-identified": "Scenarios identified",
         "context-required": "Architecture questions — code evidence needed",

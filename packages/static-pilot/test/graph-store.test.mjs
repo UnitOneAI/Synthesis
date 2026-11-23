@@ -511,3 +511,18 @@ diskTest(
     });
   },
 );
+diskTest('repository inventory reads the published disk ledger without rebuilding or claiming supporting repositories',async t=>{
+ const f=await fixture(t);await fs.writeFile(path.join(f.root,'one','unparsed.xyz'),'unsupported source');
+ const model=await analyze(f.manifest,{sourceRoot:f.root,graphDatabase:f.file});
+ const graph=new GraphStore(f.file,{readOnly:true});
+ try{
+  attachGraph(model.sourceGraph,graph);
+  const {pocReviewPlan}=await import('../src/poc-scope.mjs');
+  model.pocScope={kind:'repositories',title:'One primary',profile:'Static',repositories:['one']};
+  const plan=pocReviewPlan(model),inventory=plan.scope.repositoryInventory;
+  assert.ok(inventory.files.some(f=>f.path==='unparsed.xyz'&&f.collectionStatus==='unsupported'));
+  assert.ok(inventory.gaps.some(g=>g.path==='unparsed.xyz'));assert.ok(inventory.files.every(f=>f.repository==='one'));
+  assert.deepEqual(plan.scope.poc.supportingRepositories,['two']);
+  assert.ok(plan.scope.poc.interfaceIds.every(id=>model.interfaces.find(i=>i.id===id).repository==='one'));
+ }finally{graph.close();}
+});
