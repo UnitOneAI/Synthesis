@@ -597,7 +597,7 @@ export function systemPrintReport(model, options = {}) {
               ["Missing code evidence", t.validation?.missingEvidence?.join('; ')],
               ["Deployment assumptions — not verified", t.validation?.deploymentAssumptions?.join('; ')],
               ["Recommended code change", t.validation?.remediation?.codeFix],
-              ["Validated source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
+              ["Cited source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
               ["Why this actor is in scope", t.actorRationale ? `${t.actorRationale.profiles}. Required condition: ${t.actorRationale.whyInScope}` : null],
               ["Actor entry evidence", t.actorRationale?.entryEvidence],
               ["Proposed misuse path", t.actorRationale?.proposedPath],
