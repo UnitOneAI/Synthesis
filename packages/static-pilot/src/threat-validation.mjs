@@ -7,7 +7,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-2';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-3';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 export const THREAT_ASSESSMENT_SCHEMA = {
@@ -82,6 +82,9 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:true,basis:'requested-initialization'});}
     }
   }
+  // Explicit code requests (including declaration windows) must precede
+  // generic framework candidates and call neighbors under the byte limit.
+  references.sort((a,b)=>Number(Boolean(b.required))-Number(Boolean(a.required)));
   let records=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
