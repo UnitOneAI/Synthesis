@@ -1034,3 +1034,14 @@ test('provider deadline is configurable, bounded, and defaults to five minutes',
   })), /request failed or timed out/);
   assert.ok(Date.now() - started < 3000);
 });
+
+test('POC rejects a write scenario anchored to the neighboring read operation', async () => {
+ const packet=reviewPacket(await fixture()),a=packet.records.find(r=>r.direction!=='control');
+ a.operation='GET /settings';packet.reviewFocus={selectedProfile:{name:'Network caller'}};packet.reviewUnit={primaryInterfaceIds:[a.id]};
+ const value=suggestion(packet);value.connections=[];value.threats[0].scenario='Caller sends PATCH /settings to change a sensitive setting.';
+ assert.throws(()=>validateReview(value,packet),/different HTTP operation/);
+ value.threats[0].scenario='Caller sends GET /settings to read a sensitive setting.';
+ assert.equal(validateReview(value,packet).threats.length,1);
+ packet.reviewUnit.primaryInterfaceIds=[];
+ assert.throws(()=>validateReview(value,packet),/selected primary operation/);
+});

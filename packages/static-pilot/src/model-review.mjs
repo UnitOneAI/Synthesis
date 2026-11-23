@@ -444,6 +444,18 @@ export function validateReview(value, packet) {
       )
         invalid("unknown STRIDE category");
       const evidenceIds = refs(t.interfaceIds, t.evidenceIds);
+      if(packet.reviewFocus?.selectedProfile) {
+        const primary=new Set(packet.reviewUnit?.primaryInterfaceIds || []);
+        if(t.interfaceIds.some(id=>!primary.has(id)))invalid('POC threat must anchor to the selected primary operation');
+        const operations=t.interfaceIds.map(id=>records.get(id).operation);
+        const claims=[t.title,t.scenario,...(Array.isArray(t.analysis?.attackSteps) ? t.analysis.attackSteps : [])].join(' ');
+        const explicit=[...claims.matchAll(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s,;"'()]+)/g)];
+        for(const operation of operations){const anchor=/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)/.exec(operation || '');if(!anchor)continue;
+          const samePath=explicit.filter(m=>m[2].replace(/[.:]+$/,'').endsWith(anchor[2]));
+          if(samePath.length && !samePath.some(m=>m[1]===anchor[1]))invalid('POC scenario describes a different HTTP operation than its cited interface');
+        }
+      }
+
       return {
         ...Object.fromEntries(fields.map((k) => [k, str(t[k])])),
         ...validateAnalysis(t.analysis, packet, str, invalid),

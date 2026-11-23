@@ -91,7 +91,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     if(source.file(ref.repository,ref.path)) availableFiles.set(key,{repository:ref.repository,path:ref.path});
     if(records.some(r => r.repository===ref.repository && r.path===ref.path && r.startLine===Math.max(1,(ref.line || 1)-20)))continue;
     try {
-      const {code,...record}=await source.window(ref);
+      const {code,...record}=await source.functionWindow(ref);
       record.basis=ref.basis;
       const overlap=records.filter(r=>r.repository===record.repository && r.path===record.path && r.blobSha256===record.blobSha256 && r.startLine<=record.endLine+1 && r.endLine>=record.startLine-1);
       const mergedLines=[...new Map([...overlap.flatMap(r=>r.lines),...record.lines].map(l=>[l.line,l])).values()].sort((a,b)=>a.line-b.line);

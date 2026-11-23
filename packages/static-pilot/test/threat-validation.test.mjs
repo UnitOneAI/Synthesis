@@ -219,7 +219,7 @@ test('POC completion assesses every returned scenario, retains counterevidence a
 test('requested initialization survives generic framework context under the byte limit',async t=>{
  const padding='# '+ 'x'.repeat(110)+'\n';
  const files=[['repo0/control.py','ENFORCE_AUTH = True\n'+padding.repeat(200)]];
- for(const name of ['Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])files.push([`repo0/${name}.cs`,`class ${name} { public void Check() {} }\n`+('// '+ 'x'.repeat(110)+'\n').repeat(100)]);
+ for(const name of ['Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])files.push([`repo0/${name}.cs`,`class ${name} {\n public void Check() {\n`+('// '+ 'x'.repeat(110)+'\n').repeat(100)+'}\n}\n']);
  const f=await threatFixture(t,files),{threatInvestigationPacket}=await import('../src/threat-validation.mjs');
  const p=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'config-first',locations:[{repository:'repo0',path:'control.py',line:125}],controls:'',explanation:''},[{repository:'repo0',path:'control.py',line:125}],{},['Inspect the environment configuration initialization at the top of control.py.']);
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.startLine===1),'Generic control candidates must not displace the requested declaration');

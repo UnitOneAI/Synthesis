@@ -72,7 +72,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
   };
   const seedText=[];
   if (original.reviewFocus?.selectedProfile) for (const ref of packet.records.flatMap(r=>r.evidence).slice(0,8)) {
-    try {seedText.push((await source.window(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
+    try {seedText.push((await source.functionWindow(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
   }
   const controlLookup = original.reviewFocus?.selectedProfile ? await controlContext(source, packet.records.flatMap(r=>r.evidence), seedText.join('\n')) : null;
   if (controlLookup) packet.sourceContext.controlLookup = {searches:controlLookup.searches,omitted:controlLookup.omitted,basis:controlLookup.basis};
@@ -99,7 +99,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
       )
         continue;
       if (records.length >= 16) throw Error("source-context-window-limit");
-      const w = await source.window({
+      const w = await (original.reviewFocus?.selectedProfile ? source.functionWindow.bind(source) : source.window.bind(source))({
         ...ref,
         line,
       });

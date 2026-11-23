@@ -219,3 +219,16 @@ test("versioned standards preserve the old baseline and never turn missing asses
     /unknown or duplicated/,
   );
 });
+
+test('POC source uses the parsed handler range, excluding a neighboring write handler',async t=>{
+ const {root,manifest}=await fixture(t);
+ await fs.writeFile(path.join(root,'service','app.py'),"from flask import Flask\napp=Flask(__name__)\n@app.get('/settings')\ndef read_settings():\n    return read_config()\n\n@app.patch('/settings')\ndef write_settings():\n"+'    # padding\n'.repeat(85)+"    persist_config()\n");
+ const model=await analyze(manifest,{sourceRoot:root});const source=await verifiedStrideSource(model,manifest,root);
+ const read=await source.functionWindow({repository:'service',path:'app.py',line:3});
+ assert.equal(read.startLine,3);assert.equal(read.endLine,5);assert.match(read.code,/read_config/);assert.doesNotMatch(read.code,/persist_config|patch/);
+ const write=await source.functionWindow({repository:'service',path:'app.py',line:7});
+ assert.match(write.code,/persist_config/);assert.equal(write.functionContext.complete,true);assert.doesNotMatch(write.code,/read_config/);
+ assert.equal(write.lines.length,write.endLine-write.startLine+1);assert.ok(write.lines.length<=200);
+ await fs.appendFile(path.join(root,'service','app.py'),'# changed\n');
+ await assert.rejects(()=>source.functionWindow({repository:'service',path:'app.py',line:7}),/source-hash-mismatch/);
+});

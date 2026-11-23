@@ -33,7 +33,7 @@ export function pocReviewPlan(model, excerpts = new Map()) {
   const covered = new Set(plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds));
   if (poc.interfaceIds.some(id=>!covered.has(id))) throw Error('POC has an operation that cannot fit a review packet; narrow the scope before running');
   plan.scope.poc = poc;
-  plan.scope.version += ':poc-1';
+  plan.scope.version += ':poc-2';
   plan.semantics = 'Selected inbound operations and directly supplied controls only. Other repositories remain available for evidence retrieval, not full review.';
   return plan;
 }
