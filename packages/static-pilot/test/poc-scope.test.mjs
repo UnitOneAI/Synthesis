@@ -177,3 +177,13 @@ test('repository native schema is reusable and failed category validation trigge
  assert.equal(REPOSITORY_SCHEMA.properties.connections,undefined);
  try{validateRepositoryReview({},packet);assert.fail('Must reject invalid response');}catch(error){assert.equal(failureDetail(error.message).code,'evidence-validation');}
 });
+test('repository matrix distinguishes untouched, partially assessed and reviewed-with-gaps',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Selected app',profile:'Static',repositories:['app']};
+ const config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'}),source=await verifiedStrideSource(f.model,f.manifest,f.root);
+ const fetchImpl=async(url,options)=>{const packet=JSON.parse(JSON.parse(options.body).messages[0].content),response=categoryResponse(packet);response.categoryReviews.forEach(c=>{c.status='evidence-gap';c.missingEvidence=['Named downstream binding is not supplied.'];});return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(response)}],usage:{input_tokens:2,output_tokens:2}});};
+ await enrichGraphModel(f.model,config,new Map(),fetchImpl,{reviewScope:'poc',runUntilComplete:true,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
+ assert.equal(systemModel(f.model).analysisStatus.state,'reviewed-with-gaps');
+ assert.ok(systemModel(f.model).matrix.flatMap(r=>r.cells).some(c=>c.analysisStatus==='evidence-gap'));
+ f.model.aiReview.batches=[];f.model.aiReview.coverage={...f.model.aiReview.coverage,completedBatches:0};
+ const cells=systemModel(f.model).matrix.flatMap(r=>r.cells);assert.ok(cells.some(c=>c.analysisStatus==='not-analyzed'));assert.ok(cells.every(c=>c.analysisStatus!=='partially-analyzed'));
+});

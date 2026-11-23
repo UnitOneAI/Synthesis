@@ -185,7 +185,7 @@ export function addReviewPresentation(s, model) {
     total: coverage?.totalBatches || 0,
   };
   s.repositoryAssessment = repositoryAssessmentSummary(review);
-  if(s.repositoryAssessment && !s.repositoryAssessment.stale && s.analysisStatus.state==='analyzed' && !s.repositoryAssessment.complete) s.analysisStatus.state='partially-analyzed';
+  if(s.repositoryAssessment && !s.repositoryAssessment.stale && s.analysisStatus.state==='analyzed' && !s.repositoryAssessment.complete) s.analysisStatus.state='reviewed-with-gaps';
   const failed = new Set(
     (review?.batches || [])
       .filter((b) => b.status === "failed")
@@ -218,7 +218,7 @@ export function addReviewPresentation(s, model) {
         const selected=row.interfaceIds.filter(id=>primaryScope.has(id));
         const assessments=[...new Set(selected.flatMap(id=>categoryIndex.get(JSON.stringify([cell.category,id]))||[]))];
         const accounted=new Set(assessments.flatMap(c=>c.interfaceIds));
-        cell.analysisStatus=!selected.length?'outside-scope':selected.some(id=>!accounted.has(id))?'partially-analyzed':assessments.some(c=>c.status==='evidence-gap')?'evidence-gap':assessments.some(c=>c.status==='supported-conditional')?'scenarios-identified':assessments.every(c=>c.status==='ruled-out')?'ruled-out':'analyzed-no-scenario';
+        cell.analysisStatus=!selected.length?'outside-scope':!selected.some(id=>accounted.has(id))?(hasFailed?'failed':'not-analyzed'):selected.some(id=>!accounted.has(id))?'partially-analyzed':assessments.some(c=>c.status==='evidence-gap')?'evidence-gap':assessments.some(c=>c.status==='supported-conditional')?'scenarios-identified':assessments.every(c=>c.status==='ruled-out')?'ruled-out':'analyzed-no-scenario';
       }
       cell.analysisLabel = {
         'outside-scope':'Supporting context — outside primary scope',
