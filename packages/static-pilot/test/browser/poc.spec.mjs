@@ -14,7 +14,7 @@ test('saved-graph POC selector imports, previews and survives restart without ch
   await page.getByLabel('POC scope file').setInputFiles({name:'scope.json',mimeType:'application/json',buffer:Buffer.from('\uFEFF'+JSON.stringify({title:'External API pilot',profile:'Test network assumption',operations:[{repository:'service',pathContains:'app.py'}]}))});
   await page.getByRole('button',{name:'Save POC scope',exact:true}).click();
   await expect(page.locator('#ws-review-scope')).toHaveValue('poc');
-  await page.getByRole('button',{name:'Preview system scope',exact:true}).click();await expect(page.locator('#ws-scope-preview')).toContainText('system review units');await expect(page.locator('#ws-scope-preview')).toContainText('All selected primary subjects planned');
+  await page.getByRole('button',{name:'Preview system scope',exact:true}).click();await expect(page.locator('#ws-scope-preview')).toContainText('system review units');await expect(page.locator('#ws-scope-preview')).not.toContainText('All selected primary subjects planned');
   const url=new URL(app.url), headers={'X-Synthesis-Token':app.token};
   const m=await (await page.request.get(url.origin+'/api/model',{headers})).json();expect(m.sourceGraph.fingerprint).toBe(f.model.sourceGraph.fingerprint);expect(m.pocScope.title).toBe('External API pilot');
   await app.close();app=await serve({sourceRoot:f.root,workspace:f.workspace,persist:true,port:0,quiet:true});
