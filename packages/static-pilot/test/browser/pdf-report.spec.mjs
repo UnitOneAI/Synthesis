@@ -337,3 +337,50 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
     await fs.rm(f.dir, { recursive: true, force: true });
   }
 });
+
+test("access filter carries from registers and matrix into partial PDF with mixed and unknown choices", async ({page,context}) => {
+  const {GUIDANCE_HASH}=await import('../../src/analysis-guidance.mjs');
+  const {SYSTEM_PROMPT}=await import('../../src/model-review.mjs');
+  const {sha}=await import('../../src/sources.mjs');
+  const f=await reportFixture();
+  let app;
+  try {
+    const iface=f.model.interfaces[0], evidence=iface.evidence;
+    f.model.aiReview={status:'partial',promptHash:sha(SYSTEM_PROMPT),guidance:{hash:GUIDANCE_HASH},basedOnRevision:f.model.modelRevision,
+      coverage:{completedBatches:1,totalBatches:4,pendingBatches:3,failedBatches:0,reviewedInterfaceIds:[iface.id]},
+      threats:['External attacker','Internal operator','External attacker or insider','API caller'].map((actor,n)=>({
+        id:'filter-'+n,title:['External result','Internal result','Mixed result','Unresolved result'][n],
+        category:'Tampering',actor,startingAccess:'Conditional access',asset:'Resource',scenario:'Conditional change',
+        prerequisites:'Control absent',controls:'Check enforcement',mitigation:'Enforce permissions',interfaceIds:[iface.id],evidenceIds:evidence
+      })),questions:[],connections:[],batches:[]};
+    const store=await workspaceStore(f.root,f.workspace);
+    await store.save({manifest:f.manifest,model:f.model});await store.close();
+    app=await serve({sourceRoot:f.root,workspace:f.workspace,persist:true,port:0,quiet:true});
+    await page.goto(app.url);
+    await page.getByRole('button',{name:'Open saved graph',exact:true}).click();
+    await page.getByRole('button',{name:'4 · STRIDE matrix',exact:true}).click();
+    await page.getByLabel('Actor access',{exact:true}).selectOption('external');
+    await page.getByLabel('Include unresolved access',{exact:true}).uncheck();
+    await expect(page.locator('.ws-priority-panel')).not.toContainText('Internal result');
+    await expect(page.locator('.ws-priority-panel')).not.toContainText('Unresolved result');
+    await expect(page.locator('.ws-priority-panel')).toContainText('Mixed result');
+    const popupPromise=context.waitForEvent('page');
+    await page.getByRole('button',{name:'Export STRIDE review · PDF',exact:true}).click();
+    const popup=await popupPromise;
+    await expect(popup.locator('#report-status')).toContainText('Report ready');
+    await expect(popup.locator('#report-content')).toContainText('External result');
+    await expect(popup.locator('#report-content')).toContainText('Mixed result');
+    await expect(popup.locator('#report-content')).not.toContainText('Internal result');
+    await expect(popup.locator('#report-content')).not.toContainText('Unresolved result');
+    await expect(popup.locator('#report-content')).toContainText('1 / 4 STRIDE packets');
+    await popup.close();
+    await page.locator('.ws-tabs').getByRole('button',{name:'Threat actors',exact:true}).click();
+    await expect(page.getByLabel('Actor access',{exact:true})).toHaveValue('external');
+    await expect(page.locator('.ws-records')).not.toContainText('Internal operator');
+    await page.getByLabel('Include unresolved access',{exact:true}).check();
+    await expect(page.locator('.ws-records')).toContainText('API caller');
+    await page.locator('.ws-tabs').getByRole('button',{name:'Threat register',exact:true}).click();
+    await expect(page.locator('.ws-records')).not.toContainText('Internal result');
+    await expect(page.locator('.ws-records')).toContainText('Unresolved result');
+  } finally {await page.goto('about:blank');await app?.close();await fs.rm(f.dir,{recursive:true,force:true});}
+});

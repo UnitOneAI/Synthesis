@@ -11,7 +11,10 @@
     )
       throw Error("Open the report from the Synthesis workspace.");
     const response = await fetch(
-      "/api/export?" + new URLSearchParams({ format }),
+      "/api/export?" + new URLSearchParams({ format,
+        accessScope: params.get('accessScope') || 'all',
+        includeUnresolved: params.get('includeUnresolved') || 'true',
+      }),
       { headers: { "X-Synthesis-Token": key } },
     );
     if (!response.ok) throw Error((await response.json()).error);

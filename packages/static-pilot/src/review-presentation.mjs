@@ -1,3 +1,4 @@
+import {actorAccess, threatAccess} from './threat-access.mjs';
 import { threatAssessment } from './threat-validation-state.mjs';
 import { sourceScope } from "./architecture.mjs";
 
@@ -16,6 +17,9 @@ export function addReviewPresentation(s, model) {
     for (const r of s[kind])
       r.reference = `${prefix}-${(counts.get(r.id.slice(0, 8).toUpperCase()) > 1 ? r.id : r.id.slice(0, 8)).toUpperCase()}`;
   }
+  for (const a of s.actors || []) a.access = actorAccess(a);
+  const actors = new Map((s.actors || []).map(a => [a.id, a]));
+  for (const t of s.threats) t.access = threatAccess(t, actors);
   const evidence = new Map(model.evidence.map((e) => [e.id, e]));
   const interfaces = new Map((model.interfaces || []).map((i) => [i.id, i]));
   const nodes = new Map([...s.components, ...s.entities].map((n) => [n.id, n]));

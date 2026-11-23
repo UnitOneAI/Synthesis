@@ -1690,7 +1690,10 @@ export async function serve({
         if (format === "threat-print-html")
           return send(
             200,
-            systemPrintReport(model),
+            systemPrintReport(model, {
+              accessScope: url.searchParams.get('accessScope') || 'all',
+              includeUnresolved: url.searchParams.get('includeUnresolved') !== 'false',
+            }),
             "text/html; charset=utf-8",
           );
         if (format === "html")

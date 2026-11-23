@@ -859,6 +859,7 @@ async function download(format, preview = false, options = {}) {
     window.open(
       "/print-report.html#" +
         new URLSearchParams({
+          ...options,
           token,
           format: format === "pdf" ? "threat-print-html" : "cwe-evidence-html",
         }),

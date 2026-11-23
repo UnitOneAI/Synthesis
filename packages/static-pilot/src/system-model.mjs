@@ -864,6 +864,9 @@ export function editSystem(model, input) {
       );
     } else if (input.action === "upsert") {
       const r = input.record;
+      if (r?.accessClassification !== undefined &&
+          (input.kind !== 'actors' || !['external', 'internal', 'mixed', 'unresolved'].includes(r.accessClassification)))
+        throw Error('Invalid actor access classification');
       if (!r || typeof r !== "object" || Array.isArray(r))
         throw Error("Invalid record");
       const allowed = [
@@ -888,6 +891,7 @@ export function editSystem(model, input) {
         "memberIds",
         "parentId",
         "startingAccess",
+        "accessClassification",
         "objectives",
         "excludedCapabilities",
         "entryIds",
