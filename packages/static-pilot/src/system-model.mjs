@@ -523,6 +523,7 @@ export function systemModel(model, { matrix = true } = {}) {
   result.revision = fingerprint([
     model.modelRevision,
     w,
+    model.sourceConclusions,
     model.aiReview?.responseHash,
     model.aiReview?.status,
     model.deploymentContext,
@@ -747,8 +748,31 @@ export function editSystem(model, input) {
   const current = systemModel(model);
   if (input.revision !== current.revision)
     throw Error("System model changed; refresh before saving");
-  const next = structuredClone(model),
-    w = (next.architecture ||= empty());
+  const next = structuredClone(model);
+  if (input.action === "source-conclusion") {
+    const threat = current.threats.find(t => t.id === input.subjectId && t.origin === "analysis");
+    const evidence = threat?.validation?.evidence || [];
+    if (!evidence.length || threat.reviewState === "stale") throw Error("Current source evidence required");
+    if (!["conditional", "open"].includes(input.status)) throw Error("Invalid conclusion");
+    const { statement, condition, nextAction, reviewer } = input;
+    if (![statement, condition, nextAction, reviewer].every(v => typeof v === "string" && v.trim()))
+      throw Error("Conclusion, condition, next action and reviewer are required");
+    const ids = input.evidenceIds;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 24) throw Error("Select supporting source windows");
+    const citations = uniq(ids).map(id => {
+      const record = evidence.find(e => e.id === id);
+      if (!record?.blobSha256) throw Error("Unknown source window");
+      const { repository, path, blobSha256, startLine, endLine } = record;
+      return { repository, path, blobSha256, startLine, endLine };
+    });
+    (next.sourceConclusions ||= {})[threat.id] = {
+      status: input.status, statement: clean(statement), condition: clean(condition),
+      nextAction: clean(nextAction), reviewer: clean(reviewer), citations,
+      contextKey: threat.validation.contextKey, issueHash: threat.validation.issueHash,
+    };
+    return next;
+  }
+  const w = (next.architecture ||= empty());
   if (input.action === "decision") {
     const item =
       lists.flatMap((k) => current[k]).find((r) => r.id === input.subjectId) ||

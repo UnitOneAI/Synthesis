@@ -10,7 +10,7 @@ import { sha } from '../src/sources.mjs';
 import { SYSTEM_PROMPT, modelConfig } from '../src/model-review.mjs';
 import { reviewThreatScenarios } from '../src/threat-validation.mjs';
 import { threatAssessment } from '../src/threat-validation-state.mjs';
-import { systemModel } from '../src/system-model.mjs';
+import { editSystem, systemModel } from '../src/system-model.mjs';
 import { systemPrintReport } from '../src/system-exports.mjs';
 import { workspaceStore } from '../src/workspace-store.mjs';
 import { serve } from '../src/server.mjs';
@@ -155,4 +155,23 @@ test('failed response retains the requested control context for a bounded retry'
  }});
  const e=f.model.threatValidation.entries[0];assert.equal(e.assessment,'failed');assert.deepEqual(e.missingEvidence,['Inspect SecondGuard']);
  assert.equal(f.model.threatValidation.assessmentCounts.failed,1);assert.equal(calls,3);
+});
+
+test('cited conclusions retain independent assessments and STRIDE coverage, reject invented evidence and expire on claim changes', async t => {
+  const {model, manifest, root} = await threatFixture(t);
+  const id = model.aiReview.threats[0].id;
+  await reviewThreatScenarios(manifest, model, {sourceRoot: root, config, budget: 1, threatIds: [id],
+    fetchImpl: async (_, request) => answer(JSON.parse(JSON.parse(request.body).messages[0].content))});
+  const current = systemModel(model);
+  const evidence = current.threats.find(t => t.id === id).validation.evidence;
+  const input = {action: 'source-conclusion', revision: current.revision, subjectId: id, status: 'open',
+    statement: 'Caller binding requires review', condition: 'Caller is unknown', nextAction: 'Inspect binding',
+    reviewer: 'Fixture reviewer', evidenceIds: [evidence[0].id]};
+  assert.throws(() => editSystem(model, {...input, evidenceIds: ['unknown']}), /Unknown source window/);
+  const next = editSystem(model, input);
+  assert.deepEqual(next.aiReview, model.aiReview);
+  assert.deepEqual(next.threatValidation, model.threatValidation);
+  assert.match(systemPrintReport(next), /Caller binding requires review/);
+  next.aiReview.threats[0].scenario = 'Changed claim';
+  assert.doesNotMatch(systemPrintReport(next), /Caller binding requires review/);
 });

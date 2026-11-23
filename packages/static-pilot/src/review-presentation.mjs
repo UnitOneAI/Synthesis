@@ -105,6 +105,19 @@ export function addReviewPresentation(s, model) {
     t.validation = threatAssessment(model, t.id);
     if (t.validation.assessment === 'ruled-out') { rank = 5; label = 'Counterevidence found'; reasons.unshift('A separate source assessment found a control that rules out this stated path; reviewer confirmation is still required.'); }
     else if (t.validation.assessment === 'static-supported' && rank < 4) { rank = Math.min(rank, 1); label = 'Source-supported concern'; reasons.unshift('Separate assessment cites input and sink evidence; deployed exploitability remains unverified.'); }
+    const conclusion = model.sourceConclusions?.[t.id];
+    if (conclusion?.issueHash && conclusion.issueHash === t.validation.issueHash &&
+        conclusion.contextKey === t.validation.contextKey &&
+        conclusion.citations.every(c => t.validation.evidence?.some(r =>
+          r.repository === c.repository && r.path === c.path && r.blobSha256 === c.blobSha256 &&
+          r.startLine <= c.startLine && r.endLine >= c.endLine)) && t.reviewState !== "stale") {
+      t.sourceConclusion = conclusion;
+      if (conclusion.status === "conditional") {
+        rank = 0;
+        label = "Conditional threat with cited evidence";
+        reasons.unshift(conclusion.statement);
+      }
+    }
     t.reviewPriority = {
       rank,
       label,

@@ -521,6 +521,7 @@ export async function serve({
                 "Source or analysis methodology changed; prior analysis retained for reference and requires a new review.";
             }
           }
+          if (model?.sourceConclusions) m.model.sourceConclusions = structuredClone(model.sourceConclusions);
           if (model?.deploymentContext) m.model.deploymentContext = structuredClone(model.deploymentContext);
           if (model?.architecture) {
             m.model.architecture = structuredClone(model.architecture);
@@ -575,6 +576,7 @@ export async function serve({
               m.model.usageLedger,
               !model?.usageLedger && Boolean(model?.aiReview),
             );
+          if (model?.sourceConclusions) m.model.sourceConclusions = structuredClone(model.sourceConclusions);
           if (mode !== "review" && model?.deploymentContext) m.model.deploymentContext = structuredClone(model.deploymentContext);
           if (mode !== "review" && model?.architecture) {
             m.model.architecture = structuredClone(model.architecture);
