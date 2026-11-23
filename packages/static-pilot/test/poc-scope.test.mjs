@@ -84,3 +84,13 @@ test('scope changes create separate saved review identities and unmatched scopes
  assert.equal(plan.scope.poc.operationGroups,2);
  assert.equal(plan.batches.length,2,'Distinct operation definitions retain separate review allowances');
 });
+
+test('control lookup follows private helpers and acronym-prefixed response types',async()=>{
+ const names=['_settings_to_model','_tier_to_out','LLMSettingsResponse','XMLReader','API_KEYS'];
+ const found=controlSymbols('Inspect '+names.join(' and '));
+ for(const name of names)assert.ok(found.includes(name),name);
+ assert.ok(!controlSymbols('Inspect ordinary words for missing evidence').includes('Inspect'));
+ const source={search:s=>({items:names.includes(s)?[{id:s,kind:'function',name:s,repository:'service',path:s+'.py',line:10}]:[],next:null})};
+ const result=await controlContext(source,[{repository:'service',path:'routes.py'}],names.join(' '));
+ for(const name of names)assert.ok(result.references.some(r=>r.path===name+'.py'),name);
+});

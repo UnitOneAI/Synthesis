@@ -2,7 +2,9 @@
 const caches = new WeakMap();
 export function controlSymbols(text) {
   const value = String(text);
-  const named = value.match(/\b(?:[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+|[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*)\b/g) || [];
+  const identifiers = value.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) || [];
+  // Private helpers and acronym-prefixed types carry control/serialization logic too.
+  const named = identifiers.filter(n => /[A-Za-z0-9]_[A-Za-z0-9]|^_[A-Za-z]|[a-z][A-Z]|[A-Z]{2,}[a-z]/.test(n));
   const attributes = [...value.matchAll(/\[\s*([A-Za-z_]\w*)/g)].map(m=>m[1]);
   const framework = ['Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','Configure','ConfigureServices','Authentication','Authorization','Depends'].filter(n=>new RegExp('\\b'+n+'\\b').test(value));
   named.sort((a,b)=>Number(/auth|key|policy|permission|access|guard|filter|principal/i.test(b))-Number(/auth|key|policy|permission|access|guard|filter|principal/i.test(a)));
