@@ -151,7 +151,10 @@ export function redact(value) {
     )
     .replace(
       /^.*(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization|connectionstring|connection_string|accountkey|clientsecret)\s*["']?\s*[:=].*$/gim,
-      "[sensitive assignment omitted]",
+      // Preserve a narrowly recognized dependency-injection signature. No
+      // literals or function body are permitted by this exception.
+      (line) => /^\s*(?:async\s+)?def\s+\w+\(\w+:\s*(?:Optional\[str\]|str)\s*=\s*(?:Security|Depends)\(\w+\)\)\s*(?:->\s*\w+\s*)?:\s*$/.test(line)
+        ? line : "[sensitive assignment omitted]",
     )
     .replace(
       /\b(?:sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9_]+|github_pat_[a-zA-Z0-9_]+|AIza[a-zA-Z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g,

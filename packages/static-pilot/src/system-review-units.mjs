@@ -6,14 +6,14 @@ import { deploymentContext, contextForInterfaces } from './deployment-context.mj
 import { interfacePriorities, batchStage } from './review-order.mjs';
 
 export const SYSTEM_REVIEW_VERSION = 'system-review-3';
-export function systemReviewPlan(model, excerpts = new Map()) {
+export function systemReviewPlan(model, excerpts = new Map(), selection = null) {
   const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
   const context = deploymentContext(model, system);
   const evidence = new Map(model.evidence.map(e => [e.id, e]));
   const byId = new Map(model.interfaces.map(i => [i.id, i]));
   const production = i => i.evidence.some(e => sourceScope(evidence.get(e)?.path || '') === 'production-candidate');
   const eligible = i => production(i) && (['inbound', 'outbound', 'resource'].includes(i.direction) && i.kind !== 'connection-config' || ['worker', 'store-use', 'external-use', 'execution-identity', 'entrypoint', 'process'].includes(i.connection?.role));
-  const primary = new Set(model.interfaces.filter(eligible).map(i => i.id));
+  const primary = new Set(selection ? selection.interfaceIds : model.interfaces.filter(eligible).map(i => i.id));
   const controls = new Map();
   for (const i of model.interfaces) if (production(i) && (i.kind === 'control' || i.kind === 'connection-config' || ['host-binding', 'proxy-target', 'execution-identity'].includes(i.connection?.role))) {
     if (!controls.has(i.component)) controls.set(i.component, []);
@@ -52,6 +52,8 @@ export function systemReviewPlan(model, excerpts = new Map()) {
       { ...system, flows: contextFlows }, undefined, [...requiredIds],
     );
     packet.deploymentContext = contextForInterfaces(context, interfaces.map(i => i.id));
+    if (selection) packet.reviewFocus.qualityRules = 'Investigate the current operation, not a hypothetical future change. A static 404 with no data operation is not an authorization bypass. Dependencies without a specific advisory or source-supported attack path are inventory obligations, not vulnerability scenarios. Resolve applicable global, inherited and route-specific controls from sourceContext; name exact missing implementations as questions. Do not infer absence from omitted controls. Assess spoofing, tampering, repudiation, disclosure, availability and privilege separately; no finding is required in every category.';
+    if (selection) packet.reviewFocus.selectedProfile = {name:selection.profile,basis:'analysis assumption; not deployment verification'};
     packet.reviewFocus.responseContract = 'Return concise actionable scenarios. Anchor each threat to exactly ONE interfaceId and one or more evidenceIds owned by that interface, copied from the evidenceOwnership table. Do not add evidence from other interfaces to threat.evidenceIds: supporting controls belong in analysis.controlEvidenceIds when supplied and relevant; other path context belongs in narrative with explicit uncertainty. This anchor does not prove the entire connected path. Return connections as [] because static connections are already supplied. Assess all six STRIDE categories; do not invent a scenario to fill a category. Return at most six distinct scenarios and preserve missing evidence as questions.';
     packet.reviewFocus.evidenceOwnership = packet.records.map(r => ({ interfaceId: r.id, evidenceIds: r.evidence.map(e => e.id) }));
     packet.reviewUnit = { flowIds: flows.map(f => f.id), primaryInterfaceIds: members.map(i => i.id), omittedRelatedControls: Math.max(0, related.length - selectedControls.length) };
@@ -60,7 +62,7 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     if (members.length > 8 || packet.records.length !== interfaces.length || Buffer.byteLength(JSON.stringify(packet)) > 72 * 1024) {
       if (flows.length > 1) {
         const midpoint = Math.ceil(flows.length / 2);
-        for (const half of [flows.slice(0, midpoint), flows.slice(midpoint)]) add(half.flatMap(f => f.interfaceIds.map(i => byId.get(i)).filter(Boolean)), half, label);
+        for (const half of [flows.slice(0, midpoint), flows.slice(midpoint)]) add(half.flatMap(f => f.interfaceIds.filter(i => !selection || primary.has(i)).map(i => byId.get(i)).filter(Boolean)), half, label);
       } else if (!flows.length && members.length > 1) {
         const midpoint = Math.ceil(members.length / 2);
         add(members.slice(0, midpoint), [], label); add(members.slice(midpoint), [], label);
@@ -81,7 +83,7 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     for (const i of members) obligations.push({ id: id('system-interface-obligation', i.id), kind: 'system-interface', subject: i.id, interfaceIds: [i.id], batchIds: [batch.id] });
   };
   for (const flow of system.flows) {
-    const ids = (flow.interfaceIds || []).filter(i => byId.has(i));
+    const ids = (flow.interfaceIds || []).filter(i => byId.has(i) && (!selection || primary.has(i)));
     if (!ids.some(i => primary.has(i))) continue;
     if (!ids.every(i => production(byId.get(i)))) { gaps.push({ reason: 'mixed-production-supporting-flow', flowId: flow.id }); continue; }
     const key = JSON.stringify([flow.source, flow.target, flow.protocol, flow.callerIdentity, flow.calleeIdentity, flow.authorization, flow.transport, flow.controlIds]);
@@ -91,7 +93,22 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     for (let at = 0; at < ids.length; at += 8)
       flowGroups.get(key).push({ ...flow, interfaceIds: ids.slice(at, at + 8) });
   }
-  for (const flows of flowGroups.values()) for (let at = 0; at < flows.length; at += 4) {
+  // For a POC, operations are primary review subjects. Supply their incident
+  // flows together instead of reviewing the same handler once for every flow.
+  if (selection) {
+    const groups = new Map();
+    for (const i of model.interfaces.filter(i => primary.has(i.id))) {
+      if (!groups.has(i.component)) groups.set(i.component, []);
+      groups.get(i.component).push(i);
+    }
+    for (const group of groups.values()) for (let at = 0; at < group.length; at += 8) {
+      const members = group.slice(at, at + 8), ids = new Set(members.map(i => i.id));
+      const flows = system.flows.filter(f => f.interfaceIds?.some(i => ids.has(i)))
+        .map(f => ({...f, interfaceIds:f.interfaceIds.filter(i => ids.has(i))}));
+      add(members, flows, `${indexes.components.get(members[0].component)?.name || members[0].repository} · selected operations`);
+    }
+  }
+  for (const flows of selection ? [] : flowGroups.values()) for (let at = 0; at < flows.length; at += 4) {
     const selected = flows.slice(at, at + 4);
     const names = [...system.components, ...system.entities];
     const label = `${names.find(n => n.id === selected[0].source)?.name || 'Caller'} → ${names.find(n => n.id === selected[0].target)?.name || 'Resource'}`;
@@ -106,7 +123,7 @@ export function systemReviewPlan(model, excerpts = new Map()) {
   for (const group of remaining.values()) for (let at = 0; at < group.length; at += 8) add(group.slice(at, at + 8), [], `${indexes.components.get(group[0].component)?.name || group[0].repository} · ${group[0].kind}`);
   // Controls/configuration omitted from initial contexts receive explicit supporting units.
   const included = new Set(batches.flatMap(b => b.packet.records.map(r => r.id)));
-  for (const group of controls.values()) {
+  for (const group of selection ? [] : controls.values()) {
     const missing = group.filter(i => !included.has(i.id));
     for (let at = 0; at < missing.length; at += 8) add(missing.slice(at, at + 8), [], `${missing[at].repository} · configuration and controls`);
   }

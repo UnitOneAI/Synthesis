@@ -1,3 +1,4 @@
+import {controlContext} from './control-context.mjs';
 import { InvestigationSource } from "./investigation-source.mjs";
 import { localSource, sha } from "./sources.mjs";
 import {
@@ -69,9 +70,16 @@ export async function prepareStrideEvidence(original, source, options = {}) {
     graphDetails:
       "Retrieved on demand from the saved graph; per-interface neighborhoods omitted",
   };
+  const seedText=[];
+  if (original.reviewFocus?.selectedProfile) for (const ref of packet.records.flatMap(r=>r.evidence).slice(0,8)) {
+    try {seedText.push((await source.window(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
+  }
+  const controlLookup = original.reviewFocus?.selectedProfile ? await controlContext(source, packet.records.flatMap(r=>r.evidence), seedText.join('\n')) : null;
+  if (controlLookup) packet.sourceContext.controlLookup = {searches:controlLookup.searches,omitted:controlLookup.omitted,basis:controlLookup.basis};
   const refs = [
     ...(options.references || []),
     ...packet.records.flatMap((r) => r.evidence),
+    ...(controlLookup?.references || []),
   ];
   for (const ref of refs) {
     const key = `${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`;
@@ -180,6 +188,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
     packet,
     context: {
       version: STRIDE_EVIDENCE_VERSION,
+      controlLookup: packet.sourceContext.controlLookup || null,
       records: records.map(evidenceMetadata),
       gaps,
       fingerprint: sha(JSON.stringify([records.map((r) => r.id), gaps])),

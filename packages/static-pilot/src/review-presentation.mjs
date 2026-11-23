@@ -106,6 +106,12 @@ export function addReviewPresentation(s, model) {
           : "Assess the stated impact and prerequisites against effective controls.",
       );
     } else reasons.push("No usable source citations establish applicability.");
+    const argument = [t.name,t.scenario,t.analysis?.impact,t.prerequisites,t.controls].join(' ');
+    t.followUpKind = /if (?:the )?(?:fallback |handler |code )?(?:handler )?(?:were |is )?(?:modified|changed)|would need to be changed|future (?:code )?change/i.test(argument)
+      ? 'Change-regression / hardening'
+      : refs.some(r=>/(?:package-lock|yarn.lock|packages.lock|package.json)/i.test(r.path)) && /known.vulnerab|outdated|supply.chain|dependency/i.test(t.name) && !/CVE-\d{4}-\d+/i.test(argument)
+        ? 'Dependency / build review obligation' : null;
+    if (t.followUpKind && !severity) {rank=4;label=t.followUpKind;reasons.push('Preserved follow-up; not a demonstrated current exploitable path.');}
     t.validation = threatAssessment(model, t.id);
     if (t.validation.assessment === 'ruled-out') { rank = 5; label = 'Counterevidence found'; reasons.unshift('A separate source assessment found a control that rules out this stated path; reviewer confirmation is still required.'); }
     else if (t.validation.assessment === 'static-supported' && rank < 4) { rank = Math.min(rank, 1); label = 'Source-supported concern'; reasons.unshift('Separate assessment cites input and sink evidence; deployed exploitability remains unverified.'); }

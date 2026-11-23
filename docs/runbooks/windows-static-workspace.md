@@ -521,3 +521,11 @@ In **STRIDE matrix**, **Threat register** or **Threat actors**, choose **Actor a
 The selection carries across these three views. **Export STRIDE review · PDF** uses the same access filter and includes linked actor and trust-boundary records. The export states its filter and retains full-review packet coverage. The DFD provides full system context. Other searches, category and disposition filters apply only on screen; CSV, complete HTML and JSON exports retain the full review scope.
 
 Classification comes from explicit actor descriptions or an **Edit record → Actor access classification** declaration. A network endpoint or authenticated caller alone leaves access unresolved. Classification describes a modeling assumption, not verified deployment exposure. Changing an actor declaration follows the existing architecture-edit review invalidation rules.
+
+## Smaller POC on an existing graph
+
+Keep the repository selection and saved graph unchanged. In **STRIDE matrix**, expand **Scoped POC**, import the operation-selector JSON described in [Scoped static POC](../scoped-static-poc.md), and choose **Save POC scope**. Set **Review scope → Scoped POC** and select **Preview system scope**. Empty or over-broad selectors stop with an error; narrow paths or add `operationContains` rather than treating an incomplete match as covered.
+
+Enable source excerpts in Sources, choose up to four workers and **Run until complete**, then start STRIDE. After the selected packets complete, the POC automatically assesses saved scenarios against code and shared controls. This assessment is currently serial and bounded to three rounds per scenario; STRIDE requests use the chosen worker count. Keep the process running. A provider 403 requires gateway access correction before resuming; retrying unchanged credentials is not a completion strategy.
+
+Use the **POC code conclusions** panel to distinguish supported, ruled-out, needs-context, failed and unassessed scenarios. Packet completion alone is not completed evidence assessment. Export the partial PDF at any checkpoint. The External display filter remains separate from this operation scope.

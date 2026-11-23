@@ -118,6 +118,10 @@ test("metadata packets are bounded, balanced across repositories, and omit sourc
   );
 });
 test("transient source excerpts redact common credentials and preserve bounded context", () => {
+  const signature = 'async def verify_admin_key(api_key: Optional[str] = Security(api_key_header)) -> bool:';
+  assert.equal(redact(signature), signature);
+  assert.ok(!redact('def verify(api_key: str = "secret-literal"):').includes('secret-literal'));
+  assert.ok(!redact(signature + ' password = "secret-literal"').includes('secret-literal'));
   const excerpts = new Map();
   collectExcerpts(
     { evidence: [{ id: "e", path: "code.cs", line: 4 }] },

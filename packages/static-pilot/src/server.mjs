@@ -1,3 +1,4 @@
+import {resolvePocScope,pocReviewPlan} from './poc-scope.mjs';
 import { reviewThreatScenarios } from './threat-validation.mjs';
 import { deploymentContext, updateDeploymentContext } from './deployment-context.mjs';
 import { systemReviewPlan } from './system-review-units.mjs';
@@ -560,6 +561,7 @@ export async function serve({
           model.aiReview = m.aiReview;
           model.usageLedger = m.usageLedger;
           if (m.savedStrideScopes) model.savedStrideScopes = m.savedStrideScopes;
+          if (m.threatValidation) model.threatValidation = m.threatValidation;
           await checkpoint();
           if (worker === active)
             active.postMessage({
@@ -594,6 +596,7 @@ export async function serve({
           job = {
             status: "ready",
             message:
+              model.aiReview?.scope?.poc && model.threatValidation ? `POC packets: ${model.aiReview.coverage.completedBatches}/${model.aiReview.coverage.totalBatches}. Code assessment: ${model.threatValidation.assessmentCounts?.sourceSupported || 0} supported, ${model.threatValidation.assessmentCounts?.ruledOut || 0} ruled out, ${model.threatValidation.assessmentCounts?.needsCodeContext || 0} need context, ${model.threatValidation.assessmentCounts?.failed || 0} failed. Inspect unassessed scenarios and deployment assumptions.` :
               model.aiReview?.status === "failed"
                 ? "Graph retained; model review FAILED. See review details."
                 : model.aiReview?.status === "partial"
@@ -967,7 +970,8 @@ export async function serve({
           throw Error("Choose 1–4 parallel review workers");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
-        if (input.reviewScope !== undefined && !['system', 'deep'].includes(input.reviewScope)) throw Error('Choose system or deep STRIDE scope');
+        if (input.reviewScope !== undefined && !['system', 'deep', 'poc'].includes(input.reviewScope)) throw Error('Choose system, deep or scoped POC STRIDE review');
+        if (input.reviewScope === 'poc') { resolvePocScope(model); if (!input.includeSourceExcerpts) throw Error('Scoped POC requires source excerpts for control investigation'); }
         // Keep prior successful responses outside the active snapshot before a
         // repacked or changed-method review can replace its current projection.
         await store?.archiveReview(model);
@@ -1459,9 +1463,21 @@ export async function serve({
         return model
           ? send(200, outputModel())
           : send(409, { error: "No completed model" });
+      if (req.method === 'POST' && url.pathname === '/api/poc-scope') {
+        if (!model || ['running','cancelling'].includes(job.status)) return send(409,{error:'Open the graph and stop review before changing POC scope'});
+        const input = await body(req);
+        if (input.modelRevision !== model.modelRevision) return send(409,{error:'Refresh the current graph'});
+        const scope = resolvePocScope(model,input.scope);
+        const candidate = {...model,pocScope:scope};
+        const plan = pocReviewPlan(candidate);
+        if (plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
+        model.pocScope = scope;
+        await checkpoint(); if (persistenceError) throw Error('POC scope could not be saved');
+        return send(200,outputModel());
+      }
       if (req.method === "GET" && url.pathname === "/api/system-review-plan") {
         if (!model) return send(409, { error: 'Open a saved graph first' });
-        const plan = systemReviewPlan(model);
+        const plan = url.searchParams.get('scope') === 'poc' ? pocReviewPlan(model) : systemReviewPlan(model);
         return send(200, { reviewScope: 'system', preview: plan.preview, units: plan.batches.length, obligations: plan.obligations.length, gaps: plan.gaps.length, scope: plan.scope, semantics: plan.semantics });
       }
       if (req.method === "GET" && url.pathname === "/api/deployment-evidence") {

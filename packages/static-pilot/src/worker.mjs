@@ -1,3 +1,4 @@
+import {assessCompletedPoc} from './threat-validation.mjs';
 import {
   verifiedStrideSource,
   prepareStrideEvidence,
@@ -35,7 +36,7 @@ try {
           : resolve();
       };
       parentPort.on("message", ack);
-      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes });
+      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes, threatValidation: workerData.model?.threatValidation });
     });
   const trace = (event, data) =>
     new Promise((resolve, reject) => {
@@ -115,6 +116,15 @@ try {
             excerpts = value;
           },
         });
+  if (workerData.mode === 'review' && workerData.options.reviewScope === 'poc' &&
+      !model.aiReview.coverage.pendingBatches && !model.aiReview.coverage.failedBatches && model.aiReview.threats.length) {
+    progress('POC STRIDE packets saved; assessing scenarios against code and shared controls');
+    await assessCompletedPoc(workerData.manifest, model, {
+      sourceRoot: workerData.options.sourceRoot, config:workerData.options.modelConfig,
+      budget:100, runUntilComplete:true, progress, trace,
+      checkpoint:()=>checkpoint(model.aiReview,model.usageLedger),
+    });
+  }
   parentPort.postMessage({
     type: "done",
     model,

@@ -55,6 +55,20 @@ function fixture() {
     },
   };
 }
+test('future-code and dependency hypotheses remain visible as follow-ups instead of priority vulnerabilities', () => {
+  const {s,m}=fixture();
+  s.threats[0].name='Authorization bypass if the fallback handler is modified';
+  s.threats[1].name='Known-vulnerable dependency could be installed';
+  m.evidence[1].path='package-lock.json';
+  addReviewPresentation(s,m);
+  assert.equal(s.threats[0].followUpKind,'Change-regression / hardening');
+  assert.equal(s.threats[1].followUpKind,'Dependency / build review obligation');
+  assert.equal(s.threats[0].reviewPriority.rank,4);
+  assert.equal(s.threats.length,2);
+  s.threats[1].analysis={impact:'Applicable advisory CVE-2026-12345'};
+  addReviewPresentation(s,m);
+  assert.equal(s.threats[1].followUpKind,null);
+});
 test("references preserve saved IDs and connect boundary crossings with explained review priority", () => {
   const { s, m } = fixture();
   addReviewPresentation(s, m);

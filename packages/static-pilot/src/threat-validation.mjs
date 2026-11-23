@@ -1,3 +1,4 @@
+import {controlSymbols, controlContext} from './control-context.mjs';
 import { SECURITY_RESPONSE_SCHEMA } from './security-schemas.mjs';
 import { SECURITY_REVIEW_PROMPT, validateSecurityAssessment } from './security-intelligence.mjs';
 import { sha } from './sources.mjs';
@@ -28,12 +29,9 @@ export function validateThreatAssessment(value, packet) {
   return {...validateSecurityAssessment(rest,packet),deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
 }
 
-// Literal names only; source/model prose never becomes code, a command or a path.
-export function controlSymbols(text) {
-  return [...new Set((String(text).match(/\b(?:[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+|[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*)\b/g) || []).filter(s => s.length >= 5 && s.length <= 100))].slice(0, 16);
-}
-export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = []) {
-  const source = new InvestigationSource(model, manifest, root);
+export { controlSymbols } from './control-context.mjs';
+export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
+  const source = sourceOverride || new InvestigationSource(model, manifest, root);
   const symbols = controlSymbols([...missing, issue.controls, issue.explanation, JSON.stringify(issue.analysis || {})].join(' '));
   const requiredSymbols = new Set(controlSymbols(missing.join(' ')));
   const refs = [], searches = [], gaps = [];
@@ -53,7 +51,8 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
-  const references = [...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.map(r => ({...r, basis:'named-control-candidate'}))];
+  const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
+  const references = [...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...authContext.references, ...refs.map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -97,7 +96,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; report any required unresolved code path in missingEvidence. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Describe missing named functions in missingEvidence for a bounded follow-up search.',
-    retrieval:{routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    retrieval:{frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }
@@ -116,14 +115,20 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   if(model.threatValidation && model.threatValidation.contextKey !== threatValidationKey(model)) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }
+  const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
   const report = await reviewSecurityIssues(manifest, model, {
     ...options, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: (m, mf, root, issue, follow, context, missing) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });
       const scoped = { ...context, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
-      return threatInvestigationPacket(m,mf,root,issue,follow?.length?follow:priorEntries.get(issue.id)?.followUp || [],scoped,missing?.length?missing:priorEntries.get(issue.id)?.missingEvidence || []);
+      return threatInvestigationPacket(m,mf,root,issue,follow?.length?follow:priorEntries.get(issue.id)?.followUp || [],scoped,missing?.length?missing:priorEntries.get(issue.id)?.missingEvidence || [],sharedSource);
     },
   });
   return report;
+}
+
+export async function assessCompletedPoc(manifest, model, options) {
+  if (!model.aiReview?.scope?.poc || model.aiReview.coverage?.pendingBatches || model.aiReview.coverage?.failedBatches || !model.aiReview.threats?.length) return null;
+  return reviewThreatScenarios(manifest, model, {...options,budget:100,runUntilComplete:true});
 }

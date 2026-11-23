@@ -1,3 +1,4 @@
+import {controlSymbols} from './control-context.mjs';
 import { graphReader } from "./graph-store.mjs";
 import { SECURITY_RESPONSE_SCHEMA } from "./security-schemas.mjs";
 import { internalTopology } from "./internal-topology.mjs";
@@ -434,7 +435,7 @@ export async function reviewSecurityIssues(
       if (
         old &&
         (old.rounds >= INVESTIGATION_LIMITS.contextRounds ||
-          (old.assessment === "needs-context" && !old.followUp?.length && !(followMissingControls && old.missingEvidence?.some(s => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]/.test(s)))))
+          (old.assessment === "needs-context" && !old.followUp?.length && !(followMissingControls && old.missingEvidence?.some(s => controlSymbols(s).length))))
       )
         continue;
       const entry = {
@@ -579,7 +580,7 @@ export async function reviewSecurityIssues(
       if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         entry.assessment === "needs-context" &&
-        (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]/.test(s)))) &&
+        (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))) &&
         entry.rounds < INVESTIGATION_LIMITS.contextRounds
       )
         queue.push(item);

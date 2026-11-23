@@ -177,3 +177,12 @@ test('cited conclusions retain independent assessments and STRIDE coverage, reje
   next.aiReview.threats[0].scenario = 'Changed claim';
   assert.doesNotMatch(systemPrintReport(next), /Caller binding requires review/);
 });
+test('POC completion assesses every returned scenario, retains counterevidence and resumes without calls',async t=>{
+ const {assessCompletedPoc}=await import('../src/threat-validation.mjs');
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{id:'fixture'}};
+ let calls=0;const options={sourceRoot:f.root,config,fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ assert.equal(await assessCompletedPoc(f.manifest,f.model,options),null);assert.equal(calls,0);
+ f.model.aiReview.coverage.pendingBatches=0;f.model.aiReview.coverage.failedBatches=0;
+ await assessCompletedPoc(f.manifest,f.model,options);assert.equal(calls,12);assert.equal(f.model.threatValidation.assessmentCounts.ruledOut,12);
+ await assessCompletedPoc(f.manifest,f.model,options);assert.equal(calls,12);
+});

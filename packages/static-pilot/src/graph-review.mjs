@@ -1,3 +1,4 @@
+import {pocReviewPlan} from './poc-scope.mjs';
 import { setTimeout as recoveryWait } from 'node:timers/promises';
 import { systemReviewPlan } from './system-review-units.mjs';
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
@@ -501,7 +502,7 @@ export async function enrichGraphModel(
   }
   const plan =
     options.plan ||
-    (options.reviewScope === 'system' ? systemReviewPlan(model, excerpts) : reviewPlan(model, excerpts, {
+    (options.reviewScope === 'poc' ? pocReviewPlan(model, excerpts) : options.reviewScope === 'system' ? systemReviewPlan(model, excerpts) : reviewPlan(model, excerpts, {
       progress: (state) =>
         options.progress?.(
           `Preparing STRIDE plan: ${state.stage}${state.preparedPackets ? " · " + state.preparedPackets + " packets prepared" : ""} · ${Math.round(state.elapsedMs / 1000)}s · no model calls yet`,
@@ -559,8 +560,8 @@ export async function enrichGraphModel(
     concurrency,
   });
   // Keep the other review scope resumable; switching views must not discard paid work.
-  const selectedScope = plan.reviewScope === 'system' ? 'system' : 'deep';
-  const priorScope = model.aiReview?.reviewScope === 'system' ? 'system' : 'deep';
+  const selectedScope = plan.scope?.poc ? 'poc:' + plan.scope.poc.id : plan.reviewScope === 'system' ? 'system' : 'deep';
+  const priorScope = model.aiReview?.scope?.poc ? 'poc:' + model.aiReview.scope.poc.id : model.aiReview?.reviewScope === 'system' ? 'system' : 'deep';
   let activePrior = model.aiReview;
   if (model.aiReview && priorScope !== selectedScope) {
     model.savedStrideScopes = { ...model.savedStrideScopes, [priorScope]: model.aiReview };
