@@ -185,7 +185,7 @@ export function registerCsv(model, kind) {
         r.rowKind,
         ...r.cells.map(
           (c) =>
-            `${c.analysisLabel}; reviewer state: ${c.state}; ${c.scenarioCount} scenarios; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
+            `${c.analysisLabel}; reviewer state: ${c.state}; ${c.scenarioCount} scenarios; ${c.questionCount || 0} architecture questions; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
         ),
       ]),
     ];
@@ -389,7 +389,7 @@ export function systemReport(model) {
       r.name,
       ...r.cells.map(
         (c) =>
-          `${c.analysisLabel}; reviewer state ${c.state}: ${c.scenarioCount} scenarios, ${c.checklistCount} checklist items`,
+          `${c.analysisLabel}; reviewer state ${c.state}: ${c.scenarioCount} scenarios, ${c.questionCount || 0} architecture questions, ${c.checklistCount} checklist items`,
       ),
     ]),
   )}<h2>Threat register</h2><p>${s.threats.filter((t) => t.origin !== "review checklist").length} threat scenarios and ${s.threats.filter((t) => t.origin === "review checklist").length} checklist items. These are conditional review records, not confirmed vulnerabilities.</p>${s.threats
@@ -527,7 +527,7 @@ export function systemPrintReport(model) {
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
   const summary = hasResults
-    ? `${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
+    ? `<h2>Priority threats</h2><p>Highest review priorities from returned scenarios. This order is not a confirmed severity rating.</p>${scenarios.slice(0, 6).map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>${e(t.reviewPriority.label)}</strong> · Validation: ${e(t.validation?.assessment || 'not-assessed')}</p><p>${e(t.analysis?.impact || t.asset)}</p><p><strong>Actor:</strong> ${e(names(t.actorIds, 'Not established'))}</p><p><strong>Trust crossing:</strong> ${e(names(t.boundaryIds, 'Not established; needs evidence'))}</p><p><strong>Control evidence:</strong> ${e(t.validation?.counterEvidence || t.controls || 'Not established')}</p><p><strong>Next action:</strong> ${e(t.validation?.missingEvidence?.join('; ') || t.mitigation)}</p></article>`).join('')}${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
         ["Threat / affected scope", "Why it matters", "Next action"],
         scenarios.map((t) => [
           `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,
@@ -547,7 +547,7 @@ export function systemPrintReport(model) {
         r.name,
         ...r.cells.map(
           (c) =>
-            `${c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.failedEvidence ? "; failed packets" : ""}`,
+            `${c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.questionCount ? `; ${c.questionCount} architecture questions` : ''}${c.failedEvidence ? "; failed packets" : ""}`,
         ),
       ]),
   )}<h2>Threat actors linked to returned scenarios</h2><p>These profiles describe the access assumed by the scenarios. Awaiting reviewer confirmation means the access assumption has not been accepted; it does not mean a model request is still running.</p>${table(
@@ -577,6 +577,10 @@ export function systemPrintReport(model) {
       ? detailed
           .map((t) => {
             const paragraphs = [
+              ["Independent source assessment", t.validation?.assessment !== 'not-assessed' ? t.validation?.assessment : 'Not assessed'],
+              ["Validation counterevidence", t.validation?.counterEvidence],
+              ["Missing control evidence", t.validation?.missingEvidence?.join('; ')],
+              ["Validated source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
               ["Impact", t.analysis?.impact || t.asset],
               [
                 "Access and prerequisites",

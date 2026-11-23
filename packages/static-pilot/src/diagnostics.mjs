@@ -539,6 +539,19 @@ export async function errorReport({
           : null,
         phases: model?.explorationRun?.phases || [],
       },
+      threatValidation: {
+        status: model?.threatValidation?.status || 'not-run',
+        callsThisRun: model?.threatValidation?.callsThisRun,
+        pending: model?.threatValidation?.pending,
+        entries: sample(model?.threatValidation?.entries, e => ({
+          issueId: e.issueId, assessment: e.assessment, rounds: e.rounds,
+          stopReason: e.stopReason, attemptId: e.attemptId,
+          sourceWindows: e.evidence?.length || 0,
+          controlSearches: e.retrieval?.controlSearches?.length || 0,
+          gapCount: e.evidenceGaps?.length || 0,
+          failure: e.error ? failureDetail(e.error) : null,
+        })),
+      },
       securityInvestigations: {
         status: model?.securityReview?.status || "not-run",
         callsThisRun: model?.securityReview?.callsThisRun,

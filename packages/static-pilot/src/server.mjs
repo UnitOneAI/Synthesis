@@ -1,3 +1,4 @@
+import { reviewThreatScenarios } from './threat-validation.mjs';
 import { deploymentContext, updateDeploymentContext } from './deployment-context.mjs';
 import { systemReviewPlan } from './system-review-units.mjs';
 import { STRIDE_INVESTIGATION_PROMPT } from "./stride-evidence.mjs";
@@ -312,6 +313,7 @@ export async function serve({
         });
         if (model.explorationRun?.status === "running")
           model.explorationRun.status = "partial";
+        if (model.threatValidation?.status === 'running') model.threatValidation.status = 'partial';
         if (model.securityReview?.status === "running")
           model.securityReview.status = "partial";
         if (model.cweModelReview?.status === "running") {
@@ -527,6 +529,7 @@ export async function serve({
           }
           if (model?.explorationRun)
             m.model.explorationRun = structuredClone(model.explorationRun);
+          if (model?.threatValidation) m.model.threatValidation = structuredClone(model.threatValidation);
           if (model?.securityReview)
             m.model.securityReview = structuredClone(model.securityReview);
           if (model?.cweModelReview) {
@@ -1250,6 +1253,27 @@ export async function serve({
               message: "Exploration failed; inspect saved errors and traces",
             };
           });
+        return send(202, job);
+      }
+      if (req.method === 'POST' && url.pathname === '/api/threats/validate') {
+        const input = await body(req);
+        if (!model || ['running', 'cancelling'].includes(job.status)) return send(409, { error: 'Open the saved graph and wait for the current operation' });
+        if (!modelConfig) return send(409, { error: 'Configure an approved model provider' });
+        if (input.modelRevision !== model.modelRevision) return send(409, { error: 'Refresh the current source snapshot' });
+        if (input.includeSourceCode !== true || !Number.isInteger(input.budget) || input.budget < 1 || input.budget > 100 || (input.runUntilComplete !== undefined && typeof input.runUntilComplete !== 'boolean')) return send(400, { error: 'Enable source sharing and choose 1–100 requests' });
+        if (!model.aiReview?.coverage?.completedBatches || model.aiReview.status === 'stale' || (model.aiReview.basedOnRevision && model.aiReview.basedOnRevision !== model.modelRevision)) return send(409, { error: 'Current completed STRIDE results are required' });
+        if (input.threatIds !== undefined && (!Array.isArray(input.threatIds) || !input.threatIds.length || input.threatIds.some(id => !model.aiReview.threats.some(t => t.id === id)))) return send(400, { error: 'Select saved threat IDs' });
+        cweController = new AbortController();
+        const jobId = randomBytes(12).toString('hex');
+        job = { status: 'running', mode: 'threat-validation', jobId, message: 'Following saved threat evidence and named controls' };
+        cweTask = withGraph(() => reviewThreatScenarios(manifest, model, {
+          sourceRoot: root, config: modelConfig, budget: input.budget, runUntilComplete: input.runUntilComplete === true, threatIds: input.threatIds,
+          signal: cweController.signal, fetchImpl: cweModelFetch,
+          trace: (event, data) => traces.record(event, { ...data, jobId }),
+          progress: message => { job.message = message; },
+          checkpoint: async () => { await checkpoint(); if (persistenceError) throw Error('Threat validation checkpoint failed'); },
+        })).then(report => { job = { status: 'ready', mode: 'threat-validation', jobId, message: `Threat validation ${report.status}: ${report.callsThisRun} calls; ${report.pending || 0} selected scenarios unresolved. Original STRIDE results retained.` }; })
+          .catch(() => { job = { status: 'failed', mode: 'threat-validation', jobId, message: 'Threat validation stopped; saved results and traces retained' }; });
         return send(202, job);
       }
       if (req.method === "POST" && url.pathname === "/api/security/review") {

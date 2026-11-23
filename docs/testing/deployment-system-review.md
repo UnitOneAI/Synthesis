@@ -46,3 +46,13 @@ Deployment declarations are indexed, not a compiler-level effective configuratio
 - These deterministic provider simulations do not establish live customer gateway throughput or customer scan completion.
 
 Local recovery verification: 248 backend tests passed, three conditional scanner skips; 29 browser tests passed, two conditional skips. Reopening the previously saved live open-autofix system result retained all three completed units with zero provider calls. Its remaining 216 system units were not run by this recovery check. Customer gateway completion has not been verified from the development environment.
+
+## Saved threat validation acceptance tests
+
+- Saved SQLite graph over twelve repositories resolves a named control in another repository; original STRIDE scenarios and coverage remain byte-for-byte unchanged in the engine.
+- Hash-matched assessments survive persistence and resume with zero additional provider calls. Changed source or scenario text cannot silently reuse a favorable conclusion.
+- An explicit missing control triggers another bounded indexed search and reassessment. Per-action budgets and the three-round ceiling remain enforced.
+- HTTP action rejects missing authentication, source consent and invented IDs; successful assessment is checkpointed and leaves STRIDE results intact.
+- Architecture-only cells display zero source scenarios and a separate question count; mixed cells retain the source-scenario count and matching status.
+- Browser priority cards open the associated threat details. Assessment source consent defaults off. Existing matrix scrolling, actor/boundary navigation and partial PDF export remain regression gates.
+- All provider responses in these tests are controlled fixtures, not live security findings. Live saved-source qualification is reported separately.

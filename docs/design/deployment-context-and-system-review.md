@@ -162,3 +162,13 @@ This is a bounded enhancement to the existing application, not a new graph platf
 - Focused exports reuse the existing small-package limits, exclude secrets/source windows by default and disclose omitted material. No endpoint, installer or target program is executed.
 
 Validation uses deterministic fixtures and provider simulations for execution behavior, plus a separately identified live gateway qualification for model output quality. No simulated finding may be presented as a customer finding.
+
+## Saved threat validation and presentation
+
+STRIDE scenario discovery and independent source assessment have separate saved records. The new authenticated `POST /api/threats/validate` action requires source consent, a current review revision, and saved scenario IDs. It reuses `graph.sqlite`; it neither executes target code nor rebuilds the graph. The default UI selects six highest-priority current source-referenced scenarios. All current scenarios can be explicitly selected.
+
+Each scenario seeds hash-checked code windows, related static flows, graph neighbors and shared control candidates. Literal control identifiers (including camel case and underscore names) guide indexed searches across the selected repositories. Searches inspect at most two pages per identifier and sixteen identifiers. Missing named controls can trigger another retrieval round; unchanged packets are not resubmitted. There are at most three assessment rounds per scenario. Continuous mode drains this finite assessment queue; unavailable deployment facts remain unresolved. This focused assessment queue is serial; parallel STRIDE discovery retains its existing worker controls.
+
+`threatValidation` retains cited input/control/sink steps, counterevidence, missing facts, retrieval limits, attempts and usage. Its cache depends on the source, scenario, architecture, deployment context and assessment contract. Restart reuses matching completed assessments after verifying cited file hashes. Original STRIDE counts and scenarios remain unchanged. Model-supported conclusions require security review and do not approve actors or boundaries.
+
+Matrix labels and counts use the same source-scenario set. Metadata-only architecture questions are displayed separately. Priority cards and PDF sections explain the actor, affected asset, candidate trust crossing, control evidence and next action. Candidate crossings retain evidence links even where the peer is unresolved; they are never presented as proven connectivity. Evidence assessment may lower the review priority when a cited control rules out the stated path. Review priority is not a severity score.

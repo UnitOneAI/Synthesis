@@ -351,6 +351,13 @@ function renderModel() {
       tab("exploration");
       await window.SynthesisExploration.showIssue(issue);
     },
+    validateThreats: async (input) => {
+      jobNavigationRevision = navigationRevision;
+      await api('threats/validate', { modelRevision: model.modelRevision, ...input });
+      clearInterval(polling);
+      polling = setInterval(() => status().catch(e => message(e.message, true)), 750);
+      await status();
+    },
     startReview: async (budget, controls = {}) => {
       strideReviewScope = controls.reviewScope || 'system';
       $("review-until-complete").checked = controls.runUntilComplete === true;

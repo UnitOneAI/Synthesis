@@ -596,7 +596,7 @@ test("explicit continuation retries only failed validation batches with stricter
   assert.ok(model.aiReview.batches[0].requestPromptHash);
 });
 
-test("one STRIDE request returns matrix scenarios before any manual actor or boundary declarations", async () => {
+test("one metadata STRIDE request returns matrix questions before manual actor or boundary declarations", async () => {
   const { root, model } = await portfolio();
   try {
     const { systemModel } = await import("../src/system-model.mjs");
@@ -653,7 +653,7 @@ test("one STRIDE request returns matrix scenarios before any manual actor or bou
     assert.ok(
       s.matrix
         .filter((r) => r.rowKind === "component")
-        .some((r) => r.cells.some((c) => c.scenarioCount === 1)),
+        .some((r) => r.cells.some((c) => c.scenarioCount === 0 && c.questionCount === 1)),
     );
     assert.ok(
       s.matrix.some((r) => r.cells.some((c) => c.state === "not-analyzed")),

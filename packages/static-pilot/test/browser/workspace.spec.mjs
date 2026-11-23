@@ -843,6 +843,16 @@ test("partial STRIDE results default to component scenarios without requiring de
     ],
     questions: [],
   };
+  let validationSubmitted, validating = false;
+  await page.route('**/api/status', async route => {
+    const response=await route.fetch(), status=await response.json();
+    await route.fulfill({json:{...status,status:validating?'running':'ready',mode:'threat-validation',inference:{label:'Configured fixture',model:'fixture'}}});
+  });
+  await page.route('**/api/threats/validate', async route => {
+    validationSubmitted=route.request().postDataJSON();validating=true;
+    await route.fulfill({status:202,json:{status:'running'}});
+  });
+  await page.route('**/api/cancel', async route => {validating=false;await route.fulfill({json:{status:'ready'}});});
   data.systemModel = systemModel(data);
   await page.route("**/api/model", (route) => route.fulfill({ json: data }));
   await page.reload();
@@ -852,6 +862,22 @@ test("partial STRIDE results default to component scenarios without requiring de
   await expect(page.getByLabel("Rows", { exact: true })).toHaveValue(
     "component",
   );
+  await expect(page.locator('.ws-priority-panel')).toContainText('Priority threats');
+  await expect(page.locator('.ws-priority-card')).toContainText('Unauthorized operation');
+  await page.locator('.ws-priority-card').click();
+  await expect(page.locator('#ws-inspector')).toContainText('Independent source assessment');
+  await page.getByText('Validate saved threats against code and controls', {exact:true}).click();
+  await expect(page.locator('#ws-validation-source')).not.toBeChecked();
+  await expect(page.locator('#ws-validation-budget')).toHaveValue('6');
+  await expect(page.locator('#ws-validation-scope')).toHaveValue('priority');
+  await page.locator('#ws-validation-source').check();
+  await page.getByRole('button',{name:'Validate saved threats',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Stop validation',exact:true})).toBeVisible();
+  expect(validationSubmitted.threatIds).toEqual(['scenario-fixture']);
+  expect(validationSubmitted.includeSourceCode).toBe(true);
+  expect(validationSubmitted.budget).toBe(6);
+  await page.getByRole('button',{name:'Stop validation',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Validate saved threats',exact:true})).toBeEnabled();
   await expect(page.locator(".ws-matrix")).toContainText("threat scenario");
   await expect(page.locator(".ws-matrix")).not.toContainText("checklist items");
   await expect(page.locator(".ws-matrix button.populated")).toHaveCount(1);
