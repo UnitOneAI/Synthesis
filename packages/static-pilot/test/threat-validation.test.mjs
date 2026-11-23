@@ -171,7 +171,9 @@ test('cited conclusions retain independent assessments and STRIDE coverage, reje
   const next = editSystem(model, input);
   assert.deepEqual(next.aiReview, model.aiReview);
   assert.deepEqual(next.threatValidation, model.threatValidation);
-  assert.match(systemPrintReport(next), /Caller binding requires review/);
+  const report = systemPrintReport(next);
+  assert.match(report, /Caller binding requires review/);
+  assert.match(report, /Returned scenarios by STRIDE category/);
   next.aiReview.threats[0].scenario = 'Changed claim';
   assert.doesNotMatch(systemPrintReport(next), /Caller binding requires review/);
 });
