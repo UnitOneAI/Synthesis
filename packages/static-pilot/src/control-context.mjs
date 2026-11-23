@@ -1,3 +1,4 @@
+import {sourceScope} from './architecture.mjs';
 // Static candidate retrieval. A declaration is not proof that a control applies.
 const caches = new WeakMap();
 export function controlSymbols(text) {
@@ -13,7 +14,8 @@ export function controlSymbols(text) {
 export async function controlContext(source, seeds, text = '') {
   let cache = caches.get(source); if (!cache) {cache=new Map();caches.set(source,cache);}
   const repositories = new Set(seeds.map(s=>s.repository));
-  const names = [...new Set([...controlSymbols(text), 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,32);
+  const bootstrap = seeds.some(s=>/\.py$/i.test(s.path)) ? ['create_app','lifespan','setup_rate_limiting'] : ['Startup','Program','ConfigureServices'];
+  const names = [...new Set([...bootstrap,...controlSymbols(text), 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,32);
   const references=[], searches=[];
   for (const symbol of names) {
     let result=cache.get(symbol);
@@ -23,8 +25,8 @@ export async function controlContext(source, seeds, text = '') {
       result={nodes,truncated:Boolean(after)};cache.set(symbol,result);
     }
     const matches=result.nodes.filter(n=>n.kind==='file' || n.name===symbol || n.name?.endsWith('.'+symbol) || n.name?.endsWith('::'+symbol));
-    const near = n => seeds.some(s=>s.repository===n.repository && n.path.startsWith(s.path.split(/\/(?:Controllers|controllers|routes)\//)[0]+'/'));
-    matches.sort((a,b)=>Number(near(b))-Number(near(a)) || Number(repositories.has(b.repository))-Number(repositories.has(a.repository)) || Number(a.kind==='file')-Number(b.kind==='file'));
+    const near = n => seeds.some(s=>{const parent=s.path.split(/\/(?:Controllers|controllers|routes)\//)[0];const directory=parent===s.path?s.path.slice(0,Math.max(0,s.path.lastIndexOf('/'))):parent;return s.repository===n.repository && (!directory || n.path.startsWith(directory+'/'));});
+    matches.sort((a,b)=>Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') || Number(near(b))-Number(near(a)) || Number(repositories.has(b.repository))-Number(repositories.has(a.repository)) || Number(a.kind==='file')-Number(b.kind==='file'));
     searches.push({symbol,matches:matches.length,truncated:result.truncated});
     for(const n of matches.slice(0,3)) if(!references.some(r=>r.repository===n.repository && r.path===n.path && Math.abs(r.line-(n.line||1))<20))
       references.push({repository:n.repository,path:n.path,line:n.line||1,basis:'control-candidate; applicability unproven'});

@@ -94,3 +94,10 @@ test('control lookup follows private helpers and acronym-prefixed response types
  const result=await controlContext(source,[{repository:'service',path:'routes.py'}],names.join(' '));
  for(const name of names)assert.ok(result.references.some(r=>r.path===name+'.py'),name);
 });
+
+test('Python control context includes application composition and prefers production startup over fixtures',async()=>{
+ const source={search:s=>({items:s==='create_app'?[{id:'test',kind:'function',name:s,repository:'app',path:'tests/app.py',line:1},{id:'real',kind:'function',name:s,repository:'app',path:'api/server.py',line:170}]:[],next:null})};
+ const result=await controlContext(source,[{repository:'app',path:'api/routes.py'}],'verify_admin_key');
+ assert.ok(result.searches.some(s=>s.symbol==='create_app'));
+ assert.equal(result.references[0].path,'api/server.py');
+});
