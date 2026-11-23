@@ -119,7 +119,7 @@ test("service diagram groups calls, exposes evidence/gaps, exports the selected 
       exact: true,
     });
     await expect(boundaryBadge.locator("text")).toHaveText(
-      /^TB-[A-F0-9]{8} \+49: pending$/,
+      [/^TB-[A-F0-9]{8} \+49$/, /^pending$/],
     );
     await expect(boundaryBadge.locator("title")).toContainText(
       "Caller identity not established → Application principal (requires confirmation) · inference · pending",

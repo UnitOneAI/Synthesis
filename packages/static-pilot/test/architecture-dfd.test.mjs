@@ -600,3 +600,22 @@ test("presentation ownership follows adapters through libraries to their candida
   assert.equal(d.connections[0].source, "a");
   assert.ok(d.nodes.find((n) => n.id === "a").memberIds.includes("adapter"));
 });
+
+test('boundary references and review status stay outside forward component boxes',async t=>{
+  const {root,manifest}=await fixture(t,{service:{'Service.csproj':'<Project Sdk="Microsoft.NET.Sdk.Web"></Project>','Controller.cs':'[Route("api/settings")]\npublic class SettingsController {\n[HttpPatch("api/settings")]\npublic void Write() {}\n}'}});
+  const model=await analyze(manifest,{sourceRoot:root});
+  const options={showUnresolved:true};
+  const diagram=diagramModel(systemModel(model),options),{positions}=layoutDiagram(diagram),svg=systemSvg(model,options);
+  const badges=[...svg.matchAll(/class="dfd-boundary-badge" data-connection-id="([^"]+)" x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)"/g)];
+  assert.ok(badges.length,'Fixture must render a trust-boundary badge');
+  let forward=0;
+  for(const [,id,x,,width] of badges){
+    const connection=diagram.connections.find(c=>c.id===id),a=positions.get(connection.source),b=positions.get(connection.target);
+    if(b.x<=a.x)continue;
+    forward++;
+    assert.ok(Number(x)>=a.x+260,'Badge must not overlap the source component');
+    assert.ok(Number(x)+Number(width)<b.x,'Badge must not be hidden behind the target component');
+  }
+  assert.ok(forward);
+  assert.match(svg,/>pending<\/text>/,'Status remains visible separately from the reference');
+});
