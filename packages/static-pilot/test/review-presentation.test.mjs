@@ -137,3 +137,20 @@ test('matrix labels and counts use the same source scenarios, separating archite
  assert.equal(c.scenarioCount,1);assert.equal(c.questionCount,1);assert.equal(c.analysisStatus,'scenarios-identified');
  assert.deepEqual(c.scenarioReferences,[s.threats[1].reference]);
 });
+
+test("access filtering preserves mixed and unresolved actors without inferring internet exposure", async () => {
+  const {actorAccess, threatAccess, matchesAccess, accessFilter} = await import('../src/threat-access.mjs');
+  assert.equal(actorAccess({name:'Authenticated API caller', startingAccess:'Network access'}).kind, 'unresolved');
+  assert.equal(actorAccess({name:'External attacker or insider'}).kind, 'mixed');
+  const external = {id:'outside', access:actorAccess({name:'External attacker'})};
+  const internal = {id:'inside', access:actorAccess({name:'Compromised worker'})};
+  const actors = new Map([[external.id,external],[internal.id,internal]]);
+  const mixed = {access:threatAccess({actorIds:['outside','inside']},actors)};
+  assert.equal(mixed.access.kind,'mixed');
+  assert.ok(matchesAccess(mixed,'external',false));
+  assert.equal(matchesAccess(internal,'external',false),false);
+  assert.ok(matchesAccess({access:{kind:'unresolved'}},'external',true));
+  assert.equal(matchesAccess({access:{kind:'unresolved'}},'external',false),false);
+  assert.equal(actorAccess({name:'External attacker',accessClassification:'internal'}).kind,'internal');
+  assert.throws(()=>accessFilter('invented'), /Invalid/);
+});

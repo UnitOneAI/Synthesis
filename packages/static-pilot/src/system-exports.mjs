@@ -1,3 +1,4 @@
+import {matchesAccess, accessFilter} from './threat-access.mjs';
 import { PRINT_STYLE, PRINT_HEADER, PRINT_FOOTER } from "./print-style.mjs";
 import { diagramModel, layoutDiagram, actorPath } from "./diagram-model.mjs";
 import { usageSummary } from "./token-usage.mjs";
@@ -432,7 +433,8 @@ export function systemReport(model) {
 
 // A review-oriented print projection. Detailed registers remain in the complete
 // HTML/JSON/CSV exports; checklist prompts never become threat scenarios.
-export function systemPrintReport(model) {
+export function systemPrintReport(model, options = {}) {
+  const filter = accessFilter(options.accessScope, options.includeUnresolved);
   const s = systemModel(model),
     review = model.aiReview;
   const stale =
@@ -449,13 +451,13 @@ export function systemPrintReport(model) {
     review?.mode === "metadata" ||
     /metadata.only/i.test(display(t.analysisQuality?.gaps));
   const scenarios = current
-    .filter((t) => !metadataOnly(t))
+    .filter((t) => !metadataOnly(t) && matchesAccess(t, filter.scope, filter.includeUnresolved))
     .sort(
       (a, b) =>
         a.reviewPriority.rank - b.reviewPriority.rank ||
         a.id.localeCompare(b.id),
     );
-  const contextQuestions = current.filter(metadataOnly);
+  const contextQuestions = current.filter(t => metadataOnly(t) && matchesAccess(t, filter.scope, filter.includeUnresolved));
   const currentScenarioIds = new Set(scenarios.map((t) => t.id));
   const detailed = scenarios.slice(0, 12);
   const table = (headers, rows) =>
@@ -514,7 +516,7 @@ export function systemPrintReport(model) {
     : partial
       ? "Partial STRIDE review"
       : "STRIDE review snapshot";
-  const snapshot = `<section class="review-snapshot"><h2>${state}</h2><p>Exported from the latest available review checkpoint. Requests still in progress are not included. Exporting does not stop or restart analysis.</p>${
+  const snapshot = `<section class="review-snapshot"><p>Actor access filter: ${e(filter.scope)} · Unresolved access ${filter.includeUnresolved ? "included" : "excluded"}. External and internal views include mixed actor scenarios. Packet coverage below describes the full review scope. The DFD shows full system context.</p><h2>${state}</h2><p>Exported from the latest available review checkpoint. Requests still in progress are not included. Exporting does not stop or restart analysis.</p>${
     stale
       ? `<p>Historical STRIDE review: ${allScenarios.length} saved scenarios and ${completed} completed packets are historical, not current valid coverage. Their details are excluded from this report. Revalidate before relying on them; the complete HTML/JSON export retains the historical records.</p>`
       : !hasResults
@@ -526,7 +528,7 @@ export function systemPrintReport(model) {
     ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
-  const conclusions = current.filter(t => t.sourceConclusion).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
+  const conclusions = current.filter(t => t.sourceConclusion && matchesAccess(t, filter.scope, filter.includeUnresolved)).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
   const categoryCounts = hasResults ? `<h3>Returned scenarios by STRIDE category</h3>
     ${table(CATEGORIES, [CATEGORIES.map(category => scenarios.filter(t => t.categories.includes(category)).length)])}
     <p>Each count includes current source-referenced scenarios assigned to that category. Scenarios can overlap. A zero means no scenario returned in the reviewed scope.</p>` : "";
@@ -549,7 +551,8 @@ export function systemPrintReport(model) {
       .filter(
         (r) =>
           r.rowKind === "component" &&
-          (r.reviewedInterfaces || r.cells.some((c) => c.failedEvidence)),
+          (r.reviewedInterfaces || r.cells.some((c) => c.failedEvidence)) &&
+          (filter.scope === 'all' || r.cells.some(c => c.threatIds?.some(id => currentScenarioIds.has(id)))),
       )
       .map((r) => [
         r.name,

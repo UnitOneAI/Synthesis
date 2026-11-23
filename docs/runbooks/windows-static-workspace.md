@@ -513,3 +513,11 @@ The planner places each assigned production flow in its review context. Standalo
 Planner changes can alter packet hashes. Compatible completed packets are reused; previous system review is retained in `stridePlanHistory` for comparison. Changed packets need review under the new context. Keep your saved graph and export the previous report before updating. The preview does not estimate token savings from metadata bytes alone.
 
 For a 4,000-packet review, the prior open-autofix rate of roughly three packets per minute implies approximately 22 hours. Treat this as a baseline only. Use measured JCI latency, token throughput and remaining packet count after the first completed calls.
+
+## Filter threats by actor access
+
+In **STRIDE matrix**, **Threat register** or **Threat actors**, choose **Actor access → External**. Mixed actor scenarios remain included. **Include unresolved access** is checked by default; clear it to hide scenarios whose starting actor location is unresolved. Use **All actor access** to restore the full view.
+
+The selection carries across these three views. **Export STRIDE review · PDF** uses the same access filter and includes linked actor and trust-boundary records. The export states its filter and retains full-review packet coverage. The DFD provides full system context. Other searches, category and disposition filters apply only on screen; CSV, complete HTML and JSON exports retain the full review scope.
+
+Classification comes from explicit actor descriptions or an **Edit record → Actor access classification** declaration. A network endpoint or authenticated caller alone leaves access unresolved. Classification describes a modeling assumption, not verified deployment exposure. Changing an actor declaration follows the existing architecture-edit review invalidation rules.
