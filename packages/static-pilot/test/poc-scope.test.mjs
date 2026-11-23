@@ -195,7 +195,7 @@ test('an isolated repository packet failure does not suppress later internal rev
  await enrichGraphModel(f.model,modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'}),new Map(),fetchImpl,{plan,reviewScope:'poc',runUntilComplete:true,concurrency:1,recoveryDelayMs:0,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
  assert.equal(f.model.aiReview.coverage.failedBatches,1);assert.equal(f.model.aiReview.coverage.pendingBatches,0);assert.ok(f.model.aiReview.batches.some(b=>b.reviewStage===2&&b.status==='completed'));
 });
-import {citationCoversEvidence} from '../src/source-citation.mjs';
+import {citationCoversEvidence,resolveSourceCitation} from '../src/source-citation.mjs';
 test('body citations cover only their hash-matched parsed owner, not neighboring handlers',()=>{
  const record={repository:'service',path:'routes.py',blobSha256:'hash',startLine:10,endLine:30,functionContext:{startLine:10,endLine:30,complete:true}};
  const body={line:15,endLine:20},anchor={repository:'service',path:'routes.py',blobSha256:'hash',line:10};
@@ -204,4 +204,15 @@ test('body citations cover only their hash-matched parsed owner, not neighboring
  assert.equal(citationCoversEvidence(body,record,{...anchor,blobSha256:'changed'}),false);
  assert.equal(citationCoversEvidence(body,{...record,functionContext:{...record.functionContext,complete:false}},anchor),false);
  assert.equal(citationCoversEvidence({line:10,endLine:12},record,anchor),true);
+});
+
+test('citations spanning supplied windows preserve every line and reject gaps or changed hashes',()=>{
+ const a={id:'a',repository:'r',path:'code.py',blobSha256:'hash',startLine:148,endLine:227};
+ const b={...a,id:'b',startLine:219,endLine:298};
+ const cite={recordId:'a',line:176,endLine:236,role:'input'};
+ assert.deepEqual(resolveSourceCitation(cite,new Map([['a',a],['b',b]])),[{...cite,endLine:227},{...cite,recordId:'b',line:228}]);
+ for(const other of [{...b,startLine:229},{...b,blobSha256:'changed'},{...b,path:'other.py'},{...b,repository:'other'}])
+  assert.equal(resolveSourceCitation(cite,new Map([['a',a],['b',other]])),null);
+ assert.equal(resolveSourceCitation({...cite,recordId:'invented'},new Map([['a',a],['b',b]])),null);
+ assert.equal(resolveSourceCitation({...cite,endLine:299},new Map([['a',a],['b',b]])),null);
 });

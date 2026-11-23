@@ -1,4 +1,7 @@
-import { citationCoversEvidence } from "./source-citation.mjs";
+import {
+  citationCoversEvidence,
+  resolveSourceCitation,
+} from "./source-citation.mjs";
 import {
   STRIDE_INVESTIGATION_PROMPT,
   STRIDE_INVESTIGATION_SCHEMA,
@@ -145,20 +148,19 @@ function validateRepositoryResponse(value, packet) {
       c.citations.length > 40
     )
       throw Error("Invalid repository assessment citations");
-    for (const ref of c.citations) {
-      const r = records.get(ref.recordId);
+    const suppliedCitations = c.citations;
+    const resolvedCitations = suppliedCitations.flatMap((ref) => {
       if (
         Object.keys(ref).some((k) => !citation.required.includes(k)) ||
-        !r ||
-        !Number.isInteger(ref.line) ||
-        !Number.isInteger(ref.endLine) ||
-        ref.line < r.startLine ||
-        ref.endLine > r.endLine ||
-        ref.line > ref.endLine ||
         !citation.properties.role.enum.includes(ref.role)
       )
         throw Error("Repository assessment cites unavailable source");
-    }
+      const resolved = resolveSourceCitation(ref, records);
+      if (!resolved)
+        throw Error("Repository assessment cites unavailable source");
+      return resolved;
+    });
+    c = { ...c, citations: resolvedCitations };
     const expected = review.threats
       .map((t, i) => (t.category === c.category ? i : null))
       .filter((i) => i !== null);
@@ -171,7 +173,12 @@ function validateRepositoryResponse(value, packet) {
     // Preserve useful source-referenced scenarios when their claimed conclusion
     // lacks proof; downgrade the conclusion rather than discarding the packet.
     const missing = [...c.missingEvidence],
-      normalizationNotes = [];
+      normalizationNotes =
+        resolvedCitations.length !== suppliedCitations.length
+          ? [
+              "Citation range split across supplied windows of the same file and hash; no missing source inferred.",
+            ]
+          : [];
     if (!equalIds(c.threatIndexes, expected))
       normalizationNotes.push(
         "Scenario indexes reconciled with validated STRIDE categories.",
