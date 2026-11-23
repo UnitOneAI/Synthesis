@@ -142,6 +142,15 @@ test('initialization window cannot hide the remainder of an overlapping control 
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.endLine>=96),'Line 79 inside the preamble must not suppress the window containing the enforcement at line 96');
 });
 
+test('explicit missing controls precede repeated scenario windows under the retrieval limit',async t=>{
+ const f=await threatFixture(t), {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'many-seeds',locations:Array.from({length:12},(_,i)=>({repository:`repo${i}`,path:'Api.cs',line:1})),controls:'',explanation:''};
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[{repository:'repo11',path:'PermissionFilter.cs',line:1}],{},['Inspect PermissionFilter and SecondGuard implementation before broad initialization context.']);
+ assert.equal(packet.records[0].path,'PermissionFilter.cs');
+ assert.ok(packet.records.some(r=>r.path==='SecondGuard.cs'));
+ assert.ok(packet.gaps.some(g=>g.reason==='required-source-window-limit'));
+});
+
 test('failed response retains the requested control context for a bounded retry',async t=>{
  const f=await threatFixture(t);let calls=0;
  await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:3,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{

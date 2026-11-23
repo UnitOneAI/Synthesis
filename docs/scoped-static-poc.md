@@ -33,7 +33,7 @@ Code conclusions, deployment assumptions and reviewer decisions remain separate.
 
 ## Reports
 
-The report identifies the selected profile/operations and deferred scope, shows packet coverage separately from code conclusions, and carries the actor-access display filter. Filtered cells use filtered scenario and architecture-question counts; completed full-scope coverage is labeled Reviewed scope rather than asserting a hidden scenario is visible. Future-change and generic dependency hypotheses are retained as follow-ups and removed from priority cards. Reusable report context comprises a capped overview and up to six focused component diagrams, with explicit omitted-object counts. The actor summary shows up to 20 profiles; complete HTML/JSON retains every record and link.
+The report identifies the selected profile/operations and deferred scope, shows packet coverage separately from code conclusions, and carries the actor-access display filter. Filtered cells use filtered scenario and architecture-question counts; completed full-scope coverage is labeled Reviewed scope rather than asserting a hidden scenario is visible. Future-change and generic dependency hypotheses are retained as follow-ups and removed from priority cards. Ruled-out scenarios remain in the record but leave priority cards. Reusable report context comprises an eight-object overview and up to six focused component diagrams, with explicit omitted-object counts. POC diagrams include only flows associated with selected interfaces; further downstream paths remain outside that diagram. The actor summary shows up to 20 profiles; complete HTML/JSON retains every record and link.
 
 ## Qualification
 

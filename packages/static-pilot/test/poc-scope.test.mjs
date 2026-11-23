@@ -12,6 +12,8 @@ import {modelConfig} from '../src/model-review.mjs';
 import {systemPrintReport} from '../src/system-exports.mjs';
 import {workspaceStore} from '../src/workspace-store.mjs';
 import {serve} from '../src/server.mjs';
+import {systemModel} from '../src/system-model.mjs';
+import {diagramModel} from '../src/diagram-model.mjs';
 async function fixture(t) {
  const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'poc-')));t.after(()=>fs.rm(dir,{recursive:true,force:true}));const root=path.join(dir,'sources');
  await fs.mkdir(path.join(root,'app','Controllers'),{recursive:true});await fs.mkdir(path.join(root,'support'));
@@ -34,6 +36,10 @@ test('POC selects explicit operations, retains shared evidence, rejects empty an
  const appearances=plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds);
  assert.equal(appearances.length,primary.size,'Incident flows must not repeat primary operation reviews');
  assert.equal(JSON.stringify(model.sourceGraph),before);
+ const system=systemModel(model), d=diagramModel(system,{interfaceIds:selected.interfaceIds,showUnresolved:true});
+ const allowed=new Set(system.flows.filter(f=>f.interfaceIds.some(id=>primary.has(id))).map(f=>f.id));
+ assert.ok(d.connections.length);
+ assert.ok(d.connections.every(c=>c.flowIds.every(id=>allowed.has(id))),'POC diagram must not show unrelated flows');
  const source=await verifiedStrideSource(model,manifest,root);
  const packet=await prepareStrideEvidence(plan.batches[0].packet,source);
  assert.ok(packet.packet.sourceContext.records.some(r=>r.path==='Startup.cs'));
@@ -56,7 +62,7 @@ test('POC saved scope resumes without requests and preserves full-system paid re
  assert.deepEqual(model.savedStrideScopes.system,full);assert.equal(model.aiReview.coverage.pendingBatches,0);assert.equal(model.aiReview.coverage.failedBatches,0,JSON.stringify(model.aiReview.batches));
  const count=calls;await enrichGraphModel(model,config,new Map(),fetchImpl,{reviewScope:'poc',runUntilComplete:true});assert.equal(calls,count);
  const store=await workspaceStore(root,path.join(root,'..','state'));await store.save({model,manifest});await store.close();
- const html=systemPrintReport(model);assert.match(html,/Scoped POC/);assert.match(html,/on-prem assumption/);assert.match(html,/STRIDE category obligations/);
+ const html=systemPrintReport(model);assert.match(html,/Scoped POC/);assert.match(html,/on-prem assumption/);assert.match(html,/STRIDE category review cases/);
 });
 test('POC scope API saves on the existing graph and refuses unknown selections',async t=>{
  const f=await fixture(t), dir=path.join(f.root,'..','state'),store=await workspaceStore(f.root,dir);await store.save({model:f.model,manifest:f.manifest});await store.close();

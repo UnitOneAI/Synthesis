@@ -149,7 +149,7 @@ export function systemReviewPlan(model, excerpts = new Map(), selection = null) 
     interpretation: 'Metadata bytes before source retrieval. Token cost and duration require provider measurements. All selected operations remain individually cited.',
   };
   return { preview, batches, omitted: [...new Set(omitted)], splits, refinements: [], obligations: [...uniqueObligations.values()], gaps,
-    limits: { packetBytes: 72 * 1024, flowsPerUnit: 4, standaloneInterfacesPerUnit: 8 },
+    limits: { packetBytes: 72 * 1024, flowsPerUnit: selection ? Math.max(0, ...batches.map(b => b.packet.reviewUnit.flowIds.length)) : 4, standaloneInterfacesPerUnit: 8 },
     semantics: 'System flows, security interfaces and related configuration/controls. Deep callable and supporting/test-code review is deferred, not completed.',
     reviewScope: 'system', scope: { version: SYSTEM_REVIEW_VERSION, interfaceIds: scopedIds, primaryInterfaces: primary.size, deferredInterfaces: model.interfaces.length - scopeSet.size,
       repositories: model.sources.map(s => ({ repository: s.name, inScope: model.interfaces.filter(i => i.repository === s.name && scopeSet.has(i.id)).length, deferred: model.interfaces.filter(i => i.repository === s.name && !scopeSet.has(i.id)).length, sourceStatus: s.status })),

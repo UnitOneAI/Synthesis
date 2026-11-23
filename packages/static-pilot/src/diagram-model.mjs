@@ -140,7 +140,9 @@ export function diagramModel(s, options = {}) {
         interfaceIds: unique(members.flatMap((m) => m.interfaceIds || [])),
       };
     });
-  let flows = s.flows.filter(usable).map((f) => ({
+  const selectedInterfaces = options.interfaceIds ? new Set(options.interfaceIds) : null;
+  const scopedFlows = s.flows.filter(f => !selectedInterfaces || f.interfaceIds?.some(i => selectedInterfaces.has(i)));
+  let flows = scopedFlows.filter(usable).map((f) => ({
     ...f,
     source: owners.get(f.source) || f.source,
     target: owners.get(f.target) || f.target,
@@ -151,7 +153,7 @@ export function diagramModel(s, options = {}) {
       s.flows.find((original) => original.id === f.id)?.source ===
         s.flows.find((original) => original.id === f.id)?.target,
   );
-  const unresolvedCount = s.flows.filter(
+  const unresolvedCount = scopedFlows.filter(
     (f) => f.basis === "unresolved",
   ).length;
   if (!showUnresolved) {
@@ -171,6 +173,10 @@ export function diagramModel(s, options = {}) {
         !omitted.has(f.target) &&
         (!f.scope || f.scope === "production-candidate"),
     );
+  }
+  if (selectedInterfaces) {
+    const connected = new Set(flows.flatMap(f => [f.source, f.target]));
+    nodes = nodes.filter(n => connected.has(n.id));
   }
   if (level === "context") {
     const internal = new Set(s.components.map((n) => owners.get(n.id)));

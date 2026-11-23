@@ -47,12 +47,12 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     searches.push({ symbol, matches: found.length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
     for (const n of found) if (refs.length < 16 && !refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1 });
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, required:requiredSymbols.has(symbol) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
-  const references = [...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...authContext.references, ...refs.map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...authContext.references, ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -74,11 +74,11 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // Supply declarations before repeating the same middle-of-file window. Explicit
   // follow-up paths must still resolve to selected, hash-matched graph files.
-  if(/initial|declar|environment|config|startup|before|full/i.test(missing.join(' '))) {
+  if(/initializ|declar|environment|config|startup/i.test(missing.join(' '))) {
     const seen=new Set();
     for(const r of [...followUp,...refs,...issue.locations]) {
       const k=r.repository+'\0'+r.path;
-      if(!seen.has(k) && seen.size<4){seen.add(k);references.unshift({...r,line:1,required:true,basis:'requested-initialization'});}
+      if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:true,basis:'requested-initialization'});}
     }
   }
   const records=[], availableFiles=new Map();let omitted=0;
