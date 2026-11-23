@@ -102,6 +102,23 @@ test('invalid assessment receives one metered correction and does not loop or ch
  assert.equal(f.model.usageLedger.attempts.length,2);assert.equal(JSON.stringify(f.model.aiReview),before);
 });
 
+test('retrieval upgrade reopens an exhausted gap once and retains prior paid attempts',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+   const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;const data=await answer(p).json();
+   if(calls===1){const v=JSON.parse(data.content[0].text);v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];data.content[0].text=JSON.stringify(v);}
+   return Response.json(data);
+ }};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const prior=f.model.threatValidation.entries[0].attemptId;
+ f.model.threatValidation.entries[0].rounds=3;f.model.threatValidation.retrievalVersion='old';
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.ok(f.model.threatValidation.entries[0].history.some(e=>e.attemptId===prior && e.reason==='retrieval-policy-updated'));
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});
+
 test('deployment assumptions do not suppress a cited conditional code concern; missing code still blocks it',async t=>{
  const {validateThreatAssessment}=await import('../src/threat-validation.mjs');
  const r={id:'r',repository:'repo',path:'api.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'input'},{line:2,text:'sink'}]};
@@ -140,6 +157,8 @@ test('initialization window cannot hide the remainder of an overlapping control 
  const p=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'overlap',locations:[{repository:'repo0',path:'control.py',line:60}],controls:'',explanation:''},[{repository:'repo0',path:'control.py',line:79}],{},['Inspect initialization and the full control implementation.']);
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.startLine===1));
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.endLine>=96),'Line 79 inside the preamble must not suppress the window containing the enforcement at line 96');
+ assert.ok(p.retrieval.coalescedWindows>0);
+ assert.equal(new Set(p.records.flatMap(r=>r.lines.map(l=>r.path+':'+l.line))).size,p.records.reduce((n,r)=>n+r.lines.length,0),'Overlapping windows should not repeat source lines');
 });
 
 test('explicit missing controls precede repeated scenario windows under the retrieval limit',async t=>{

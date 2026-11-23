@@ -7,6 +7,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-2';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 export const THREAT_ASSESSMENT_SCHEMA = {
@@ -81,22 +82,28 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:true,basis:'requested-initialization'});}
     }
   }
-  const records=[], availableFiles=new Map();let omitted=0;
+  let records=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
     if(source.file(ref.repository,ref.path)) availableFiles.set(key,{repository:ref.repository,path:ref.path});
     if(records.some(r => r.repository===ref.repository && r.path===ref.path && r.startLine===Math.max(1,(ref.line || 1)-20)))continue;
-    if(records.length>=12){omitted++;if(ref.required)gaps.push({reason:'required-source-window-limit',repository:ref.repository,path:ref.path});continue;}
     try {
       const {code,...record}=await source.window(ref);
       record.basis=ref.basis;
-      if(Buffer.byteLength(JSON.stringify([...records,record]))>42000){omitted++;if(ref.required)gaps.push({reason:'required-source-byte-limit',repository:ref.repository,path:ref.path});continue;}
-      records.push(record);
+      const overlap=records.filter(r=>r.repository===record.repository && r.path===record.path && r.blobSha256===record.blobSha256 && r.startLine<=record.endLine+1 && r.endLine>=record.startLine-1);
+      const mergedLines=[...new Map([...overlap.flatMap(r=>r.lines),...record.lines].map(l=>[l.line,l])).values()].sort((a,b)=>a.line-b.line);
+      const merge=overlap.length && mergedLines.length<=200 && mergedLines.at(-1).line-mergedLines[0].line+1===mergedLines.length;
+      const merged=merge ? {...record,id:sha(JSON.stringify([record.repository,record.path,record.blobSha256,mergedLines[0].line,mergedLines.at(-1).line])).slice(0,20),startLine:mergedLines[0].line,endLine:mergedLines.at(-1).line,lines:mergedLines,basis:'combined hash-matched source windows'} : record;
+      const next=[...records.filter(r=>!merge || !overlap.includes(r)),merged];
+      const reason=next.length>12 ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
+      if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
+      records=next;if(merge)coalescedWindows+=overlap.length;
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
+  for(let i=gaps.length-1;i>=0;i--) if(gaps[i].startLine && records.some(r=>r.repository===gaps[i].repository && r.path===gaps[i].path && r.startLine<=gaps[i].startLine && r.endLine>=gaps[i].endLine)) gaps.splice(i,1);
   const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; report any required unresolved code path in missingEvidence. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Describe missing named functions in missingEvidence for a bounded follow-up search.',
-    retrieval:{frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    retrieval:{coalescedWindows,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }
@@ -108,6 +115,14 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   if (selected && (!Array.isArray(selected) || !selected.length || selected.some(id => !model.aiReview.threats.some(t => t.id === id)))) throw Error('Select saved STRIDE threat IDs');
   const issues = model.aiReview.threats.filter(t => !selected || selected.includes(t.id)).map(t => threatIssue(model, t)).sort((a,b) => priority.get(a.id) - priority.get(b.id));
   const hashes = new Map(issues.map(i=>[i.id,sha(JSON.stringify(i))]));
+  // A changed retriever may resolve an exhausted code gap. Reopen it once for
+  // this policy; retain prior attempts and never reset conclusive assessments.
+  if (model.threatValidation && model.threatValidation.retrievalVersion !== THREAT_RETRIEVAL_VERSION) {
+    for (const entry of model.threatValidation.entries || []) if (entry.assessment === 'needs-context' && entry.issueHash === hashes.get(entry.sourceId) && (entry.rounds >= INVESTIGATION_LIMITS.contextRounds || entry.stopReason === 'no-new-evidence')) {
+      entry.history = [...(entry.history || []),{assessment:entry.assessment,packetHash:entry.packetHash,attemptId:entry.attemptId,usage:entry.usage,rounds:entry.rounds,reason:'retrieval-policy-updated'}];
+      entry.rounds=0;delete entry.stopReason;
+    }
+  }
   const priorEntries = new Map();
   for(const previous of [model.threatValidation,...(model.threatValidationHistory || []).slice().reverse()]) {
     for(const entry of previous?.entries || []) if(entry.issueHash===hashes.get(entry.sourceId) && !priorEntries.has(entry.sourceId) && (entry.followUp?.length || entry.missingEvidence?.length)) priorEntries.set(entry.sourceId,entry);
@@ -117,11 +132,11 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   }
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
   const report = await reviewSecurityIssues(manifest, model, {
-    ...options, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
+    ...options, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: (m, mf, root, issue, follow, context, missing) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });
-      const scoped = { ...context, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
+      const scoped = { ...context, analysisProfile:model.aiReview?.scope?.poc ? {statement:model.aiReview.scope.poc.profile,basis:'Explicit analysis assumption, not a verified deployment fact. Assess the code argument under this condition.'} : null, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
       return threatInvestigationPacket(m,mf,root,issue,follow?.length?follow:priorEntries.get(issue.id)?.followUp || [],scoped,missing?.length?missing:priorEntries.get(issue.id)?.missingEvidence || [],sharedSource);
     },
   });
