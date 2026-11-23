@@ -309,6 +309,9 @@ export async function reviewSecurityIssues(
     reportField = 'securityReview',
     contextKeyOverride,
     packetBuilder = investigationPacket,
+    systemPrompt = SECURITY_REVIEW_PROMPT,
+    responseSchema = SECURITY_RESPONSE_SCHEMA,
+    validateResponse = validateSecurityAssessment,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -326,12 +329,12 @@ export async function reviewSecurityIssues(
   const key = sha(
     JSON.stringify([
       contextKey,
-      sha(SECURITY_REVIEW_PROMPT),
+      sha(systemPrompt),
       config.provider,
       config.model,
       config.baseUrl,
       config.structuredOutputs === true,
-      sha(JSON.stringify(SECURITY_RESPONSE_SCHEMA)),
+      sha(JSON.stringify(responseSchema)),
     ]),
   );
   const prior = model[reportField]?.key === key ? model[reportField] : null;
@@ -343,7 +346,7 @@ export async function reviewSecurityIssues(
     key,
     contextKey,
     basedOnRevision: model.modelRevision,
-    promptHash: sha(SECURITY_REVIEW_PROMPT),
+    promptHash: sha(systemPrompt),
     provider: config.provider,
     model: config.model,
     outputContract: config.structuredOutputs
@@ -362,7 +365,16 @@ export async function reviewSecurityIssues(
   };
   model[reportField] = report;
   beginUsageRun(model);
-  const save = async () => checkpoint?.(report);
+  const save = async () => {
+    const counts={selected:issues.length,assessed:0,sourceSupported:0,ruledOut:0,needsCodeContext:0,failed:0,unassessed:0};
+    for(const issue of issues){
+      const entry=report.entries.find(e=>e.issueId===issue.id && e.issueHash===sha(JSON.stringify(issue)));
+      const field={'static-supported':'sourceSupported','ruled-out':'ruledOut','needs-context':'needsCodeContext','failed':'failed'}[entry?.assessment] || 'unassessed';
+      counts[field]++;if(['sourceSupported','ruledOut','needsCodeContext'].includes(field))counts.assessed++;
+    }
+    report.assessmentCounts=counts;
+    await checkpoint?.(report);
+  };
   const event = async (type, data) => {
     report.events.push({ type, at: new Date().toISOString(), ...data });
     if (report.events.length > INVESTIGATION_LIMITS.events) {
@@ -508,9 +520,9 @@ export async function reviewSecurityIssues(
         });
         await save();
         const response = await requestReview(config, packet, fetchImpl, {
-          systemPrompt: SECURITY_REVIEW_PROMPT,
-          responseSchema: SECURITY_RESPONSE_SCHEMA,
-          validate: validateSecurityAssessment,
+          systemPrompt,
+          responseSchema,
+          validate: validateResponse,
           signal,
           onUsage: async (usage) => {
             attempt.usage = usage;

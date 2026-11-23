@@ -56,3 +56,5 @@ Local recovery verification: 248 backend tests passed, three conditional scanner
 - Architecture-only cells display zero source scenarios and a separate question count; mixed cells retain the source-scenario count and matching status.
 - Browser priority cards open the associated threat details. Assessment source consent defaults off. Existing matrix scrolling, actor/boundary navigation and partial PDF export remain regression gates.
 - All provider responses in these tests are controlled fixtures, not live security findings. Live saved-source qualification is reported separately.
+
+Follow-up regressions: retrieve initialization preceding an old snippet and resource-matched route candidates across repositories from SQLite without re-extraction; accept a cited conditional code concern with explicit unverified deployment assumptions; retain needs-context for missing code or hash failures. Existing CWE response validation remains unchanged. Prior independent assessments seed follow-up evidence after contract updates while original STRIDE coverage is preserved.

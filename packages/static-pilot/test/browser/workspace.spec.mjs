@@ -877,7 +877,7 @@ test("partial STRIDE results default to component scenarios without requiring de
   expect(validationSubmitted.includeSourceCode).toBe(true);
   expect(validationSubmitted.budget).toBe(6);
   await page.getByRole('button',{name:'Stop validation',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Validate saved threats',exact:true})).toBeEnabled();
+  await expect(page.locator('[data-validate-threats]')).toBeEnabled();
   await expect(page.locator(".ws-matrix")).toContainText("threat scenario");
   await expect(page.locator(".ws-matrix")).not.toContainText("checklist items");
   await expect(page.locator(".ws-matrix button.populated")).toHaveCount(1);
