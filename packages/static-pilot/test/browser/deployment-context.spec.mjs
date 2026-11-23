@@ -1,0 +1,50 @@
+import { test, expect } from '@playwright/test';
+import fs from 'node:fs/promises';
+import { reportFixture } from '../report-fixture.mjs';
+import { workspaceStore } from '../../src/workspace-store.mjs';
+import { serve } from '../../src/server.mjs';
+import { modelConfig } from '../../src/model-review.mjs';
+
+test('saved graph system review needs no answers; optional cards preserve evidence and scope across restart', async ({ page }) => {
+  const f = await reportFixture(); let app; const errors=[]; let builds=0;
+  page.on('pageerror', e=>errors.push(e.message));
+  page.on('request', r=>{if(r.method()==='POST'&&r.url().endsWith('/api/analyze')) builds++;});
+  const options={sourceRoot:f.root,workspace:f.workspace,persist:true,port:0,quiet:true,modelConfig:modelConfig('anthropic-gateway','claude-opus-4-6-1',{CLAUDE_API_KEY:'test-only'},{baseUrl:'https://gateway.example/anthropic'})};
+  try {
+    const store=await workspaceStore(f.root,f.workspace);await store.save({model:f.model,manifest:f.manifest});await store.close();
+    app=await serve(options);await page.goto(app.url);
+    await page.getByRole('button',{name:'Open saved graph',exact:true}).click();
+    await page.getByRole('button',{name:'4 · STRIDE matrix',exact:true}).click();
+    await expect(page.locator('#ws-review-scope')).toHaveValue('system');
+    await page.getByRole('button',{name:'Preview system scope',exact:true}).click();
+    await expect(page.locator('#ws-scope-preview')).toContainText('system review units');
+    let submitted;
+    await page.route('**/api/review',route=>{submitted=route.request().postDataJSON();return route.fulfill({status:202,json:{status:'ready'}});});
+    await page.getByRole('button',{name:'Run or continue STRIDE analysis',exact:true}).click();
+    await expect.poll(()=>submitted?.reviewScope).toBe('system');
+    await page.locator('.ws-tabs').getByRole('button',{name:'Threat register',exact:true}).click();
+    await expect(page.getByLabel('Threat record type',{exact:true})).toHaveValue('scenarios');
+    await page.locator('.ws-tabs').getByRole('button',{name:'Deployment context',exact:true}).click();
+    await expect(page.locator('#ws-body')).toContainText('Review can proceed now');
+    const card=page.locator('.dc-question').filter({has:page.getByRole('heading',{name:'Who can reach the listed network entry points?'})});
+    await card.getByText('Evidence and affected conclusions',{exact:true}).click();
+    await card.locator('[data-deployment-evidence]').first().click();
+    await expect(page.locator('#dc-code')).toContainText('requests.get');
+    await page.locator('#dc-reviewer').fill('Security champion');
+    await card.getByRole('radio',{name:'Management network only',exact:true}).check();
+    await card.getByRole('button',{name:'Save response',exact:true}).click();
+    await expect(page.locator('#ws-body')).toContainText('reported deployment context');
+    await page.getByText('Optional configuration evidence',{exact:true}).click();
+    await page.locator('#dc-artifact').setInputFiles({name:'deployment.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({Authentication:{secret:'never-display-this-value'}}))});
+    await page.getByRole('button',{name:'Import declarations',exact:true}).click();
+    await page.getByText('Optional configuration evidence',{exact:true}).click();
+    await expect(page.locator('#ws-body')).toContainText('Authentication');
+    await expect(page.locator('#ws-body')).not.toContainText('never-display-this-value');
+    await page.goto('about:blank');await app.close();app=await serve(options);await page.goto(app.url);
+    await page.getByRole('button',{name:'Open saved graph',exact:true}).click();
+    await page.getByRole('button',{name:'3 · System model',exact:true}).click();
+    await page.locator('.ws-tabs').getByRole('button',{name:'Deployment context',exact:true}).click();
+    await expect(page.locator('input[name="dc-exposure"][value="1"]')).toBeChecked();
+    expect(builds).toBe(0);expect(errors).toEqual([]);
+  } finally {await page.goto('about:blank');await app?.close();await fs.rm(f.dir,{recursive:true,force:true});}
+});

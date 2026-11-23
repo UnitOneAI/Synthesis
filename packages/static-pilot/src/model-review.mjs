@@ -94,6 +94,9 @@ export function modelConfig(
     throw new Error(
       "Set --model to an approved provider model ID (letters, digits, dots, underscores and hyphens)",
     );
+  const requestTimeoutMs = Number(env.SYNTHESIS_REQUEST_TIMEOUT_MS ?? 300000);
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 600000)
+    throw Error("SYNTHESIS_REQUEST_TIMEOUT_MS must be an integer from 1000 to 600000");
   const apiKey = env[PROVIDERS[provider].key];
   if (
     env.SYNTHESIS_STRUCTURED_OUTPUTS !== undefined &&
@@ -110,6 +113,7 @@ export function modelConfig(
     provider,
     model,
     apiKey,
+    requestTimeoutMs,
     ...(env.SYNTHESIS_STRUCTURED_OUTPUTS === "1"
       ? { structuredOutputs: true }
       : {}),
@@ -490,9 +494,13 @@ export function validateReview(value, packet) {
 async function responseJson(response) {
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error(
-      `Provider returned HTTP ${response.status}; check access, model ID, quota and provider policy`,
-    );
+    const error = new Error(`Provider returned HTTP ${response.status}; check access, model ID, quota and provider policy`);
+    const retryAfter = response.headers?.get('retry-after');
+    if (retryAfter) {
+      const delay = /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+      if (Number.isFinite(delay)) error.retryAfterMs = Math.max(0, delay);
+    }
+    throw error;
   }
   const chunks = [];
   let bytes = 0;
@@ -683,8 +691,8 @@ export async function requestReview(
       method: "POST",
       redirect: "error",
       signal: options.signal
-        ? AbortSignal.any([options.signal, AbortSignal.timeout(120000)])
-        : AbortSignal.timeout(120000),
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(config.requestTimeoutMs ?? 300000)])
+        : AbortSignal.timeout(config.requestTimeoutMs ?? 300000),
       headers: {
         "Content-Type": "application/json",
         ...(gateway
@@ -723,7 +731,7 @@ export async function requestReview(
     )
       throw error;
     throw new Error(
-      "Provider request failed or timed out; no automatic retry or provider fallback",
+      "Provider request failed or timed out; usage may be unknown",
     );
   }
   const reason = anthropic

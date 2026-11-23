@@ -185,7 +185,7 @@ export function registerCsv(model, kind) {
         r.rowKind,
         ...r.cells.map(
           (c) =>
-            `${c.analysisLabel}; reviewer state: ${c.state}; ${c.scenarioCount} scenarios; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
+            `${c.analysisLabel}; reviewer state: ${c.state}; ${c.scenarioCount} scenarios; ${c.questionCount || 0} architecture questions; ${c.checklistCount} checklist items; ${c.threatIds.join(" ")}`,
         ),
       ]),
     ];
@@ -345,7 +345,7 @@ export function systemReport(model) {
         ),
       ),
     ]),
-  )}<p>${s.coverage.unresolvedFlows} unresolved relationships. ${s.coverage.pendingBoundaries} boundary decisions pending. Provider submission is not human review coverage.</p><h3>Source parsing</h3><p>${e(display(model.sourceGraph?.coverage || { status: "Not built" }))}</p><h3>STRIDE analysis coverage</h3><p>${model.aiReview?.coverage ? `${Number(model.aiReview.coverage.completedBatches || 0)} of ${Number(model.aiReview.coverage.totalBatches || 0)} batches completed; ${Number(model.aiReview.coverage.failedBatches || 0)} failed; ${Number(model.aiReview.coverage.pendingBatches || 0)} pending. Status: ${e(model.aiReview.status)}.` : "Analysis has not run."} Batch completion does not establish semantic completeness or reviewer acceptance.</p>${tokenUsageHtml(model)}<h2>System context</h2>${systemSvg(model, { level: "context" })}<h2>Overall system DFD</h2>${systemSvg(model)}${[
+  )}<p>${s.coverage.unresolvedFlows} unresolved relationships. ${s.coverage.pendingBoundaries} boundary decisions pending. Provider submission is not human review coverage.</p><h3>Source parsing</h3><p>${e(display(model.sourceGraph?.coverage || { status: "Not built" }))}</p><h3>STRIDE analysis coverage</h3><p>${model.aiReview?.coverage ? `${Number(model.aiReview.coverage.completedBatches || 0)} of ${Number(model.aiReview.coverage.totalBatches || 0)} batches completed; ${Number(model.aiReview.coverage.failedBatches || 0)} failed; ${Number(model.aiReview.coverage.pendingBatches || 0)} pending. Status: ${e(model.aiReview.status)}.` : "Analysis has not run."} Batch completion does not establish semantic completeness or reviewer acceptance.</p>${model.aiReview?.reviewScope === 'system' ? `<h3>System review scope and deployment assumptions</h3><p>${model.aiReview.scope.interfaceIds.length} system-scope interfaces; ${model.aiReview.scope.deferredInterfaces} interfaces deferred to deep review. Profile: ${e(s.deploymentContext.profile)}. Deployment is not verified.</p>${table(['Area', 'Assumption or reported context', 'Basis'], s.deploymentContext.questions.map(q => [q.name, q.statement, q.state]))}` : ''}${tokenUsageHtml(model)}<h2>System context</h2>${systemSvg(model, { level: "context" })}<h2>Overall system DFD</h2>${systemSvg(model)}${[
     "actors",
     "boundaries",
     "domains",
@@ -389,7 +389,7 @@ export function systemReport(model) {
       r.name,
       ...r.cells.map(
         (c) =>
-          `${c.analysisLabel}; reviewer state ${c.state}: ${c.scenarioCount} scenarios, ${c.checklistCount} checklist items`,
+          `${c.analysisLabel}; reviewer state ${c.state}: ${c.scenarioCount} scenarios, ${c.questionCount || 0} architecture questions, ${c.checklistCount} checklist items`,
       ),
     ]),
   )}<h2>Threat register</h2><p>${s.threats.filter((t) => t.origin !== "review checklist").length} threat scenarios and ${s.threats.filter((t) => t.origin === "review checklist").length} checklist items. These are conditional review records, not confirmed vulnerabilities.</p>${s.threats
@@ -527,7 +527,7 @@ export function systemPrintReport(model) {
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
   const summary = hasResults
-    ? `${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
+    ? `<h2>Priority threats</h2><p>Highest review priorities from returned scenarios. This order is not a confirmed severity rating.</p>${scenarios.slice(0, 6).map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>${e(t.reviewPriority.label)}</strong> · Validation: ${e(t.validation?.assessment || 'not-assessed')}</p><p>${e(t.analysis?.impact || t.asset)}</p><p><strong>Actor:</strong> ${e(names(t.actorIds, 'Not established'))}</p><p><strong>Trust crossing:</strong> ${e(names(t.boundaryIds, 'Not established; needs evidence'))}</p><p><strong>Control evidence:</strong> ${e(t.validation?.counterEvidence || t.controls || 'Not established')}</p><p><strong>Next action:</strong> ${e(t.validation?.missingEvidence?.join('; ') || t.mitigation)}</p></article>`).join('')}${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
         ["Threat / affected scope", "Why it matters", "Next action"],
         scenarios.map((t) => [
           `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,
@@ -547,7 +547,7 @@ export function systemPrintReport(model) {
         r.name,
         ...r.cells.map(
           (c) =>
-            `${c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.failedEvidence ? "; failed packets" : ""}`,
+            `${c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.questionCount ? `; ${c.questionCount} architecture questions` : ''}${c.failedEvidence ? "; failed packets" : ""}`,
         ),
       ]),
   )}<h2>Threat actors linked to returned scenarios</h2><p>These profiles describe the access assumed by the scenarios. Awaiting reviewer confirmation means the access assumption has not been accepted; it does not mean a model request is still running.</p>${table(
@@ -569,7 +569,7 @@ export function systemPrintReport(model) {
           c
             ? `${c.reference}: ${c.from} → ${c.to}`
             : "No resolved crossing established",
-          `${b.enforcement || "Enforcement not established"}. ${disposition(b)}. Threats: ${threatRefs("boundaryIds", b.id)}`,
+          `${b.enforcement || "Enforcement not established"}. ${c?.basis === 'unresolved' ? 'Candidate crossing: peer/access unresolved. ' : ''}${disposition(b)}. Threats: ${threatRefs("boundaryIds", b.id)}`,
         ]),
       ),
   )}<h2>Threat details</h2><p>${detailed.length} of ${scenarios.length} scenarios shown in detail, ordered by review priority. Every current scenario is in the summary above; complete details remain in the HTML/JSON exports. This report excludes repeated checklist text and empty property rows.</p>${
@@ -577,6 +577,10 @@ export function systemPrintReport(model) {
       ? detailed
           .map((t) => {
             const paragraphs = [
+              ["Independent source assessment", t.validation?.assessment !== 'not-assessed' ? t.validation?.assessment : 'Not assessed'],
+              ["Validation counterevidence", t.validation?.counterEvidence],
+              ["Missing control evidence", t.validation?.missingEvidence?.join('; ')],
+              ["Validated source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
               ["Impact", t.analysis?.impact || t.asset],
               [
                 "Access and prerequisites",
@@ -584,10 +588,9 @@ export function systemPrintReport(model) {
               ],
               [
                 "Code path",
-                names(
-                  t.flowIds,
-                  "No connected flow established for this scenario",
-                ),
+                t.flowIds.length ? names(t.flowIds) : t.candidateFlowIds?.length
+                  ? "Candidate path; peer or deployment unresolved: " + names(t.candidateFlowIds)
+                  : "No connected flow established for this scenario",
               ],
               [
                 "Trust crossing",
@@ -640,8 +643,10 @@ export function systemPrintReport(model) {
       : ""
   }`
     : "<p>No current threat scenarios recorded in this report. Resume a successful STRIDE review before producing a findings report. Historical records and static planning inputs remain available in the workspace and complete exports.</p>";
+  const deployment = hasResults && review.reviewScope === 'system'
+    ? `<h2>Deployment assumptions and review scope</h2><p>${e(s.deploymentContext.profile)} · ${e(s.deploymentContext.profileStatus)}. ${review.scope.interfaceIds.length} interfaces in system scope; ${review.scope.deferredInterfaces} deferred to deep code review. Deferred scope is not security clearance.</p>${table(['Area', 'Assumption or reported context', 'Basis'], s.deploymentContext.questions.map(q => [q.name, q.statement, q.state]))}<p>Responses are optional. Unconfirmed deployment context remains explicit; completed analysis does not approve actor access or trust boundaries.</p>` : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories selected. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
     ["Repository", "Collection status"],
     model.sources.map((r) => [r.name, r.status]),
-  )}${summary}${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
+  )}${deployment}${summary}${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
 }

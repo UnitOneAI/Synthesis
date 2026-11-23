@@ -1,6 +1,22 @@
 # Windows: static system threat modeling
 
-## Current update: external-first review, faster planning and current-results reports
+## System threat model and optional deployment review
+
+Update from `main` using the commands below. The saved graph and compatible completed reviews are retained.
+
+1. Restart with the same source root and workspace. In Sources choose **Open saved graph**. No extraction rebuild is required for unchanged compatible source.
+2. Enable **Include hash-checked, redacted code context in STRIDE** in Sources for source-backed review. Restarted graphs retrieve hash-checked windows from the local clones; the model does not need stored raw excerpts.
+3. Open **4 · STRIDE matrix**. Set **Review scope → System threat model** and click **Preview system scope**. It reports the smaller system-unit plan and the code scope deferred to deeper review, without making a model call.
+4. Start with one request and one worker. After a valid result appears, use up to four workers and **Run until complete**. The request budget is disabled in this mode. The token target is advisory; the invalid-response and provider-error guards still stop a broken run.
+5. Review current threats, their priorities, evidence, actors and boundary transitions. Partial current results can be exported immediately using **Export STRIDE review · PDF**.
+6. **System model → Deployment context** is optional. Keep assumptions and run now, or answer the few cards. A non-default deployment statement requires a reviewer name. Answering a card reopens only dependent system units; choosing a profile or importing configuration conservatively reopens system review. None of these actions approves a trust boundary or verifies deployed access.
+7. Use **Deep code-path STRIDE** separately when deeper callable/path coverage is needed. Scope checkpoints are retained independently and compatible completed results are reused. System review deliberately does not mark deferred deep interfaces complete. CWE review remains unchanged.
+
+Optional configuration import accepts JSON, XML, `.config`, `.wxs` and `.wxi`, up to 256 KiB each and eight artifacts. Only recognized declaration names and the file hash are retained; values and credentials are discarded. File content is never executed. Selection of a discovered configuration profile is analysis context, not a claim that it is deployed.
+
+See [design and limits](../design/deployment-context-and-system-review.md) and [qualification](../testing/deployment-system-review.md).
+
+## Previous update: external-first review, faster planning and current-results reports
 
 This update reuses the existing saved graph. It does not change extraction rules, the STRIDE prompt or guidance version, and reuses successful responses whose packet hashes still match. Repository-wide classification citations are now restricted to submitted evidence; affected scopes are repacked and may need fresh model review. Before starting the next STRIDE action, the server saves the prior successful checkpoint under `review-history/stride-<digest>.json` in the workspace. These historical JSON archives are separate from current coverage and do not replace a full workspace backup. Records already marked stale by an earlier methodology change remain historical.
 
@@ -10,7 +26,7 @@ A run now stops new requests after three consecutive invalid responses, or six i
 
 After updating, open the saved graph, enable **Include hash-checked, redacted code context in STRIDE**, and verify one request with one worker and **Run until complete** off. If it succeeds, choose four workers and **Run until complete**. Do not rebuild unchanged clones to clear a model error. For an interrupted/failed run, download **Export errors** and save the small JSON under your exports directory.
 
-STRIDE now runs **External interfaces first** automatically. The matrix shows five stages: declared external interfaces, potential entry points, their internal paths/context, remaining internal actors/boundaries, then supporting/test code. Four workers run within a stage; the next stage waits for it to settle. If a stage has failed packets, later scope stays pending until the error is resolved and you continue. Unknown exposure is not labeled internet-facing. This ordering alone does not invalidate compatible completed packets or require rebuilding the graph.
+STRIDE now runs **External interfaces first** automatically. The matrix shows five stages: declared external interfaces, potential entry points, their internal paths/context, remaining internal actors/boundaries, then supporting/test code. Four workers run within a stage; the next stage waits for it to settle. In deep code-path scope, a failed stage keeps later scope pending until resolved. In system scope, an isolated invalid unit remains failed while later stages proceed; final status stays partial until failures are resolved. Unknown exposure is not labeled internet-facing. This ordering alone does not invalidate compatible completed packets or require rebuilding the graph.
 
 The default PDF now shows current returned results, with a prioritized summary, linked actors/boundaries and readable threat details. If analysis has not produced a current successful checkpoint, it says **No current STRIDE results** and omits static planning registers and stale findings. Partial current results remain exportable. Complete HTML/JSON exports retain full records. See [design and limits](../design/stride-planning-recovery.md).
 
@@ -454,3 +470,29 @@ The same PDF remains available under **System model → Export review package �
 After updating and restarting Synthesis, existing saved findings export with the UnitOne logo and **Confidential — Do not share** notice. No graph rebuild, model rerun, new VM dependency or report setting is required. Use **CWE code review → CWE evidence · PDF** or **STRIDE matrix → Export STRIDE review · PDF**. The CWE report starts with a compact summary by CWE, candidate count, scanner/model totals and distinct affected repository counts; unmapped security issues remain included.
 
 In Edge/Chrome's print dialog choose **Save as PDF** and turn **Headers and footers** off to exclude browser-added timestamps, URLs and titles. Save outside the repositories. The downloaded CWE HTML uses the same layout and embeds the logo for offline printing. Detailed execution/coverage data remain in the UI and JSON exports; STRIDE's partial or historical review status remains in its PDF.
+
+### Recovering an interrupted STRIDE review
+
+A saved `2,309 packets` result (or any old deep-review count) is not proof that a new **System threat model** action ran. Check the saved review scope separately from the selector for the next action. Use **Preview system scope**, then select **System threat model** before starting. Existing compatible system and deep results remain separately resumable; switching scope does not declare deep work completed.
+
+STRIDE **Run until complete** now retries a transient transport/timeout or HTTP 408/429/500/502/503/504/529 failure at most twice per packet, with backoff. It attempts one corrective retry for an invalid response using the existing strict citation rules. Each actual request retains its own token record, including unknown usage after timeout. Bounded request-budget actions do not add automatic retries. Authorization/configuration failures remain immediate stops. Persistent invalid output still trips the existing failure guard. A gateway Retry-After longer than 60 seconds stops for later continuation rather than retrying early.
+
+An isolated invalid system-review unit remains failed but does not prevent later system stages from being attempted. That pass stays **partial**, never completed coverage. Systemic provider failures and the invalid-response guard still stop further dispatch. Deep-code review retains its existing stage gating.
+
+The default provider deadline is now five minutes. To set it explicitly in the same PowerShell window before starting the server:
+
+```powershell
+$env:SYNTHESIS_REQUEST_TIMEOUT_MS = '300000'
+```
+
+This only controls the local request deadline; it cannot extend a gateway's own timeout. Export errors now includes the saved review scope and the specific stopping request separately from earlier citation failures. Do not rebuild an unchanged graph or delete successful reviews to resolve a transient provider error.
+
+## Use completed STRIDE scenarios without repeating discovery
+
+Open the saved graph, then **4 · STRIDE matrix**. Current returned scenarios appear in **Priority threats**. Click a card to see its actor, candidate trust crossings, source references and assessment. Architecture questions are counted separately from source-referenced scenarios.
+
+Expand **Validate saved threats against code and controls**. Enable source sharing only for the configured approved provider. Leave **Scenario scope → Top six priorities**, choose **6** requests, then select **Validate saved threats**. This uses the saved graph to retrieve named controls across selected repositories. It preserves STRIDE results. After inspecting the first results, select **All current source-referenced scenarios** and **Continue across saved scenarios** to drain the finite assessment queue. Each scenario has at most three rounds; missing deployment facts remain explicit gaps. This assessment action is serial. STRIDE discovery retains its separate parallel workers.
+
+For a useful system-level completion, select **Review scope → System threat model**, **Preview system scope**, four workers (subject to gateway limits), and **Run until complete**. This is a scoped architecture review, not exhaustive code-path coverage. System and deep review preserve separate compatible checkpoints. Do not rebuild an unchanged graph merely to continue review.
+
+Export the current partial or completed report with **Export STRIDE review · PDF**, then **Print / Save as PDF**. **Export errors** includes assessment state and failure metadata. Browser exports go to the browser's download location; select your intended export folder explicitly. Automatic traces remain under the configured trace directory.

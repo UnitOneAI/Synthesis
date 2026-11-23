@@ -303,6 +303,13 @@ export async function reviewSecurityIssues(
     sourceRoot,
     config,
     budget = 4,
+    candidateIssues,
+    followMissingControls = false,
+    retryInvalidAssessment = false,
+    reportField = 'securityReview',
+    contextKeyOverride,
+    packetBuilder = investigationPacket,
+    runUntilComplete = false,
     signal,
     fetchImpl = fetch,
     checkpoint,
@@ -315,7 +322,7 @@ export async function reviewSecurityIssues(
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("Security request budget must be 1–100");
   const context = securityContext(model),
-    contextKey = securityContextKey(model);
+    contextKey = contextKeyOverride || securityContextKey(model);
   const key = sha(
     JSON.stringify([
       contextKey,
@@ -327,8 +334,8 @@ export async function reviewSecurityIssues(
       sha(JSON.stringify(SECURITY_RESPONSE_SCHEMA)),
     ]),
   );
-  const prior = model.securityReview?.key === key ? model.securityReview : null;
-  const issues = securityIssues(model)
+  const prior = model[reportField]?.key === key ? model[reportField] : null;
+  const issues = (candidateIssues || securityIssues(model))
     .filter((i) => !i.stale)
     .slice(0, INVESTIGATION_LIMITS.issues);
   const report = {
@@ -353,7 +360,7 @@ export async function reviewSecurityIssues(
     startedAt: new Date().toISOString(),
     limits: INVESTIGATION_LIMITS,
   };
-  model.securityReview = report;
+  model[reportField] = report;
   beginUsageRun(model);
   const save = async () => checkpoint?.(report);
   const event = async (type, data) => {
@@ -387,7 +394,7 @@ export async function reviewSecurityIssues(
   try {
     for (const item of queue) {
       if (signal?.aborted) throw Error("Security review cancelled");
-      if (report.callsThisRun >= budget) break;
+      if (!runUntilComplete && report.callsThisRun >= budget) break;
       const old = report.entries.find(
         (e) => e.issueId === item.issue.id && e.issueHash === item.hash,
       );
@@ -415,7 +422,7 @@ export async function reviewSecurityIssues(
       if (
         old &&
         (old.rounds >= INVESTIGATION_LIMITS.contextRounds ||
-          (old.assessment === "needs-context" && !old.followUp?.length))
+          (old.assessment === "needs-context" && !old.followUp?.length && !(followMissingControls && old.missingEvidence?.some(s => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]/.test(s)))))
       )
         continue;
       const entry = {
@@ -446,13 +453,14 @@ export async function reviewSecurityIssues(
       report.entries.push(entry);
       let attempt;
       try {
-        const packet = await investigationPacket(
+        const packet = await packetBuilder(
           model,
           manifest,
           sourceRoot,
           item.issue,
           old?.followUp || [],
           context,
+          old?.missingEvidence || [],
         );
         if (old?.error?.startsWith("Security assessment failed"))
           packet.previousValidationFailure = old.error;
@@ -490,7 +498,7 @@ export async function reviewSecurityIssues(
         entry.attemptId = attempt.id;
         report.callsThisRun++;
         progress?.(
-          `Security assessment: ${report.callsThisRun}/${budget} requests`,
+          `${reportField === 'threatValidation' ? 'Threat validation' : 'Security assessment'}: ${report.callsThisRun}${runUntilComplete ? '' : '/' + budget} requests`,
         );
         await event("request-started", {
           issueId: item.issue.id,
@@ -554,9 +562,10 @@ export async function reviewSecurityIssues(
         )
       )
         break;
+      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < 2 && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         entry.assessment === "needs-context" &&
-        entry.followUp?.length &&
+        (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]/.test(s)))) &&
         entry.rounds < INVESTIGATION_LIMITS.contextRounds
       )
         queue.push(item);

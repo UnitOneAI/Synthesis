@@ -22,6 +22,7 @@ let repositories = [],
   diagramUrl,
   inferenceInitialized = false;
 let providerAvailable = false;
+let strideReviewScope = 'system';
 let navigationRevision = 0,
   jobNavigationRevision = 0;
 const esc = (value) =>
@@ -350,7 +351,15 @@ function renderModel() {
       tab("exploration");
       await window.SynthesisExploration.showIssue(issue);
     },
+    validateThreats: async (input) => {
+      jobNavigationRevision = navigationRevision;
+      await api('threats/validate', { modelRevision: model.modelRevision, ...input });
+      clearInterval(polling);
+      polling = setInterval(() => status().catch(e => message(e.message, true)), 750);
+      await status();
+    },
     startReview: async (budget, controls = {}) => {
+      strideReviewScope = controls.reviewScope || 'system';
       $("review-until-complete").checked = controls.runUntilComplete === true;
       $("review-token-target").value = controls.tokenTarget ?? "";
       $("review-workers").value = controls.concurrency ?? 2;
@@ -691,6 +700,7 @@ $("run-review").onclick = async () => {
     jobNavigationRevision = navigationRevision;
     await api("review", {
       modelRevision: model.modelRevision,
+      reviewScope: strideReviewScope,
       maxBatches: Number($("review-budget").value),
       concurrency: Number($("review-workers").value),
       runUntilComplete: $("review-until-complete").checked,

@@ -466,3 +466,14 @@ nav[aria-label="Workflow"] button {
   outline: 2px solid #1555c4;
   outline-offset: 2px;
 }
+/* Deployment review stays optional and readable in remote desktop windows. */
+.dc-header { padding: 18px; background: #f2f6fb; border: 1px solid #cad8ea; border-radius: 8px; }
+.dc-question { padding: 18px; margin: 16px 0; border: 1px solid #cad8ea; border-radius: 8px; background: white; }
+.dc-question fieldset { border: 0; margin: 14px 0; padding: 0; }
+.dc-choice { display: flex; gap: 10px; align-items: baseline; padding: 9px; margin: 5px 0; border: 1px solid #dce3ed; border-radius: 6px; }
+.dc-choice:has(input:checked) { background: #eef4ff; border-color: #6c91c6; }
+.dc-choice input { width: auto; }
+.dc-question textarea { display: block; width: 100%; min-height: 64px; }
+.dc-evidence { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; margin: 4px 0; font-size: 12px; }
+#dc-code pre { max-height: 440px; overflow: auto; background: #f3f6fa; padding: 16px; white-space: pre-wrap; }
+.ws-priority-panel{margin:16px 0;padding:18px;border:1px solid #98b4d4;border-left:5px solid #245a9a;border-radius:8px;background:#f4f8fd}.ws-priority-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.ws-priority-card{display:flex;flex-direction:column;gap:8px;text-align:left!important;background:white!important;color:#172f4b!important;border:1px solid #bacde2!important;padding:14px!important;white-space:normal}.ws-priority-card strong{line-height:1.4}.ws-priority-card p{margin:0}.ws-validation-badge{align-self:flex-start;border-radius:4px;padding:3px 7px;background:#e5edf6;font-size:12px;font-weight:600}.ws-priority-panel details{margin-top:16px}.ws-priority-panel details label{display:block;margin:8px 0}

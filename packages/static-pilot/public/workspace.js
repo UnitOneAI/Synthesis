@@ -19,11 +19,15 @@
     update,
     s,
     startReview,
+    validateThreats,
     stopReview,
     openExploration,
     providerAvailable = false,
     jobState = { status: "idle" },
     requestBudget = 12,
+    reviewScope = 'system',
+    showAllDeploymentQuestions = false,
+    deploymentClaimCount = 20,
     reviewWorkers = 2,
     runUntilComplete = false,
     tokenTarget = "",
@@ -35,7 +39,7 @@
     focus = "",
     actor = "",
     query = "",
-    threatType = "all",
+    threatType = "scenarios",
     categoryFilter = "",
     dispositionFilter = "",
     page = 0,
@@ -239,6 +243,7 @@
       ["system", "System DFD"],
       ["actors", "Threat actors"],
       ["boundaries", "Trust boundaries"],
+      ["deployment", "Deployment context"],
       ["matrix", "STRIDE matrix"],
       ["threats", "Threat register"],
       ["components", "Components"],
@@ -258,8 +263,27 @@
     renderBody();
     renderInspector();
   }
+  let deploymentReviewer = '';
+  async function saveDeployment(payload) {
+    if (saving) return;
+    deploymentReviewer = root.querySelector('#dc-reviewer')?.value || deploymentReviewer;
+    saving = true; root.inert = true;
+    try {
+      const value = await api('deployment-context', { revision: s.deploymentContext.revision, ...payload });
+      update(value); notify('Deployment context saved. Affected results require review; compatible results remain saved.');
+    } catch (error) { notify(error.message, true); }
+    finally { saving = false; root.inert = false; }
+  }
+  function renderDeployment(body) {
+    const context = s.deploymentContext;
+    if (!context) { body.textContent = 'Refresh to load deployment context.'; return; }
+    const evidenceButton = id => { const item = model.evidence.find(e => e.id === id); return item ? `<button class="dc-evidence" data-deployment-evidence="${e(id)}">${e(item.repository + '/' + item.path + ':' + (item.line || item.pointer || 1))}</button>` : ''; };
+    const cards = (showAllDeploymentQuestions ? context.questions : context.questions.slice(0, 3)).map(q => `<article class="dc-question"><span class="badge">${e(q.state)}</span><h3>${e(q.question)}</h3><p><strong>Current assumption or statement:</strong> ${e(q.statement)}</p><p>${e(q.why)} Affects ${q.componentIds.length} components, ${q.flowIds.length} flows, ${q.boundaryIds.length} candidate boundaries and ${q.threatIds.length} current scenarios.</p><fieldset><legend>Optional review response</legend>${q.choices.map((choice, index) => `<label class="dc-choice"><input type="radio" name="dc-${e(q.id)}" value="${index}" ${index === (q.answer?.choice || 0) ? 'checked' : ''}>${e(choice)}</label>`).join('')}</fieldset><label>Rationale or scope clarification (optional)<textarea id="dc-rationale-${e(q.id)}">${e(q.answer?.rationale || '')}</textarea></label><button data-deployment-answer="${e(q.id)}">Save response</button><details><summary>Evidence and affected conclusions</summary>${q.evidenceIds.slice(0, 3).map(evidenceButton).join('')}<p>${e(q.evidenceIds.length)} evidence references retained.</p>${[...q.threatIds.slice(0, 3), ...q.boundaryIds.slice(0, 3), ...q.flowIds.slice(0, 2)].map(id => `<button data-select="${e(id)}">${e(find(id)?.reference || find(id)?.name || id)}</button>`).join('')}</details></article>`).join('');
+    body.innerHTML = `<section class="dc-header"><p class="eyebrow">ASSUMPTIONS FIRST · STATIC ONLY</p><h2>Deployment context</h2><p>Review can proceed now. These optional responses refine the model; they do not block analysis.</p><div class="toolbar"><label>Configuration profile<select id="dc-profile">${['Unconfirmed source-defined deployment', ...context.profiles].map(p => option(p, p, p === context.profile)).join('')}</select></label><button id="dc-run-system">Review system threat model</button></div><p>${e(context.profileStatus)}. Profile selection is context, not proof of deployment or a filter that hides alternative configurations.</p></section><h3>Questions affecting risk</h3><p>${context.assumptions} assumptions in use. Showing ${Math.min(showAllDeploymentQuestions ? context.questions.length : 3, context.questions.length)} of ${context.questions.length} optional questions. You can review them after STRIDE returns results.</p><label>Reviewer (required only when reporting deployment facts)<input id="dc-reviewer" autocomplete="name" value="${e(deploymentReviewer)}"></label>${cards || '<p>No deployment questions derived from collected interfaces.</p>'}${context.questions.length > 3 ? `<button id="dc-show-all">${showAllDeploymentQuestions ? 'Show fewer questions' : 'Show all questions'}</button>` : ''}<details class="dc-question"><summary>Optional configuration evidence</summary><p>Import a small JSON/XML configuration. Only recognized declaration names and its hash are retained; raw values and credentials are discarded. Imported configuration does not prove deployed settings.</p><input id="dc-artifact" type="file" accept=".json,.xml,.config,.wxs,.wxi"><button id="dc-import-artifact">Import declarations</button>${context.artifacts.map(a => `<p>${e(a.name)} · ${e(a.declarations.map(d => d.key).join(', '))}<br><small>SHA256: ${e(a.sha256)}</small></p>`).join('')}</details><h3>Source evidence</h3><p>Source declarations, deployment status and reviewer decisions are separate. A control in a component does not prove enforcement on every route.</p><div class="table-wrap"><table><thead><tr><th>Area / component</th><th>Evidence</th><th>Deployment</th><th>Review</th></tr></thead><tbody>${context.claims.slice(0, deploymentClaimCount).map(c => `<tr><td>${e(c.area)}<br>${e(c.component)}</td><td>${c.evidenceIds.slice(0, 2).map(evidenceButton).join('')}<small>${c.evidenceIds.length} references · ${e(c.evidenceBasis?.join(', ') || c.basis)}</small></td><td>${e(c.deploymentStatus)}</td><td>${e(c.reviewDecision)}</td></tr>`).join('')}</tbody></table></div><p>Showing ${Math.min(deploymentClaimCount, context.claims.length)} of ${context.claims.length} evidence groups.</p>${context.claims.length > deploymentClaimCount ? '<button id="dc-more-evidence">Show more evidence</button>' : ''}<section id="dc-code" aria-live="polite"></section>`;
+  }
   function renderBody() {
     const body = root.querySelector("#ws-body");
+    if (view === 'deployment') { renderDeployment(body); return; }
     if (view === "system") {
       const nodes = [...s.components, ...s.entities];
       body.innerHTML = `<div class="toolbar"><label>View<select aria-label="View" id="ws-level">${[
@@ -313,8 +337,8 @@
         ? `<section class="ws-last-review-failure" role="alert"><strong>Latest STRIDE attempt failed${lastFailure.stage === "before-review-checkpoint" ? " before the first review checkpoint" : ""}</strong><p>${e(lastFailure.code)} · ${e(lastFailure.action)}</p><p>Saved prior results remain below. Export errors for the failure stage and timestamp.</p></section>`
         : "";
       const stageRows = !stale && review?.reviewOrder?.stages;
-      const stagePanel = `<section class="ws-review-order"><h3>External interfaces first</h3><p>Review declared external interfaces, potential external entry points, their internal paths, remaining internal actors and boundaries, then supporting/test code. Unknown exposure stays high priority without being labeled internet-facing. Each stage settles before the next starts; failed stages keep later work pending.</p>${stageRows ? `<table><thead><tr><th>Review stage</th><th>Completed / planned</th><th>Failed</th><th>Pending</th></tr></thead><tbody>${stageRows.map((stage) => `<tr><th>${e(stage.label)}<small>${e(stage.description)}</small></th><td>${stage.completed} / ${stage.total}</td><td>${stage.failed}</td><td>${stage.pending}</td></tr>`).join("")}</tbody></table><p>Counts are packets, not confirmed exposure or approved trust boundaries. Shared packets can include supporting context.</p>` : `<p>Current stage coverage is not available yet. Start a review to prepare the plan; historical counts are not current coverage.</p>`}</section>`;
-      body.innerHTML = `${failureNotice}${staleNotice}${stagePanel}<div class="ws-analysis"><div><strong>${stale ? "Historical packet counts · " : ""}${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}" ${runUntilComplete ? "disabled" : ""}></label><label>Parallel review workers<select id="ws-review-workers" ${["running", "cancelling"].includes(jobState.status) ? "disabled" : ""}>${[1, 2, 3, 4].map((v) => option(v, v, v === reviewWorkers)).join("")}</select></label><label><input id="ws-until-complete" type="checkbox" ${runUntilComplete ? "checked" : ""}>Run until complete</label><label>Token target this action (advisory)<input id="ws-token-target" type="number" min="1" step="1" placeholder="No target" value="${e(tokenTarget)}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p id="ws-run-progress" role="status">${e(window.SynthesisReviewRun?.(model.aiReview) || "")}</p>${model.aiReview?.coverageEvidence ? `<div class="callout" role="status"><strong>Source and control review</strong><p>${e(model.aiReview.coverageEvidence.sourceWindows)} code windows supplied; ${e(model.aiReview.coverageEvidence.unresolved)} unresolved evidence items. Use Exploration to follow missing callers, controls and configuration across repositories.</p><p>ASVS requirement assessments: ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "source-supported").length)} source-supported, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "needs-context").length)} need context, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-reviewed").length)} not reviewed, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-applicable").length)} marked not applicable. Counts are per packet and requirement; they do not establish ASVS compliance.</p></div>` : ""}<div class="toolbar"><button data-ws-export="pdf">Export STRIDE review · PDF</button><span class="hint">Exports the latest saved review snapshot, including partial results, threat actors and trust boundaries. In-flight requests are not included until saved.</span></div><p class="hint">Parallel workers review separate packets using the same model; they reduce waiting, not total token usage. Reduce workers if the gateway limits concurrent requests. The limit does not increase automatically. Run until complete reviews pending packets across the saved repository scope without the 100-call or elapsed-time stop. Token targets are advisory and never stop a run. Stop at any time; provider failures and repeated invalid responses require attention. In bounded mode, request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap ws-matrix-scroll" role="region" aria-label="STRIDE matrix scroll area" tabindex="0"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+      const stagePanel = `<section class="ws-review-order"><h3>External interfaces first</h3><p>Review declared external interfaces, potential external entry points, their internal paths, remaining internal actors and boundaries, then supporting/test code. Unknown exposure stays high priority without being labeled internet-facing. ${review?.reviewScope === "system" ? "System stages proceed in priority order. Isolated failed units remain visible while later stages are reviewed; repeated failures still stop the run." : "Each stage settles before the next starts; failed stages keep later work pending."}</p>${stageRows ? `<table><thead><tr><th>Review stage</th><th>Completed / planned</th><th>Failed</th><th>Pending</th></tr></thead><tbody>${stageRows.map((stage) => `<tr><th>${e(stage.label)}<small>${e(stage.description)}</small></th><td>${stage.completed} / ${stage.total}</td><td>${stage.failed}</td><td>${stage.pending}</td></tr>`).join("")}</tbody></table><p>Counts are packets, not confirmed exposure or approved trust boundaries. Shared packets can include supporting context.</p>` : `<p>Current stage coverage is not available yet. Start a review to prepare the plan; historical counts are not current coverage.</p>`}</section>`;
+      body.innerHTML = `${failureNotice}${staleNotice}<p class="callout">System threat modeling reviews connected flows, entry points, workers, stores and controls first. Deployment assumptions let review proceed without answering questions. Deep code-path coverage remains separately selectable.</p><p class="hint">${model.aiReview ? `Saved results shown: ${model.aiReview.reviewScope === 'system' ? 'System threat model' : 'Deep code-path STRIDE'}.` : 'No saved STRIDE results.'} The scope selector controls the next action. Each scope retains its compatible completed work.</p><div id="ws-scope-preview">${model.aiReview?.reviewScope === 'system' ? `${model.aiReview.scope.interfaceIds.length} system-scope interfaces; ${model.aiReview.scope.deferredInterfaces} interfaces deferred to deep review. This is not whole-codebase clearance.` : ''}</div>${priorityThreatsHtml()}${stagePanel}<div class="ws-analysis"><div><strong>${stale ? "Historical packet counts · " : ""}${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Review scope<select id="ws-review-scope" ${['running', 'cancelling'].includes(jobState.status) ? 'disabled' : ''}><option value="system" ${reviewScope === 'system' ? 'selected' : ''}>System threat model</option><option value="deep" ${reviewScope === 'deep' ? 'selected' : ''}>Deep code-path STRIDE</option></select></label><button id="ws-preview-scope">Preview system scope</button><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}" ${runUntilComplete ? "disabled" : ""}></label><label>Parallel review workers<select id="ws-review-workers" ${["running", "cancelling"].includes(jobState.status) ? "disabled" : ""}>${[1, 2, 3, 4].map((v) => option(v, v, v === reviewWorkers)).join("")}</select></label><label><input id="ws-until-complete" type="checkbox" ${runUntilComplete ? "checked" : ""}>Run until complete</label><label>Token target this action (advisory)<input id="ws-token-target" type="number" min="1" step="1" placeholder="No target" value="${e(tokenTarget)}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p id="ws-run-progress" role="status">${e(window.SynthesisReviewRun?.(model.aiReview) || "")}</p>${model.aiReview?.coverageEvidence ? `<div class="callout" role="status"><strong>Source and control review</strong><p>${e(model.aiReview.coverageEvidence.sourceWindows)} code windows supplied; ${e(model.aiReview.coverageEvidence.unresolved)} unresolved evidence items. Use Exploration to follow missing callers, controls and configuration across repositories.</p><p>ASVS requirement assessments: ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "source-supported").length)} source-supported, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "needs-context").length)} need context, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-reviewed").length)} not reviewed, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-applicable").length)} marked not applicable. Counts are per packet and requirement; they do not establish ASVS compliance.</p></div>` : ""}<div class="toolbar"><button data-ws-export="pdf">Export STRIDE review · PDF</button><span class="hint">Exports the latest saved review snapshot, including partial results, threat actors and trust boundaries. In-flight requests are not included until saved.</span></div><p class="hint">Parallel workers review separate packets using the same model; they reduce waiting, not total token usage. Reduce workers if the gateway limits concurrent requests. The limit does not increase automatically. Run until complete reviews pending packets across the saved repository scope without the 100-call or elapsed-time stop. Token targets are advisory and never stop a run. Stop at any time; provider failures and repeated invalid responses require attention. In bounded mode, request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap ws-matrix-scroll" role="region" aria-label="STRIDE matrix scroll area" tabindex="0"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
         .filter((r) => r.rowKind === (window.wsRowKind || "component"))
         .map(
           (r) =>
@@ -324,10 +348,10 @@
                   .map((id) => threatIndex.get(id))
                   .filter((t) => t && (!actor || t.actorIds.includes(actor)));
                 const scenarios = ts.filter(
-                    (t) => t.origin !== "review checklist",
+                    (t) => t.origin !== "review checklist" && !t.metadataOnly,
                   ).length,
                   checklist = ts.length - scenarios;
-                return `<td><button data-select="${e(c.id)}" class="${scenarios ? "populated" : ""}"><b>${scenarios || (c.analysisStatus === "analyzed-no-scenario" ? "0" : "—")}</b>${scenarios ? `<small>threat scenario${scenarios === 1 ? "" : "s"}</small>` : ""}<small>${actor && !scenarios && c.scenarioCount ? "No scenarios for selected actor · " : ""}${e(c.analysisLabel || c.state.replaceAll("-", " "))}</small>${c.failedEvidence ? "<small>Failed packets</small>" : ""}${c.decision ? `<small>Review: ${e(c.state)}</small>` : ""}</button></td>`;
+                return `<td><button data-select="${e(c.id)}" class="${scenarios ? "populated" : ""}"><b>${scenarios || (c.analysisStatus === "analyzed-no-scenario" ? "0" : "—")}</b>${scenarios ? `<small>threat scenario${scenarios === 1 ? "" : "s"}</small>` : ""}<small>${actor && !scenarios && c.scenarioCount ? "No scenarios for selected actor · " : ""}${e(c.analysisLabel || c.state.replaceAll("-", " "))}</small>${c.questionCount ? `<small>${c.questionCount} architecture questions</small>` : ''}${c.failedEvidence ? "<small>Failed packets</small>" : ""}${c.decision ? `<small>Review: ${e(c.state)}</small>` : ""}</button></td>`;
               })
               .join("")}</tr>`,
         )
@@ -336,7 +360,12 @@
         )}</tbody></table></div>${!s.matrix.some((r) => r.rowKind === (window.wsRowKind || "component")) ? "<p>No subjects of this type. Component rows show analysis results without requiring boundary declarations.</p>" : ""}`;
       body.insertAdjacentHTML(
         "beforeend",
-        `<h3>${stale ? "Historical repository review progress" : "Repository review progress"}</h3><table><thead><tr><th>Repository</th><th>Reviewed interfaces</th><th>State</th></tr></thead><tbody>${(c?.repositories || model.sources.map((source) => ({ repository: source.name, reviewedInterfaces: 0, totalInterfaces: model.interfaces.filter((i) => i.repository === source.name).length, state: "not-reviewed" }))).map((r) => `<tr><td>${e(r.repository)}</td><td>${r.reviewedInterfaces} / ${r.totalInterfaces}</td><td>${e(r.state)}</td></tr>`).join("")}</tbody></table>`,
+        `<h3>${stale ? "Historical repository review progress" : model.aiReview?.reviewScope === 'system' ? "Repository system-review progress" : "Repository review progress"}</h3>${model.aiReview?.reviewScope === 'system' ? `<p>${model.aiReview.scope.deferredInterfaces} interfaces are deferred to deep review, outside the counts below.</p>` : ''}<table><thead><tr><th>Repository</th><th>Reviewed interfaces</th><th>State</th></tr></thead><tbody>${(c?.repositories || model.sources.map((source) => ({ repository: source.name, reviewedInterfaces: 0, totalInterfaces: model.interfaces.filter((i) => i.repository === source.name).length, state: "not-reviewed" }))).map((r) => {
+          const scoped = model.aiReview?.reviewScope === 'system' ? model.aiReview.scope.repositories.find(x => x.repository === r.repository) : null;
+          const total = scoped ? scoped.inScope : r.totalInterfaces;
+          const state = scoped && r.state !== 'unavailable' ? !total ? 'no system interfaces' : r.reviewedInterfaces === total ? 'submitted' : r.reviewedInterfaces ? 'partial' : 'not-reviewed' : r.state;
+          return `<tr><td>${e(r.repository)}</td><td>${r.reviewedInterfaces} / ${total}</td><td>${e(state)}</td></tr>`;
+        }).join("")}</tbody></table>`,
       );
       body.insertAdjacentHTML(
         "beforeend",
@@ -362,7 +391,7 @@
             (!categoryFilter || r.categories.includes(categoryFilter)))),
     );
     page = Math.max(0, Math.min(page, Math.ceil(filtered.length / 50) - 1));
-    body.innerHTML = `<div class="toolbar"><h3>${titles[view]}</h3>${["actors", "boundaries"].includes(view) ? "<p>Candidate profiles and boundaries are static inputs or analysis assumptions. Pending means awaiting reviewer confirmation, not a running model request. A successful STRIDE response does not automatically approve access assumptions or enforcement.</p>" : ""}${view === "threats" ? "<p>Sorted by explained review priority. Priority is not severity; deployment and exploitability require review.</p>" : ""}<input id="ws-search" type="search" aria-label="Search register" placeholder="Search names, access, evidence…" value="${e(query)}"><button data-new="${view}">Add ${view === "actors" ? "actor profile" : view === "boundaries" ? "trust boundary" : view === "threats" ? "threat scenario" : "record"}</button></div><div class="toolbar"><label>Disposition<select id="ws-disposition" aria-label="Register disposition">${[["", "All dispositions"], ...[...new Set(rows.map((r) => r.reviewState))].map((v) => [v, v.replaceAll("-", " ")])].map(([k, l]) => option(k, l, k === dispositionFilter)).join("")}</select></label>${
+    body.innerHTML = `${view === 'threats' ? priorityThreatsHtml() : ''}<div class="toolbar"><h3>${titles[view]}</h3>${["actors", "boundaries"].includes(view) ? "<p>Candidate profiles and boundaries are static inputs or analysis assumptions. Pending means awaiting reviewer confirmation, not a running model request. A successful STRIDE response does not automatically approve access assumptions or enforcement.</p>" : ""}${view === "threats" ? "<p>Sorted by explained review priority. Priority is not severity; deployment and exploitability require review.</p>" : ""}<input id="ws-search" type="search" aria-label="Search register" placeholder="Search names, access, evidence…" value="${e(query)}"><button data-new="${view}">Add ${view === "actors" ? "actor profile" : view === "boundaries" ? "trust boundary" : view === "threats" ? "threat scenario" : "record"}</button></div><div class="toolbar"><label>Disposition<select id="ws-disposition" aria-label="Register disposition">${[["", "All dispositions"], ...[...new Set(rows.map((r) => r.reviewState))].map((v) => [v, v.replaceAll("-", " ")])].map(([k, l]) => option(k, l, k === dispositionFilter)).join("")}</select></label>${
       view === "threats"
         ? `<label>Record type<select id="ws-threat-type" aria-label="Threat record type">${[
             ["all", "All records"],
@@ -388,6 +417,12 @@
         .join("") ||
       "<p>No records. Add an evidence-supported declaration or an explicit assumption.</p>"
     }</div><div class="toolbar"><button id="ws-prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="ws-next" ${(page + 1) * 50 >= filtered.length ? "disabled" : ""}>Next</button></div>`;
+  }
+  function priorityThreatsHtml() {
+    const current = (s.threats || []).filter(t => t.origin === 'analysis' && t.reviewState !== 'stale' && !t.metadataOnly).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank || a.id.localeCompare(b.id));
+    if (!current.length) return '';
+    const busy = ['running','cancelling'].includes(jobState.status);
+    return `<section class="ws-priority-panel"><h3>Priority threats</h3><p>Source-supported concerns and open control questions. Review priority is not a confirmed severity rating.</p><div class="ws-priority-cards">${current.slice(0,6).map(t => `<button class="ws-priority-card" data-select="${e(t.id)}"><strong>${e(t.reference)} · ${e(t.name)}</strong><span class="ws-validation-badge">${e(t.validation?.assessment || 'not-assessed')}</span><p>${e(t.analysis?.impact || t.asset)}</p><small>Actor: ${e((t.actorIds || []).map(id => s.actors.find(a => a.id === id)?.name).filter(Boolean).join(', '))}</small><small>${t.boundaryIds?.length || 0} candidate trust crossings · ${t.evidenceIds?.length || 0} source references</small></button>`).join('')}</div><details><summary>Validate saved threats against code and controls</summary><p>Reuses the saved graph. Searches named controls across selected repositories, reads hash-checked source windows and records counterevidence. Original STRIDE results stay intact. Each scenario has at most three assessment rounds; unresolved facts remain gaps.</p><label><input type="checkbox" id="ws-validation-source">Send redacted source windows to the configured provider</label><label>Scenario scope<select id="ws-validation-scope"><option value="priority">Top six priorities</option><option value="all">All current source-referenced scenarios</option></select></label><label>Model requests<input id="ws-validation-budget" type="number" min="1" max="100" value="6"></label><label><input id="ws-validation-continuous" type="checkbox">Continue across saved scenarios (maximum three rounds each)</label><button data-validate-threats="all" ${busy || !providerAvailable ? 'disabled' : ''}>Validate saved threats</button><button data-stop-validation ${busy && jobState.mode === 'threat-validation' ? '' : 'hidden'}>Stop validation</button><p>${e(model.threatValidation ? `${model.threatValidation.status} · ${model.threatValidation.callsThisRun} requests in last action · ${model.threatValidation.pending ?? 'unknown'} selected scenarios unresolved` : 'No independent threat validation has run.')}</p></details></section>`;
   }
   function connectionCoverageHtml() {
     const gaps =
@@ -578,7 +613,7 @@
             )
             .join("")}</div></section>`
         : ""
-    }<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.reference ? r.reference + " · " + r.name : r.name)}</h3>${r.reviewPriority ? field("Review priority", r.reviewPriority.label + ": " + r.reviewPriority.reasons.join(" ") + " " + r.reviewPriority.interpretation) : ""}${r.analysisLabel ? field("Analysis status", r.analysisLabel + (r.failedEvidence ? ". Failed packets affect this subject." : "")) : ""}<span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Evidence strength", r.evidenceStatus)}${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${r.crossings?.length ? `<section><h4>Boundary crossings</h4>${r.crossings.map((c) => `<button data-select="${e(c.id)}">${e(c.reference)} · ${e(c.from)} → ${e(c.to)}</button>`).join("")}<p>Candidate crossing; the transition and enforcement require evidence review.</p></section>` : ""}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Architecture classification", r.classification)}${field("Source scope", r.scope)}${field("Candidate host", r.hostCandidateId ? names([r.hostCandidateId]) : "")}${
+    }<p class="eyebrow">${e(titles[r.kind] || "STRIDE review")}</p><h3>${e(r.reference ? r.reference + " · " + r.name : r.name)}</h3>${r.reviewPriority ? field("Review priority", r.reviewPriority.label + ": " + r.reviewPriority.reasons.join(" ") + " " + r.reviewPriority.interpretation) : ""}${r.analysisLabel ? field("Analysis status", r.analysisLabel + (r.failedEvidence ? ". Failed packets affect this subject." : "")) : ""}<span class="badge">${e(r.basis || r.state)} · ${e(r.reviewState || "review required")}</span>${field("Evidence strength", r.evidenceStatus)}${r.validation ? field('Independent source assessment', r.validation.assessment) + field('Validation counterevidence', r.validation.counterEvidence) + field('Missing evidence', r.validation.missingEvidence?.join('; ')) + field('Validated source path', r.validation.trace?.map(x => `${x.role}: ${x.repository} / ${x.path}:${x.line} — ${x.reason}`).join('; ')) : ''}${field("Threat statement", r.scenario)}${field("Initial access", r.startingAccess)}${field("Objectives / impact", r.objectives || r.asset)}${field("Excluded capabilities", r.excludedCapabilities)}${field("Prerequisites", r.prerequisites)}${r.crossings?.length ? `<section><h4>Boundary crossings</h4>${r.crossings.map((c) => `<button data-select="${e(c.id)}">${e(c.reference)} · ${e(c.from)} → ${e(c.to)}</button>`).join("")}<p>Candidate crossing; the transition and enforcement require evidence review.</p></section>` : ""}${field("Trust transition", r.before ? `${r.dimension}: ${r.before} → ${r.after}` : "")}${field("Controls and enforcement", r.enforcement || r.controls)}${field("Description", r.description)}${field("Architecture classification", r.classification)}${field("Source scope", r.scope)}${field("Candidate host", r.hostCandidateId ? names([r.hostCandidateId]) : "")}${
       s.components.some((c) => c.hostCandidateId === r.id)
         ? `<section><h4>Associated source groups</h4><p>Unique project-reference ownership; deployment requires review.</p>${s.components
             .filter((c) => c.hostCandidateId === r.id)
@@ -734,7 +769,36 @@
   root.addEventListener("click", async (event) => {
     const b = event.target.closest("button,[data-select]");
     if (!b) return;
-    if (b.dataset.dfdExport) {
+    if (b.hasAttribute('data-validate-threats')) {
+      try {
+        const candidates = s.threats.filter(t => t.origin === 'analysis' && t.reviewState !== 'stale' && !t.metadataOnly).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank || a.id.localeCompare(b.id));
+        const ids = b.dataset.validateThreats === 'all' ? (root.querySelector('#ws-validation-scope')?.value === 'all' ? candidates : candidates.slice(0,6)).map(t => t.id) : [b.dataset.validateThreats];
+        const includeSourceCode = root.querySelector('#ws-validation-source')?.checked === true;
+        await validateThreats({ threatIds: ids, includeSourceCode, budget: Number(root.querySelector('#ws-validation-budget')?.value || 6), runUntilComplete: root.querySelector('#ws-validation-continuous')?.checked === true });
+      } catch (error) { notify(error.message, true); }
+    } else if (b.id === 'dc-show-all') {
+      showAllDeploymentQuestions = !showAllDeploymentQuestions; renderBody();
+    } else if (b.id === 'dc-import-artifact') {
+      const file = root.querySelector('#dc-artifact').files[0];
+      if (!file || file.size > 256 * 1024) { notify('Choose a configuration file no larger than 256 KiB', true); return; }
+      await saveDeployment({ action: 'artifact', name: file.name, text: await file.text() });
+    } else if (b.id === 'dc-more-evidence') { deploymentClaimCount += 20; renderBody();
+    } else if (b.id === 'dc-run-system') { view = 'matrix'; reviewScope = 'system'; render();
+    } else if (b.id === 'ws-preview-scope') {
+      try { const plan = await api('system-review-plan'); const panel = root.querySelector('#ws-scope-preview');
+        if (panel) panel.textContent = `${plan.units} system review units · ${plan.scope.interfaceIds.length} in-scope interfaces · ${plan.scope.deferredInterfaces} deferred to deep review · ${plan.gaps} explicit context gaps. No model call was made.`;
+      } catch (error) { notify(error.message, true); }
+    } else if (b.dataset.deploymentAnswer) {
+      const key = b.dataset.deploymentAnswer;
+      const choice = Number(root.querySelector(`input[name="dc-${key}"]:checked`).value);
+      await saveDeployment({ action: 'answer', questionId: key, choice, reviewer: root.querySelector('#dc-reviewer').value, rationale: root.querySelector(`#dc-rationale-${key}`).value });
+    } else if (b.dataset.deploymentEvidence) {
+      try {
+        const window = await api('deployment-evidence?id=' + encodeURIComponent(b.dataset.deploymentEvidence));
+        const panel = root.querySelector('#dc-code');
+        if (panel) { panel.innerHTML = `<h3>Verified source evidence</h3><p>Hash-checked local source; sensitive values are redacted where recognized. No model call.</p><pre>${e(window.lines.map(l => `${l.line ?? l.number}: ${l.text}`).join('\n'))}</pre>`; panel.scrollIntoView({ block: 'nearest' }); }
+      } catch (error) { notify(error.message, true); }
+    } else if (b.dataset.dfdExport) {
       download(b.dataset.dfdExport, false, diagramOptions()).catch((error) =>
         notify(error.message, true),
       );
@@ -818,13 +882,14 @@
         requestBudget = Number(root.querySelector("#ws-request-budget").value);
         await startReview(requestBudget, {
           concurrency: reviewWorkers,
+          reviewScope,
           runUntilComplete,
           tokenTarget: tokenTarget === "" ? null : Number(tokenTarget),
         });
       } catch (error) {
         notify(error.message, true);
       }
-    } else if (b.hasAttribute("data-stop-review")) {
+    } else if (b.hasAttribute("data-stop-review") || b.hasAttribute('data-stop-validation')) {
       try {
         await stopReview();
       } catch (error) {
@@ -892,7 +957,11 @@
     }
   });
   root.addEventListener("change", (event) => {
+    if (event.target.id === 'ws-review-scope') { reviewScope = event.target.value; return; }
+    if (event.target.id === 'dc-profile') { saveDeployment({ action: 'profile', profile: event.target.value }); return; }
+
     const id = event.target.id;
+    if (id.startsWith("ws-validation-")) return;
     if (id === "ws-gap-search" || id === "ws-search") return;
     if (id === "ws-review-workers") {
       reviewWorkers = Number(event.target.value);
@@ -992,6 +1061,7 @@
         notify,
         update,
         startReview,
+        validateThreats,
         stopReview,
         openExploration,
         providerAvailable,
@@ -1025,6 +1095,9 @@
       if (run)
         run.disabled =
           !value.inference || ["running", "cancelling"].includes(value.status);
+      for (const button of root.querySelectorAll('[data-validate-threats]')) button.disabled = !value.inference || ['running','cancelling'].includes(value.status);
+      const validationStop = root.querySelector('[data-stop-validation]');
+      if (validationStop) validationStop.hidden = !(value.status === 'running' && value.mode === 'threat-validation');
       const workers = root.querySelector("#ws-review-workers");
       if (workers)
         workers.disabled = ["running", "cancelling"].includes(value.status);

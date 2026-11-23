@@ -1,6 +1,22 @@
 # Deployment context and system-focused static threat modeling
 
-Status: proposed design and implementation contract. This document does not claim the feature is implemented. The STRIDE response/retry recovery release is separate (main commit `63d18ab`).
+Status: implemented on `codex/deployment-system-review`, pending review and main merge. The implementation is static only and reuses the saved graph. Qualification and remaining limits are recorded in [tests](../testing/deployment-system-review.md).
+
+## Delivered behavior
+
+- The UI defaults to **System threat model**, with explicit deep code-path STRIDE still selectable. Existing API clients default to the prior deep scope unless they request `reviewScope: system`.
+- `system-review-units.mjs` groups saved production interfaces and flows by endpoints, protocol and declared control/identity context. Each unit retains member interfaces; grouping never establishes equivalent authorization. Units have at most eight primary records plus six related controls, a 72 KiB base packet limit and explicit split/omission accounting. Source windows use the existing verified retrieval limits.
+- `deployment-context.mjs` indexes source declarations into five topics, discovers named configuration profiles, persists optional answers and supplies explicit assumptions to review packets. The UI shows three cards initially, with the remaining cards available on demand. Selecting a profile supplies analysis context; it does not select or prove the effective deployed configuration.
+- `deployment-artifacts.mjs` accepts up to eight small JSON/XML/configuration artifacts. It retains recognized declaration names and hashes only, never raw values or executable content. This is evidence of declarations being present, not interpretation of actual effective accounts, grants or policy values.
+- Source windows are fetched by saved evidence ID, with existing access-token, containment, hash and redaction checks. Answers are scoped to source fingerprints, and changed source makes the answer stale.
+- An answer change invalidates dependent system-review packets and conclusions. Other completed packets remain reusable. Profile/artifact changes conservatively invalidate the system scope. System and deep scope checkpoints are retained separately so switching does not discard prior paid review; unchanged compatible packets make no new calls.
+- Current partial results populate the existing priority register and STRIDE matrix. Reports include the active scope and explicit deployment assumptions. No successful model response automatically approves a boundary or establishes deployed actor access.
+
+## Limits in this increment
+
+Claim rows group declarations by component and topic. They do not yet derive a complete policy/ACL interpretation or automatically resolve contradictory deployment profiles. Questions are grouped into five topics, not individually ranked by risk for every component; an operator can keep the conservative assumption or report mixed/unknown when settings differ. Source-linked threat/boundary details remain available in the existing model. Evidence gaps, unresolved destinations and per-window limits remain explicit; system-scope completion is not exhaustive code coverage or deployment verification. Saved source hashes and review contracts still control compatibility; this does not waive source-change invalidation.
+
+The sections below retain the longer-term design contract. Items beyond the delivered behavior above are design targets, not implemented claims.
 
 ## Product outcome
 
@@ -146,3 +162,13 @@ This is a bounded enhancement to the existing application, not a new graph platf
 - Focused exports reuse the existing small-package limits, exclude secrets/source windows by default and disclose omitted material. No endpoint, installer or target program is executed.
 
 Validation uses deterministic fixtures and provider simulations for execution behavior, plus a separately identified live gateway qualification for model output quality. No simulated finding may be presented as a customer finding.
+
+## Saved threat validation and presentation
+
+STRIDE scenario discovery and independent source assessment have separate saved records. The new authenticated `POST /api/threats/validate` action requires source consent, a current review revision, and saved scenario IDs. It reuses `graph.sqlite`; it neither executes target code nor rebuilds the graph. The default UI selects six highest-priority current source-referenced scenarios. All current scenarios can be explicitly selected.
+
+Each scenario seeds hash-checked code windows, related static flows, graph neighbors and shared control candidates. Literal control identifiers (including camel case and underscore names) guide indexed searches across the selected repositories. Searches inspect at most two pages per identifier and sixteen identifiers. Missing named controls can trigger another retrieval round; unchanged packets are not resubmitted. There are at most three assessment rounds per scenario. Continuous mode drains this finite assessment queue; unavailable deployment facts remain unresolved. This focused assessment queue is serial; parallel STRIDE discovery retains its existing worker controls.
+
+`threatValidation` retains cited input/control/sink steps, counterevidence, missing facts, retrieval limits, attempts and usage. Its cache depends on the source, scenario, architecture, deployment context and assessment contract. Restart reuses matching completed assessments after verifying cited file hashes. Original STRIDE counts and scenarios remain unchanged. Model-supported conclusions require security review and do not approve actors or boundaries.
+
+Matrix labels and counts use the same source-scenario set. Metadata-only architecture questions are displayed separately. Priority cards and PDF sections explain the actor, affected asset, candidate trust crossing, control evidence and next action. Candidate crossings retain evidence links even where the peer is unresolved; they are never presented as proven connectivity. Evidence assessment may lower the review priority when a cited control rules out the stated path. Review priority is not a severity score.

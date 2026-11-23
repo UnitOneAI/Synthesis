@@ -596,7 +596,7 @@ test("explicit continuation retries only failed validation batches with stricter
   assert.ok(model.aiReview.batches[0].requestPromptHash);
 });
 
-test("one STRIDE request returns matrix scenarios before any manual actor or boundary declarations", async () => {
+test("one metadata STRIDE request returns matrix questions before manual actor or boundary declarations", async () => {
   const { root, model } = await portfolio();
   try {
     const { systemModel } = await import("../src/system-model.mjs");
@@ -653,7 +653,7 @@ test("one STRIDE request returns matrix scenarios before any manual actor or bou
     assert.ok(
       s.matrix
         .filter((r) => r.rowKind === "component")
-        .some((r) => r.cells.some((c) => c.scenarioCount === 1)),
+        .some((r) => r.cells.some((c) => c.scenarioCount === 0 && c.questionCount === 1)),
     );
     assert.ok(
       s.matrix.some((r) => r.cells.some((c) => c.state === "not-analyzed")),
@@ -965,7 +965,7 @@ test("parallel STRIDE stops dispatch after provider failure but retains other ac
       const index = calls++;
       await new Promise((resolve) => setTimeout(resolve, index === 0 ? 2 : 20));
       return index === 0
-        ? new Response("private provider body", { status: 429 })
+        ? new Response("private provider body", { status: 403 })
         : parallelStrideResponse(
             JSON.parse(JSON.parse(opts.body).messages[0].content),
           );
@@ -1209,7 +1209,7 @@ test("STRIDE stops alternating validation failures without discarding successful
   );
   assert.equal(calls, 12);
   assert.equal(model.aiReview.coverage.completedBatches, 6);
-  assert.equal(model.aiReview.coverage.failedBatches, 6);
+  assert.equal(model.aiReview.coverage.failedBatches, 1, "Five earlier failures were repaired; all six failed attempts remain metered");
   assert.equal(model.aiReview.failureGuard.stopped, true);
   assert.equal(model.aiReview.failureGuard.invalidResponses, 6);
   assert.equal(model.aiReview.stopReason, "repeated-response-format-failure");
@@ -1287,7 +1287,7 @@ test("STRIDE preserves unselected failures through a bounded retry and saved res
   await enrichGraphModel(model, config, new Map(), async () => Response.json({
     stop_reason: "end_turn", usage: { input_tokens: 20, output_tokens: 10 },
     content: [{ type: "text", text: "not JSON" }],
-  }), { plan, runUntilComplete: true, concurrency: 1 });
+  }), { plan, maxBatches: 3, concurrency: 1 });
   assert.equal(model.aiReview.coverage.failedBatches, 3);
   const failures = model.aiReview.batches.filter(b => b.status === "failed");
   const cancellation = new AbortController();

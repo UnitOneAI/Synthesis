@@ -1,3 +1,4 @@
+import { threatAssessment } from './threat-validation-state.mjs';
 import { sourceScope } from "./architecture.mjs";
 
 // Display references never replace saved IDs or enter review fingerprints.
@@ -38,7 +39,7 @@ export function addReviewPresentation(s, model) {
       .filter(Boolean);
     const scopes = [...new Set(refs.map((e) => sourceScope(e.path)))];
     t.sourceScopes = scopes;
-    t.metadataOnly = Boolean(
+    t.metadataOnly = model.aiReview?.mode === 'metadata' || /metadata.only/i.test(JSON.stringify(t.analysisQuality?.gaps || [])) || Boolean(
       t.interfaceIds?.length &&
         t.interfaceIds.every(
           (id) =>
@@ -46,8 +47,9 @@ export function addReviewPresentation(s, model) {
             interfaces.get(id)?.connection?.role !== "symbol-call",
         ),
     );
-    t.boundaryLinkBasis =
-      "Boundaries associated through shared interfaces; verify relevance to this scenario.";
+    t.boundaryLinkBasis = t.candidateFlowIds?.length
+      ? "Candidate boundaries associated through shared interfaces. Some flow peers remain unresolved; access, crossing relevance and enforcement are assumptions requiring review."
+      : "Boundaries associated through shared interfaces; verify relevance to this scenario.";
     const reasons = [];
     let rank = 3,
       label = "Establish context";
@@ -100,6 +102,9 @@ export function addReviewPresentation(s, model) {
           : "Assess the stated impact and prerequisites against effective controls.",
       );
     } else reasons.push("No usable source citations establish applicability.");
+    t.validation = threatAssessment(model, t.id);
+    if (t.validation.assessment === 'ruled-out') { rank = 5; label = 'Counterevidence found'; reasons.unshift('A separate source assessment found a control that rules out this stated path; reviewer confirmation is still required.'); }
+    else if (t.validation.assessment === 'static-supported' && rank < 4) { rank = Math.min(rank, 1); label = 'Source-supported concern'; reasons.unshift('Separate assessment cites input and sink evidence; deployed exploitability remains unverified.'); }
     t.reviewPriority = {
       rank,
       label,
@@ -141,6 +146,9 @@ export function addReviewPresentation(s, model) {
   const threatById = new Map(s.threats.map((t) => [t.id, t]));
   for (const row of s.matrix || [])
     for (const cell of row.cells) {
+      const scenarios = cell.threatIds.map(id => threatById.get(id)).filter(t => t && t.origin !== 'review checklist');
+      cell.questionCount = scenarios.filter(t => t.metadataOnly).length;
+      cell.scenarioCount = scenarios.length - cell.questionCount;
       const hasFailed = row.interfaceIds.some((id) => failed.has(id));
       cell.analysisStatus =
         review?.status === "stale"
@@ -149,7 +157,7 @@ export function addReviewPresentation(s, model) {
               row.reviewedInterfaces === row.interfaceIds.length
             ? cell.scenarioCount
               ? "scenarios-identified"
-              : "analyzed-no-scenario"
+              : cell.questionCount ? "context-required" : "analyzed-no-scenario"
             : row.reviewedInterfaces
               ? "partially-analyzed"
               : hasFailed
@@ -158,6 +166,7 @@ export function addReviewPresentation(s, model) {
       cell.analysisLabel = {
         stale: "Stale analysis",
         "scenarios-identified": "Scenarios identified",
+        "context-required": "Architecture questions — code evidence needed",
         "analyzed-no-scenario": "Analyzed — no scenario identified",
         "partially-analyzed": "Partially analyzed",
         failed: "Analysis failed",
@@ -166,7 +175,7 @@ export function addReviewPresentation(s, model) {
       cell.failedEvidence = hasFailed;
       cell.scenarioReferences = cell.threatIds
         .map((id) => threatById.get(id))
-        .filter((t) => t && t.origin !== "review checklist")
+        .filter((t) => t && t.origin !== "review checklist" && !t.metadataOnly)
         .map((t) => t.reference);
     }
   return s;

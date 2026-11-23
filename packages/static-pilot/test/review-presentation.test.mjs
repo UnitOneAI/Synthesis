@@ -124,3 +124,16 @@ test("short reference collisions expand without altering original record IDs", (
   assert.equal(s.threats[0].reference, "T-A123456789");
   assert.equal(s.threats[2].reference, "T-A1234567DIFFERENT");
 });
+
+
+test('matrix labels and counts use the same source scenarios, separating architecture questions', () => {
+ const {s,m}=fixture();m.interfaces=[{id:'architecture',kind:'architecture'},{id:'code',kind:'http-route'}];
+ m.aiReview={status:'partial',mode:'source-excerpts',batches:[],coverage:{completedBatches:1}};
+ s.threats[0].interfaceIds=['architecture'];s.threats[1].interfaceIds=['code'];
+ s.matrix[0].reviewedInterfaces=1;s.matrix[0].cells[0].threatIds=[s.threats[0].id];
+ addReviewPresentation(s,m);let c=s.matrix[0].cells[0];
+ assert.equal(c.scenarioCount,0);assert.equal(c.questionCount,1);assert.equal(c.analysisStatus,'context-required');
+ c.threatIds.push(s.threats[1].id);addReviewPresentation(s,m);
+ assert.equal(c.scenarioCount,1);assert.equal(c.questionCount,1);assert.equal(c.analysisStatus,'scenarios-identified');
+ assert.deepEqual(c.scenarioReferences,[s.threats[1].reference]);
+});

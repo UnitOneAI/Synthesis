@@ -375,6 +375,7 @@ test("architecture-only STRIDE responses become context questions, not detailed 
     html,
     /0 current returned threat scenarios; 1 architecture-only questions/,
   );
+  assert.doesNotMatch(html, /Scenarios identified; 0 scenarios/);
   assert.match(html, /Questions requiring implementation evidence/);
   assert.match(html, /Unverified architecture concern/);
   assert.doesNotMatch(html, /<article id=/);

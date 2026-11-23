@@ -1,3 +1,4 @@
+import { deploymentContext } from './deployment-context.mjs';
 import { addReviewPresentation } from "./review-presentation.mjs";
 import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents, sourceScope } from "./architecture.mjs";
@@ -429,8 +430,12 @@ export function systemModel(model, { matrix = true } = {}) {
           f.interfaceIds?.some((i) => t.interfaceIds.includes(i)),
       )
       .map((f) => f.id);
+    t.candidateFlowIds = result.flows
+      .filter(f => f.basis === 'unresolved' && f.interfaceIds?.some(i => t.interfaceIds.includes(i)))
+      .map(f => f.id);
+    const associatedFlows = new Set([...t.flowIds, ...t.candidateFlowIds]);
     t.boundaryIds = result.boundaries
-      .filter((b) => b.flowIds.some((id) => t.flowIds.includes(id)))
+      .filter((b) => b.flowIds.some((id) => associatedFlows.has(id)))
       .map((b) => b.id);
   }
   const allIds = new Set(lists.flatMap((k) => result[k]).map((r) => r.id));
@@ -520,7 +525,9 @@ export function systemModel(model, { matrix = true } = {}) {
     w,
     model.aiReview?.responseHash,
     model.aiReview?.status,
+    model.deploymentContext,
   ]);
+  result.deploymentContext = deploymentContext(model, result);
   result.matrix = matrix ? systemMatrix(result, model, w) : [];
   return addReviewPresentation(result, model);
 }
@@ -531,6 +538,7 @@ export function systemMatrix(s, model, w = model.architecture || empty()) {
       ? []
       : model.aiReview?.coverage?.reviewedInterfaceIds || [],
   );
+  const scope = model.aiReview?.reviewScope === 'system' ? new Set(model.aiReview.scope.interfaceIds) : null;
   const byFlow = new Map(s.flows.map((f) => [f.id, f]));
   const bySubject = new Map();
   for (const t of s.threats)
@@ -552,7 +560,9 @@ export function systemMatrix(s, model, w = model.architecture || empty()) {
         b.flowIds.flatMap((f) => byFlow.get(f)?.interfaceIds || []),
       ),
     })),
-  ].map((r) => ({
+  ].map(r => scope ? { ...r, interfaceIds: (r.interfaceIds || []).filter(i => scope.has(i)) } : r)
+  .filter(r => !scope || r.interfaceIds.length)
+  .map((r) => ({
     id: r.id,
     name: r.name,
     rowKind: r.rowKind,
