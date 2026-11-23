@@ -106,9 +106,25 @@ export function addReviewPresentation(s, model) {
           : "Assess the stated impact and prerequisites against effective controls.",
       );
     } else reasons.push("No usable source citations establish applicability.");
+    const argument = [t.name,t.scenario,t.analysis?.impact,t.prerequisites,t.controls].join(' ');
+    t.followUpKind = /if (?:the )?(?:fallback |handler |code )?(?:handler )?(?:were |is )?(?:modified|changed)|would need to be changed|future (?:code )?change/i.test(argument)
+      ? 'Change-regression / hardening'
+      : refs.some(r=>/(?:package-lock|yarn.lock|packages.lock|package.json)/i.test(r.path)) && /known.vulnerab|outdated|supply.chain|dependency/i.test(t.name) && !/CVE-\d{4}-\d+/i.test(argument)
+        ? 'Dependency / build review obligation' : null;
+    if (t.followUpKind && !severity) {rank=4;label=t.followUpKind;reasons.push('Preserved follow-up; not a demonstrated current exploitable path.');}
     t.validation = threatAssessment(model, t.id);
     if (t.validation.assessment === 'ruled-out') { rank = 5; label = 'Counterevidence found'; reasons.unshift('A separate source assessment found a control that rules out this stated path; reviewer confirmation is still required.'); }
     else if (t.validation.assessment === 'static-supported' && rank < 4) { rank = Math.min(rank, 1); label = 'Source-supported concern'; reasons.unshift('Separate assessment cites input and sink evidence; deployed exploitability remains unverified.'); }
+    // Actor selection is a scenario hypothesis, not attribution or proof of access.
+    const selectedActors = (t.actorIds || []).map(id => actors.get(id)).filter(Boolean);
+    const entrySteps = (t.validation.trace || []).filter(step => step.role === 'input');
+    t.actorRationale = {
+      profiles: selectedActors.map(a => `${a.name}: ${a.startingAccess || 'Initial access not established'}`).join('; ') || 'Actor profile not established',
+      whyInScope: t.prerequisites || 'No access prerequisite recorded; establish it before relying on this scenario.',
+      entryEvidence: entrySteps.map(step => `${step.repository} / ${step.path}:${step.line} — ${step.reason}`).join('; ') || 'No independently assessed entry-point citation. Scenario source references alone do not establish actor access.',
+      proposedPath: (t.analysis?.attackSteps || []).join(' → ') || 'No attack path recorded.',
+      interpretation: 'This profile represents a capability relevant to the stated path. It is not evidence of an actual attacker, malicious intent, or deployed reachability. Legitimate users become part of a threat scenario only under the stated misuse or compromise conditions.',
+    };
     const conclusion = model.sourceConclusions?.[t.id];
     if (conclusion?.issueHash && conclusion.issueHash === t.validation.issueHash &&
         conclusion.contextKey === t.validation.contextKey &&

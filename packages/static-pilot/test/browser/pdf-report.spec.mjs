@@ -373,6 +373,8 @@ test("access filter carries from registers and matrix into partial PDF with mixe
     await expect(popup.locator('#report-content')).not.toContainText('Internal result');
     await expect(popup.locator('#report-content')).not.toContainText('Unresolved result');
     await expect(popup.locator('#report-content')).toContainText('1 / 4 STRIDE packets');
+    await expect(popup.locator('#report-content')).not.toContainText('Scenarios identified; 0 scenarios');
+    await expect(popup.locator('#report-content')).toContainText('Reviewed scope');
     await popup.close();
     await page.locator('.ws-tabs').getByRole('button',{name:'Threat actors',exact:true}).click();
     await expect(page.getByLabel('Actor access',{exact:true})).toHaveValue('external');

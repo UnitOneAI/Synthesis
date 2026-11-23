@@ -55,6 +55,20 @@ function fixture() {
     },
   };
 }
+test('future-code and dependency hypotheses remain visible as follow-ups instead of priority vulnerabilities', () => {
+  const {s,m}=fixture();
+  s.threats[0].name='Authorization bypass if the fallback handler is modified';
+  s.threats[1].name='Known-vulnerable dependency could be installed';
+  m.evidence[1].path='package-lock.json';
+  addReviewPresentation(s,m);
+  assert.equal(s.threats[0].followUpKind,'Change-regression / hardening');
+  assert.equal(s.threats[1].followUpKind,'Dependency / build review obligation');
+  assert.equal(s.threats[0].reviewPriority.rank,4);
+  assert.equal(s.threats.length,2);
+  s.threats[1].analysis={impact:'Applicable advisory CVE-2026-12345'};
+  addReviewPresentation(s,m);
+  assert.equal(s.threats[1].followUpKind,null);
+});
 test("references preserve saved IDs and connect boundary crossings with explained review priority", () => {
   const { s, m } = fixture();
   addReviewPresentation(s, m);
@@ -153,4 +167,19 @@ test("access filtering preserves mixed and unresolved actors without inferring i
   assert.equal(matchesAccess({access:{kind:'unresolved'}},'external',false),false);
   assert.equal(actorAccess({name:'External attacker',accessClassification:'internal'}).kind,'internal');
   assert.throws(()=>accessFilter('invented'), /Invalid/);
+});
+
+test('actor rationale separates capability assumptions from cited entry evidence and actual attribution', () => {
+  const {s,m}=fixture();
+  s.actors=[{id:'caller',name:'Authenticated API caller',startingAccess:'Valid ordinary API key'}];
+  const t=s.threats[0];t.actorIds=['caller'];t.prerequisites='Caller can reach the settings operation and admin keys are not configured';
+  t.analysis={attackSteps:['Call settings with an ordinary key','Attempt a privileged write']};
+  addReviewPresentation(s,m);
+  assert.match(t.actorRationale.profiles,/Valid ordinary API key/);
+  assert.equal(t.actorRationale.whyInScope,t.prerequisites);
+  assert.match(t.actorRationale.entryEvidence,/No independently assessed/);
+  assert.match(t.actorRationale.interpretation,/not evidence of an actual attacker/);
+  assert.match(t.actorRationale.proposedPath,/Attempt a privileged write/);
+  assert.equal(t.reviewState,'pending');
+  assert.equal(s.actors[0].access.kind,'unresolved');
 });

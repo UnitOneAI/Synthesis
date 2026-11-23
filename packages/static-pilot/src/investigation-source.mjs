@@ -112,6 +112,23 @@ export class InvestigationSource {
       code: w.lines.map((l) => `${l.line}: ${l.text}`).join("\n"),
     };
   }
+  async functionWindow(ref) {
+    const line=ref.line || 1;
+    const nodes=this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
+    const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
+      .sort((a,b)=>Math.abs(a.line-line)-Math.abs(b.line-line));
+    const n=candidates[0];
+    if(!n || nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line)))return this.window(ref);
+    const first=Math.min(line,n.line),last=n.endLine;
+    if(last-first+1>200)return {...await this.window(ref),functionContext:{name:n.name,startLine:first,endLine:last,complete:false,reason:'function-exceeds-200-line-window'}};
+    const lines=[];let seed;
+    for(let cursor=first;cursor<=last;cursor+=80){
+      const w=await this.window({...ref,line:cursor+20});seed ||= w;
+      lines.push(...w.lines.filter(l=>l.line>=cursor && l.line<=Math.min(cursor+79,last)));
+    }
+    if(lines.length!==last-first+1)throw Error('source-function-range-incomplete');
+    return {...seed,id:id('function-evidence',seed.repository,seed.path,seed.blobSha256,first,last),startLine:first,endLine:last,lines,code:lines.map(l=>`${l.line}: ${l.text}`).join('\n'),functionContext:{name:n.name,startLine:first,endLine:last,complete:true}};
+  }
   catalog(records) {
     const map = new Map();
     let omitted = false;

@@ -380,3 +380,13 @@ test("architecture-only STRIDE responses become context questions, not detailed 
   assert.match(html, /Unverified architecture concern/);
   assert.doesNotMatch(html, /<article id=/);
 });
+
+test('threat print explains code, declared configuration and unverified runtime separately', async t => {
+  const f=await reportFixture();
+  cleanupAfter(t,()=>fs.rm(f.dir,{recursive:true,force:true}));
+  const html=systemPrintReport(f.model);
+  assert.match(html,/Evidence basis · what was analyzed/);
+  assert.match(html,/environment-variable reads and defaults/);
+  assert.match(html,/Not analyzed\. No target code, requests, exploit attempts or live-system probes/);
+  assert.match(html,/model gateway are not evidence of the target deployment/);
+});

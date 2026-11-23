@@ -481,7 +481,7 @@ export async function errorReport({
       stride: {
         ...review(model?.aiReview),
         reviewScope: model?.aiReview ? (model.aiReview.reviewScope === 'system' ? 'system' : 'deep') : null,
-        scope: model?.aiReview?.scope ? { inScopeInterfaces: model.aiReview.scope.interfaceIds?.length, deferredInterfaces: model.aiReview.scope.deferredInterfaces } : undefined,
+        scope: model?.aiReview?.scope ? { inScopeInterfaces: model.aiReview.scope.interfaceIds?.length, deferredInterfaces: model.aiReview.scope.deferredInterfaces, poc: model.aiReview.scope.poc ? {id:model.aiReview.scope.poc.id,primaryInterfaces:model.aiReview.scope.poc.interfaceIds.length,operations:model.aiReview.scope.poc.operations.length} : undefined } : undefined,
         failedAttemptCountsForSavedReviewRun: Object.fromEntries(
           [...(model?.usageLedger?.attempts || [])]
             .filter(

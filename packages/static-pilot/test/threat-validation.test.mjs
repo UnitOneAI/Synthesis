@@ -102,6 +102,23 @@ test('invalid assessment receives one metered correction and does not loop or ch
  assert.equal(f.model.usageLedger.attempts.length,2);assert.equal(JSON.stringify(f.model.aiReview),before);
 });
 
+test('retrieval upgrade reopens an exhausted gap once and retains prior paid attempts',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+   const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;const data=await answer(p).json();
+   if(calls===1){const v=JSON.parse(data.content[0].text);v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];data.content[0].text=JSON.stringify(v);}
+   return Response.json(data);
+ }};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const prior=f.model.threatValidation.entries[0].attemptId;
+ f.model.threatValidation.entries[0].rounds=3;f.model.threatValidation.retrievalVersion='old';
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.ok(f.model.threatValidation.entries[0].history.some(e=>e.attemptId===prior && e.reason==='retrieval-policy-updated'));
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});
+
 test('deployment assumptions do not suppress a cited conditional code concern; missing code still blocks it',async t=>{
  const {validateThreatAssessment}=await import('../src/threat-validation.mjs');
  const r={id:'r',repository:'repo',path:'api.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'input'},{line:2,text:'sink'}]};
@@ -140,6 +157,17 @@ test('initialization window cannot hide the remainder of an overlapping control 
  const p=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'overlap',locations:[{repository:'repo0',path:'control.py',line:60}],controls:'',explanation:''},[{repository:'repo0',path:'control.py',line:79}],{},['Inspect initialization and the full control implementation.']);
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.startLine===1));
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.endLine>=96),'Line 79 inside the preamble must not suppress the window containing the enforcement at line 96');
+ assert.ok(p.retrieval.coalescedWindows>0);
+ assert.equal(new Set(p.records.flatMap(r=>r.lines.map(l=>r.path+':'+l.line))).size,p.records.reduce((n,r)=>n+r.lines.length,0),'Overlapping windows should not repeat source lines');
+});
+
+test('explicit missing controls precede repeated scenario windows under the retrieval limit',async t=>{
+ const f=await threatFixture(t), {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'many-seeds',locations:Array.from({length:12},(_,i)=>({repository:`repo${i}`,path:'Api.cs',line:1})),controls:'',explanation:''};
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[{repository:'repo11',path:'PermissionFilter.cs',line:1}],{},['Inspect PermissionFilter and SecondGuard implementation before broad initialization context.']);
+ assert.equal(packet.records[0].path,'PermissionFilter.cs');
+ assert.ok(packet.records.some(r=>r.path==='SecondGuard.cs'));
+ assert.ok(packet.gaps.some(g=>g.reason==='required-source-window-limit'));
 });
 
 test('failed response retains the requested control context for a bounded retry',async t=>{
@@ -176,4 +204,41 @@ test('cited conclusions retain independent assessments and STRIDE coverage, reje
   assert.match(report, /Returned scenarios by STRIDE category/);
   next.aiReview.threats[0].scenario = 'Changed claim';
   assert.doesNotMatch(systemPrintReport(next), /Caller binding requires review/);
+});
+test('POC completion assesses every returned scenario, retains counterevidence and resumes without calls',async t=>{
+ const {assessCompletedPoc}=await import('../src/threat-validation.mjs');
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{id:'fixture'}};
+ let calls=0;const options={sourceRoot:f.root,config,fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ assert.equal(await assessCompletedPoc(f.manifest,f.model,options),null);assert.equal(calls,0);
+ f.model.aiReview.coverage.pendingBatches=0;f.model.aiReview.coverage.failedBatches=0;
+ await assessCompletedPoc(f.manifest,f.model,options);assert.equal(calls,12);assert.equal(f.model.threatValidation.assessmentCounts.ruledOut,12);
+ await assessCompletedPoc(f.manifest,f.model,options);assert.equal(calls,12);
+});
+
+
+test('requested initialization survives generic framework context under the byte limit',async t=>{
+ const padding='# '+ 'x'.repeat(110)+'\n';
+ const files=[['repo0/control.py','ENFORCE_AUTH = True\n'+padding.repeat(200)]];
+ for(const name of ['Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])files.push([`repo0/${name}.cs`,`class ${name} {\n public void Check() {\n`+('// '+ 'x'.repeat(110)+'\n').repeat(100)+'}\n}\n']);
+ const f=await threatFixture(t,files),{threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const p=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'config-first',locations:[{repository:'repo0',path:'control.py',line:125}],controls:'',explanation:''},[{repository:'repo0',path:'control.py',line:125}],{},['Inspect the environment configuration initialization at the top of control.py.']);
+ assert.ok(p.records.some(r=>r.path==='control.py'&&r.startLine===1),'Generic control candidates must not displace the requested declaration');
+ assert.ok(p.records.some(r=>r.path==='control.py'&&r.endLine>=125));
+ assert.ok(p.retrieval.candidateWindowsOmitted>0);
+ assert.equal(p.gaps.filter(g=>g.path==='control.py').length,0);
+ assert.ok(Buffer.byteLength(JSON.stringify(p.records))<=42000);
+});
+
+test('named control retrieval prioritizes production implementations before matching test helpers',async t=>{
+ const extras=Array.from({length:8},(_,i)=>[`repo0/fixture_${i}.py`,'def PermissionFilter():\n    return True\n']);
+ const f=await threatFixture(t,extras);
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const {threatIssue}=await import('../src/threat-validation-state.mjs');
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,threatIssue(f.model,f.model.aiReview.threats[0]),[],{},['Inspect PermissionFilter']);
+ const refs=packet.records.filter(r=>r.basis==='requested-symbol' || r.basis==='combined hash-matched source windows');
+ assert.ok(refs.some(r=>r.repository==='repo11' && r.path==='PermissionFilter.cs'));
+ const search=packet.retrieval.controlSearches.find(r=>r.symbol==='PermissionFilter');
+ assert.ok(search.requested);
+ const first=f.graph.node(f.model.sourceGraph.generation,search.nodeIds[0]);
+ assert.equal(first.repository,'repo11');
 });

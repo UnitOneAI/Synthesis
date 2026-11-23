@@ -151,7 +151,11 @@ export function redact(value) {
     )
     .replace(
       /^.*(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization|connectionstring|connection_string|accountkey|clientsecret)\s*["']?\s*[:=].*$/gim,
-      "[sensitive assignment omitted]",
+      // Preserve dependency-injection signatures and identifier-only conditions.
+      // Neither exception permits literals or an inline function/condition body.
+      (line) => /^\s*(?:async\s+)?def\s+\w+\(\w+:\s*(?:Optional\[str\]|str)\s*=\s*(?:Security|Depends)\(\w+\)\)\s*(?:->\s*\w+\s*)?:\s*$/.test(line)
+        || /^\s*(?:if|elif)\s+(?:not\s+)?[A-Za-z_]\w*\s*:\s*$/.test(line)
+        ? line : "[sensitive assignment omitted]",
     )
     .replace(
       /\b(?:sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9_]+|github_pat_[a-zA-Z0-9_]+|AIza[a-zA-Z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g,
@@ -441,6 +445,18 @@ export function validateReview(value, packet) {
       )
         invalid("unknown STRIDE category");
       const evidenceIds = refs(t.interfaceIds, t.evidenceIds);
+      if(packet.reviewFocus?.selectedProfile) {
+        const primary=new Set(packet.reviewUnit?.primaryInterfaceIds || []);
+        if(t.interfaceIds.some(id=>!primary.has(id)))invalid('POC threat must anchor to the selected primary operation');
+        const operations=t.interfaceIds.map(id=>records.get(id).operation);
+        const claims=[t.title,t.scenario,...(Array.isArray(t.analysis?.attackSteps) ? t.analysis.attackSteps : [])].join(' ');
+        const explicit=[...claims.matchAll(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s,;"'()]+)/g)];
+        for(const operation of operations){const anchor=/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)/.exec(operation || '');if(!anchor)continue;
+          const samePath=explicit.filter(m=>m[2].replace(/[.:]+$/,'').endsWith(anchor[2]));
+          if(samePath.length && !samePath.some(m=>m[1]===anchor[1]))invalid('POC scenario describes a different HTTP operation than its cited interface');
+        }
+      }
+
       return {
         ...Object.fromEntries(fields.map((k) => [k, str(t[k])])),
         ...validateAnalysis(t.analysis, packet, str, invalid),
