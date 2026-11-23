@@ -78,4 +78,8 @@ test('scope changes create separate saved review identities and unmatched scopes
  assert.notEqual(first.id,second.id);assert.ok(first.interfaceIds.every(i=>!second.interfaceIds.includes(i)));
  assert.throws(()=>resolvePocScope(model,{...model.pocScope,operations:[{repository:'unknown',pathContains:'.cs'}]}),/Repository not in/);
  assert.throws(()=>resolvePocScope(model,{...model.pocScope,maxInterfaces:1,operations:[{repository:'app',pathContains:'Controller.cs'}]}),/exceeding/);
+ model.pocScope={...model.pocScope,operations:[{repository:'app',pathContains:'Controller.cs'}]};
+ const plan=pocReviewPlan(model);
+ assert.equal(plan.scope.poc.operationGroups,2);
+ assert.equal(plan.batches.length,2,'Distinct operation definitions retain separate review allowances');
 });

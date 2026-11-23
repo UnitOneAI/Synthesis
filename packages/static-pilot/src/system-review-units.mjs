@@ -6,6 +6,7 @@ import { deploymentContext, contextForInterfaces } from './deployment-context.mj
 import { interfacePriorities, batchStage } from './review-order.mjs';
 
 export const SYSTEM_REVIEW_VERSION = 'system-review-3';
+export const operationSignature = (i,evidence) => JSON.stringify([i.repository,i.component,i.operation,i.protocol,i.direction,i.evidence.map(id=>evidence.get(id)).filter(Boolean).map(e=>[e.repository,e.path,e.line]).sort()]);
 export function systemReviewPlan(model, excerpts = new Map(), selection = null) {
   const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
   const context = deploymentContext(model, system);
@@ -98,8 +99,9 @@ export function systemReviewPlan(model, excerpts = new Map(), selection = null) 
   if (selection) {
     const groups = new Map();
     for (const i of model.interfaces.filter(i => primary.has(i.id))) {
-      if (!groups.has(i.component)) groups.set(i.component, []);
-      groups.get(i.component).push(i);
+      const key=operationSignature(i,evidence);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(i);
     }
     for (const group of groups.values()) for (let at = 0; at < group.length; at += 8) {
       const members = group.slice(at, at + 8), ids = new Set(members.map(i => i.id));

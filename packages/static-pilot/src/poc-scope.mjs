@@ -1,6 +1,6 @@
 import {sourceScope} from './architecture.mjs';
 import { sha } from './sources.mjs';
-import { systemReviewPlan } from './system-review-units.mjs';
+import { systemReviewPlan,operationSignature } from './system-review-units.mjs';
 export function resolvePocScope(model, input = model.pocScope) {
   if (!input || typeof input !== 'object' || !Array.isArray(input.operations) || !input.operations.length || input.operations.length > 12)
     throw Error('Import a POC scope with 1–12 operation selectors');
@@ -22,7 +22,9 @@ export function resolvePocScope(model, input = model.pocScope) {
   const interfaceIds = [...new Set(operations.flatMap(o => o.interfaceIds))].sort();
   if (interfaceIds.length > maxInterfaces) throw Error(`POC matches ${interfaceIds.length} interfaces, exceeding ${maxInterfaces}; narrow selectors. Nothing was silently dropped.`);
   const definition = {title,profile,maxInterfaces,operations:operations.map(({interfaceIds,...o})=>o)};
-  return {...definition, id:sha(JSON.stringify(definition)).slice(0,20),interfaceIds, matches:operations};
+  const selected=new Set(interfaceIds);
+  const operationGroups=new Set(model.interfaces.filter(i=>selected.has(i.id)).map(i=>operationSignature(i,evidence))).size;
+  return {...definition, id:sha(JSON.stringify(definition)).slice(0,20),interfaceIds,operationGroups, matches:operations};
 }
 export function pocReviewPlan(model, excerpts = new Map()) {
   const poc = resolvePocScope(model);

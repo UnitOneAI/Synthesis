@@ -21,7 +21,7 @@ Selectors are case-insensitive literal substrings of saved source paths, optiona
 
 Scope identity includes the title, profile and selectors. Existing full-system/deep reviews are saved separately; changing POC scope does not rebuild or change the source graph. Compatible POC packets resume by their packet hash and review provenance. The profile is an analysis assumption, not a deployed fact. All selected clones are still checked for source changes before source-backed STRIDE.
 
-Selected operations are grouped with their incident flows so a handler is not re-reviewed once per connection. Oversized units may still split to preserve every selected operation and required flow; the preview exposes that cost. Five to eight operations provide 30–48 STRIDE category review cases, not a promised number of vulnerabilities. Do not pad findings to reach a target count.
+Each selected operation definition gets a review unit with its incident flows, so a handler is not re-reviewed once per connection. Duplicate interface records with the same operation and source location share that unit; distinct operations do not share the six-scenario response allowance. Oversized units may still split to preserve every selected operation and required flow; the preview exposes that cost. Five to eight operations provide 30–48 STRIDE category review cases, not a promised number of vulnerabilities. Do not pad findings to reach a target count.
 
 ## Investigation
 
