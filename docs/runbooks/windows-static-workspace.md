@@ -496,3 +496,9 @@ Expand **Validate saved threats against code and controls**. Enable source shari
 For a useful system-level completion, select **Review scope → System threat model**, **Preview system scope**, four workers (subject to gateway limits), and **Run until complete**. This is a scoped architecture review, not exhaustive code-path coverage. System and deep review preserve separate compatible checkpoints. Do not rebuild an unchanged graph merely to continue review.
 
 Export the current partial or completed report with **Export STRIDE review · PDF**, then **Print / Save as PDF**. **Export errors** includes assessment state and failure metadata. Browser exports go to the browser's download location; select your intended export folder explicitly. Automatic traces remain under the configured trace directory.
+
+### Read the two kinds of progress separately
+
+The STRIDE matrix reports coverage of the selected system/deep scope. **Partially analyzed** means some interfaces in that row have a completed review; **Not analyzed** means none have. A returned threat does not mean its entire component is reviewed. Saved-threat follow-up assesses existing scenarios and cannot advance unrelated STRIDE packets.
+
+Saved-threat validation reports how many selected scenarios received valid assessments, how many still need code evidence, and how many calls failed. **Source-supported** is a conditional code conclusion; deployment assumptions are shown separately and remain unverified. **Needs context** means missing code, callers, controls or evidence still prevents the code conclusion. A completed assessment request is distinct from resolving every assumption. Continue system STRIDE separately to finish its remaining selected units.

@@ -526,8 +526,16 @@ export function systemPrintReport(model) {
     ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
+  const conclusions = current.filter(t => t.sourceConclusion).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
+  const categoryCounts = hasResults ? `<h3>Returned scenarios by STRIDE category</h3>
+    ${table(CATEGORIES, [CATEGORIES.map(category => scenarios.filter(t => t.categories.includes(category)).length)])}
+    <p>Each count includes current source-referenced scenarios assigned to that category. Scenarios can overlap. A zero means no scenario returned in the reviewed scope.</p>` : "";
+  const conclusionSection = conclusions.length ? `<h2>Source review conclusions</h2>${conclusions.map(t => {
+    const c = t.sourceConclusion;
+    return `<article><h3>${e(t.reference)} · ${c.status === "open" ? "Open question" : "Conditional threat"}</h3><p>${e(c.statement)}</p><p><b>Condition or missing link</b> · ${e(c.condition)}</p><p><b>Next action</b> · ${e(c.nextAction)}</p><p>Reviewed by ${e(c.reviewer)} · Automated assessment: ${e(t.validation.assessment)}</p><ul>${c.citations.map(r => `<li>${e(r.repository)} / ${e(r.path)}:${e(r.startLine)}–${e(r.endLine)}</li>`).join("")}</ul></article>`;
+  }).join("")}` : "";
   const summary = hasResults
-    ? `<h2>Priority threats</h2><p>Highest review priorities from returned scenarios. This order is not a confirmed severity rating.</p>${scenarios.slice(0, 6).map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>${e(t.reviewPriority.label)}</strong> · Validation: ${e(t.validation?.assessment || 'not-assessed')}</p><p>${e(t.analysis?.impact || t.asset)}</p><p><strong>Actor:</strong> ${e(names(t.actorIds, 'Not established'))}</p><p><strong>Trust crossing:</strong> ${e(names(t.boundaryIds, 'Not established; needs evidence'))}</p><p><strong>Control evidence:</strong> ${e(t.validation?.counterEvidence || t.controls || 'Not established')}</p><p><strong>Next action:</strong> ${e(t.validation?.missingEvidence?.join('; ') || t.mitigation)}</p></article>`).join('')}${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
+    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Highest review priorities from returned scenarios. This order is not a confirmed severity rating.</p>${scenarios.slice(0, 6).map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>${e(t.reviewPriority.label)}</strong> · Automated assessment: ${e(t.validation?.assessment || 'not-assessed')}</p><p>${e(t.analysis?.impact || t.asset)}</p><p><strong>Actor:</strong> ${e(names(t.actorIds, 'Not established'))}</p><p><strong>Trust crossing:</strong> ${e(names(t.boundaryIds, 'Not established; needs evidence'))}</p><p><strong>Control evidence:</strong> ${e(t.validation?.counterEvidence || t.controls || 'Not established')}</p>${t.validation?.deploymentAssumptions?.length ? `<p><strong>Deployment assumptions — not verified:</strong> ${e(t.validation.deploymentAssumptions.join('; '))}</p>` : ''}<p><strong>Next action:</strong> ${e(t.sourceConclusion?.nextAction || t.validation?.missingEvidence?.join('; ') || t.validation?.remediation?.codeFix || t.mitigation)}</p></article>`).join('')}${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
         ["Threat / affected scope", "Why it matters", "Next action"],
         scenarios.map((t) => [
           `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,
@@ -535,7 +543,7 @@ export function systemPrintReport(model) {
           `${t.mitigation || "Establish controls and applicability."} Severity: ${!t.decision?.stale ? t.decision?.severity || "unassessed" : "unassessed"}. Owner: ${!t.decision?.stale ? t.decision?.owner || "unassigned" : "unassigned"}.`,
         ]),
       )}<h2>System context from static extraction</h2><p>The DFD below is code/configuration context for the analysis. It is not proof that every depicted path was reviewed. Dashed or inferred connections and boundaries require confirmation.</p><h3>Overall system DFD</h3>${systemSvg(model)}
-  <h2>STRIDE matrix</h2><p>Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
+  <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
     ["Component", ...CATEGORIES],
     s.matrix
       .filter(
@@ -579,7 +587,9 @@ export function systemPrintReport(model) {
             const paragraphs = [
               ["Independent source assessment", t.validation?.assessment !== 'not-assessed' ? t.validation?.assessment : 'Not assessed'],
               ["Validation counterevidence", t.validation?.counterEvidence],
-              ["Missing control evidence", t.validation?.missingEvidence?.join('; ')],
+              ["Missing code evidence", t.validation?.missingEvidence?.join('; ')],
+              ["Deployment assumptions — not verified", t.validation?.deploymentAssumptions?.join('; ')],
+              ["Recommended code change", t.validation?.remediation?.codeFix],
               ["Validated source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
               ["Impact", t.analysis?.impact || t.asset],
               [

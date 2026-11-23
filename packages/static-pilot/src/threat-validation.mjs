@@ -1,7 +1,32 @@
+import { SECURITY_RESPONSE_SCHEMA } from './security-schemas.mjs';
+import { SECURITY_REVIEW_PROMPT, validateSecurityAssessment } from './security-intelligence.mjs';
+import { sha } from './sources.mjs';
+import { redact } from './model-review.mjs';
 import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
+
+const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
+export const THREAT_ASSESSMENT_SCHEMA = {
+  ...SECURITY_RESPONSE_SCHEMA,
+  properties: {...SECURITY_RESPONSE_SCHEMA.properties, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
+  required:[...SECURITY_RESPONSE_SCHEMA.required,'deploymentAssumptions','inputEvidence','sinkEvidence'],
+};
+export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + `
+For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
+export function validateThreatAssessment(value, packet) {
+  const {deploymentAssumptions,inputEvidence,sinkEvidence,...rest}=value || {};
+  const trace=Array.isArray(rest.trace)?[...rest.trace]:[];
+  for(const [ref,role] of [[inputEvidence,'input'],[sinkEvidence,'sink']]) {
+    if(ref===null)continue;
+    if(!ref || typeof ref!=='object' || Array.isArray(ref))throw Error('Security assessment failed schema or evidence validation (inputEvidence and sinkEvidence must be a citation or null)');
+    if(!trace.some(r=>r.role===role && r.recordId===ref.recordId && r.startLine===ref.startLine && r.endLine===ref.endLine))trace.push({...ref,role});
+  }
+  rest.trace=trace;
+  if(!Array.isArray(deploymentAssumptions) || deploymentAssumptions.length>8 || deploymentAssumptions.some(x=>typeof x!=='string'||!x.trim()||x.length>1600)) throw Error('Security assessment failed schema or evidence validation (deploymentAssumptions must contain at most eight bounded statements)');
+  return {...validateSecurityAssessment(rest,packet),deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
+}
 
 // Literal names only; source/model prose never becomes code, a command or a path.
 export function controlSymbols(text) {
@@ -22,18 +47,24 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }
     const found = matches.sort((a,b) => Number(a.kind === 'file') - Number(b.kind === 'file')).slice(0, 4);
     searches.push({ symbol, matches: found.length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
-    if (requiredSymbols.has(symbol) && (!found.length || after)) gaps.push({ reason: after ? 'control-search-page-limit' : 'named-control-not-found', symbol });
+    searches.at(-1).requested = requiredSymbols.has(symbol);
     for (const n of found) if (refs.length < 16 && !refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
       refs.push({ repository: n.repository, path: n.path, line: n.line || 1 });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
   const references = [...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.map(r => ({...r, basis:'named-control-candidate'}))];
+  const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
+  const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
+  const evidence=new Map(model.evidence.map(e=>[e.id,e]));
+  for(const route of routeCandidates) for(const id of route.evidence || []) {
+    const ref=evidence.get(id);if(ref)references.splice(issue.locations.length+followUp.length,0,{...ref,basis:'resource-route-candidate'});
+  }
   let neighborhoodLimited = false;
   for (const seed of issue.locations.slice(0,4)) {
-    const nodes = source.nodes({repository:seed.repository,path:seed.path,limit:129});
+    const nodes = source.nodes({kind:'function',repository:seed.repository,path:seed.path,limit:129});
     neighborhoodLimited ||= nodes.length > 128;
-    const nearby = nodes.filter(n => n.kind !== 'file' && Math.abs((n.line || 1) - (seed.line || 1)) < 5).slice(0,4);
+    const nearby = nodes.filter(n => n.kind !== 'file' && (n.line || 1) <= (seed.line || 1) && (n.endLine || n.line || 1) >= (seed.line || 1)).slice(0,4);
     for (const node of nearby) {
       const edges=source.edges(node.id);neighborhoodLimited ||= Boolean(edges.next);
       for(const edge of edges.items.filter(e => !/contains|owns|member/.test(e.kind)).slice(0,8)) {
@@ -42,11 +73,20 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       }
     }
   }
+  // Supply declarations before repeating the same middle-of-file window. Explicit
+  // follow-up paths must still resolve to selected, hash-matched graph files.
+  if(/initial|declar|environment|config|startup|before|full/i.test(missing.join(' '))) {
+    const seen=new Set();
+    for(const r of [...followUp,...refs,...issue.locations]) {
+      const k=r.repository+'\0'+r.path;
+      if(!seen.has(k) && seen.size<4){seen.add(k);references.unshift({...r,line:1,required:true,basis:'requested-initialization'});}
+    }
+  }
   const records=[], availableFiles=new Map();let omitted=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
     if(source.file(ref.repository,ref.path)) availableFiles.set(key,{repository:ref.repository,path:ref.path});
-    if(records.some(r => r.repository===ref.repository && r.path===ref.path && (ref.line || 1)>=r.startLine && (ref.line || 1)<=r.endLine))continue;
+    if(records.some(r => r.repository===ref.repository && r.path===ref.path && r.startLine===Math.max(1,(ref.line || 1)-20)))continue;
     if(records.length>=12){omitted++;if(ref.required)gaps.push({reason:'required-source-window-limit',repository:ref.repository,path:ref.path});continue;}
     try {
       const {code,...record}=await source.window(ref);
@@ -56,8 +96,8 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
   const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
-    citationPolicy:'Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Describe missing named functions in missingEvidence for a bounded follow-up search.',
-    retrieval:{controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; report any required unresolved code path in missingEvidence. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Describe missing named functions in missingEvidence for a bounded follow-up search.',
+    retrieval:{routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }
@@ -68,13 +108,21 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   const selected = options.threatIds;
   if (selected && (!Array.isArray(selected) || !selected.length || selected.some(id => !model.aiReview.threats.some(t => t.id === id)))) throw Error('Select saved STRIDE threat IDs');
   const issues = model.aiReview.threats.filter(t => !selected || selected.includes(t.id)).map(t => threatIssue(model, t)).sort((a,b) => priority.get(a.id) - priority.get(b.id));
+  const hashes = new Map(issues.map(i=>[i.id,sha(JSON.stringify(i))]));
+  const priorEntries = new Map();
+  for(const previous of [model.threatValidation,...(model.threatValidationHistory || []).slice().reverse()]) {
+    for(const entry of previous?.entries || []) if(entry.issueHash===hashes.get(entry.sourceId) && !priorEntries.has(entry.sourceId) && (entry.followUp?.length || entry.missingEvidence?.length)) priorEntries.set(entry.sourceId,entry);
+  }
+  if(model.threatValidation && model.threatValidation.contextKey !== threatValidationKey(model)) {
+    model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
+  }
   const report = await reviewSecurityIssues(manifest, model, {
-    ...options, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
+    ...options, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: (m, mf, root, issue, follow, context, missing) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });
       const scoped = { ...context, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
-      return threatInvestigationPacket(m,mf,root,issue,follow,scoped,missing);
+      return threatInvestigationPacket(m,mf,root,issue,follow?.length?follow:priorEntries.get(issue.id)?.followUp || [],scoped,missing?.length?missing:priorEntries.get(issue.id)?.missingEvidence || []);
     },
   });
   return report;

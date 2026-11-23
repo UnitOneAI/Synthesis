@@ -521,6 +521,7 @@ export async function serve({
                 "Source or analysis methodology changed; prior analysis retained for reference and requires a new review.";
             }
           }
+          if (model?.sourceConclusions) m.model.sourceConclusions = structuredClone(model.sourceConclusions);
           if (model?.deploymentContext) m.model.deploymentContext = structuredClone(model.deploymentContext);
           if (model?.architecture) {
             m.model.architecture = structuredClone(model.architecture);
@@ -530,6 +531,7 @@ export async function serve({
           if (model?.explorationRun)
             m.model.explorationRun = structuredClone(model.explorationRun);
           if (model?.threatValidation) m.model.threatValidation = structuredClone(model.threatValidation);
+          if (model?.threatValidationHistory) m.model.threatValidationHistory = structuredClone(model.threatValidationHistory);
           if (model?.securityReview)
             m.model.securityReview = structuredClone(model.securityReview);
           if (model?.cweModelReview) {
@@ -574,6 +576,7 @@ export async function serve({
               m.model.usageLedger,
               !model?.usageLedger && Boolean(model?.aiReview),
             );
+          if (model?.sourceConclusions) m.model.sourceConclusions = structuredClone(model.sourceConclusions);
           if (mode !== "review" && model?.deploymentContext) m.model.deploymentContext = structuredClone(model.deploymentContext);
           if (mode !== "review" && model?.architecture) {
             m.model.architecture = structuredClone(model.architecture);
@@ -1272,7 +1275,7 @@ export async function serve({
           trace: (event, data) => traces.record(event, { ...data, jobId }),
           progress: message => { job.message = message; },
           checkpoint: async () => { await checkpoint(); if (persistenceError) throw Error('Threat validation checkpoint failed'); },
-        })).then(report => { job = { status: 'ready', mode: 'threat-validation', jobId, message: `Threat validation ${report.status}: ${report.callsThisRun} calls; ${report.pending || 0} selected scenarios unresolved. Original STRIDE results retained.` }; })
+        })).then(report => { job = { status: 'ready', mode: 'threat-validation', jobId, message: `Threat evidence: ${report.assessmentCounts?.assessed || 0} / ${report.candidateCount} selected scenarios assessed; ${report.assessmentCounts?.needsCodeContext || 0} need code evidence; ${report.assessmentCounts?.failed || 0} failed. Deployment assumptions remain separate. Original STRIDE results retained.` }; })
           .catch(() => { job = { status: 'failed', mode: 'threat-validation', jobId, message: 'Threat validation stopped; saved results and traces retained' }; });
         return send(202, job);
       }

@@ -541,6 +541,7 @@ export async function errorReport({
       },
       threatValidation: {
         status: model?.threatValidation?.status || 'not-run',
+        assessmentCounts: model?.threatValidation?.assessmentCounts,
         callsThisRun: model?.threatValidation?.callsThisRun,
         pending: model?.threatValidation?.pending,
         entries: sample(model?.threatValidation?.entries, e => ({
