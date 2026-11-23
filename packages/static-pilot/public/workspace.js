@@ -813,7 +813,7 @@
     } else if (b.id === 'dc-run-system') { view = 'matrix'; reviewScope = 'system'; render();
     } else if (b.id === 'ws-preview-scope') {
       try { const plan = await api('system-review-plan?scope='+reviewScope); const panel = root.querySelector('#ws-scope-preview');
-        if (panel) panel.textContent = `${plan.units} system review units · ${plan.scope.interfaceIds.length} in-scope interfaces · ${plan.scope.deferredInterfaces} deferred to deep review · ${plan.gaps} explicit context gaps. ${plan.preview?.blockedObligations ?? 0} unassigned obligations · ${Math.round((plan.preview?.packetBytes || 0) / 1024)} KiB planned metadata · ${plan.preview?.repeatedRecordAppearances ?? 0} repeated record appearances. Source windows add to request size; timing uses measured provider throughput. No model call was made.`;
+        if (panel) panel.textContent = `${plan.units} system review units · ${plan.scope.interfaceIds.length} in-scope interfaces · ${plan.scope.poc?.kind === "repositories" ? "All selected primary subjects planned; supporting and navigation records retained as context" : plan.scope.deferredInterfaces + " deferred to deep review"} · ${plan.gaps} explicit context gaps. ${plan.preview?.blockedObligations ?? 0} unassigned obligations · ${Math.round((plan.preview?.packetBytes || 0) / 1024)} KiB planned metadata · ${plan.preview?.repeatedRecordAppearances ?? 0} repeated record appearances. Source windows add to request size; timing uses measured provider throughput. No model call was made.`;
       } catch (error) { notify(error.message, true); }
     } else if (b.dataset.deploymentAnswer) {
       const key = b.dataset.deploymentAnswer;
