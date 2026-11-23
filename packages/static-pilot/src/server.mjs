@@ -1462,7 +1462,7 @@ export async function serve({
       if (req.method === "GET" && url.pathname === "/api/system-review-plan") {
         if (!model) return send(409, { error: 'Open a saved graph first' });
         const plan = systemReviewPlan(model);
-        return send(200, { reviewScope: 'system', units: plan.batches.length, obligations: plan.obligations.length, gaps: plan.gaps.length, scope: plan.scope, semantics: plan.semantics });
+        return send(200, { reviewScope: 'system', preview: plan.preview, units: plan.batches.length, obligations: plan.obligations.length, gaps: plan.gaps.length, scope: plan.scope, semantics: plan.semantics });
       }
       if (req.method === "GET" && url.pathname === "/api/deployment-evidence") {
         if (!model) return send(409, { error: 'Open a saved graph first' });

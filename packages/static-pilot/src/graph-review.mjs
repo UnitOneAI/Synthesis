@@ -567,6 +567,12 @@ export async function enrichGraphModel(
     activePrior = model.savedStrideScopes[selectedScope];
     delete model.savedStrideScopes[selectedScope];
   }
+  if (activePrior?.reviewScope === 'system' && activePrior.scope?.version !== plan.scope?.version) {
+    model.stridePlanHistory = [...(model.stridePlanHistory || []), {
+      reason: 'System review planner changed; retained for comparison with the current evidence scope',
+      review: activePrior,
+    }].slice(-2);
+  }
   const previous =
     activePrior?.runKey === runKey ? activePrior.batches || [] : [];
   const cached = new Map(
