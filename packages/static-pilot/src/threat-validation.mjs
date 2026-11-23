@@ -101,7 +101,10 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   if (selected && (!Array.isArray(selected) || !selected.length || selected.some(id => !model.aiReview.threats.some(t => t.id === id)))) throw Error('Select saved STRIDE threat IDs');
   const issues = model.aiReview.threats.filter(t => !selected || selected.includes(t.id)).map(t => threatIssue(model, t)).sort((a,b) => priority.get(a.id) - priority.get(b.id));
   const hashes = new Map(issues.map(i=>[i.id,sha(JSON.stringify(i))]));
-  const priorEntries = new Map((model.threatValidation?.entries || []).filter(e=>e.issueHash===hashes.get(e.sourceId)).map(e=>[e.sourceId,e]));
+  const priorEntries = new Map();
+  for(const previous of [model.threatValidation,...(model.threatValidationHistory || []).slice().reverse()]) {
+    for(const entry of previous?.entries || []) if(entry.issueHash===hashes.get(entry.sourceId) && !priorEntries.has(entry.sourceId) && (entry.followUp?.length || entry.missingEvidence?.length)) priorEntries.set(entry.sourceId,entry);
+  }
   if(model.threatValidation && model.threatValidation.contextKey !== threatValidationKey(model)) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }

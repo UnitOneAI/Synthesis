@@ -444,6 +444,8 @@ export async function reviewSecurityIssues(
         issueHash: item.hash,
         contextKey,
         rounds: (old?.rounds || 0) + 1,
+        followUp: structuredClone(old?.followUp || []),
+        missingEvidence: structuredClone(old?.missingEvidence || []),
         assessment: "not-assessed",
         history: [
           ...(old?.history || []),
@@ -574,7 +576,7 @@ export async function reviewSecurityIssues(
         )
       )
         break;
-      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < 2 && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
+      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         entry.assessment === "needs-context" &&
         (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]/.test(s)))) &&

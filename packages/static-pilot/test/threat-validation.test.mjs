@@ -136,3 +136,18 @@ test('initialization window cannot hide the remainder of an overlapping control 
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.startLine===1));
  assert.ok(p.records.some(r=>r.path==='control.py'&&r.endLine>=96),'Line 79 inside the preamble must not suppress the window containing the enforcement at line 96');
 });
+
+test('failed response retains the requested control context for a bounded retry',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:3,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];v.followUp=[{repository:'repo10',path:'SecondGuard.cs',line:1,reason:'Inspect the other control'}];
+    // The follow-up must use a submitted available file. Named lookup discovers it next.
+    v.followUp=[];
+  }else {assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'));v.trace[0].endLine=100000;}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ const e=f.model.threatValidation.entries[0];assert.equal(e.assessment,'failed');assert.deepEqual(e.missingEvidence,['Inspect SecondGuard']);
+ assert.equal(f.model.threatValidation.assessmentCounts.failed,1);assert.equal(calls,3);
+});
