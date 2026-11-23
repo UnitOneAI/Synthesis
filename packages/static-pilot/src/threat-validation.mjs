@@ -1,3 +1,4 @@
+import {sourceScope} from './architecture.mjs';
 import {controlSymbols, controlContext} from './control-context.mjs';
 import { SECURITY_RESPONSE_SCHEMA } from './security-schemas.mjs';
 import { SECURITY_REVIEW_PROMPT, validateSecurityAssessment } from './security-intelligence.mjs';
@@ -44,7 +45,11 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       after = result.next;
       if (!after) break;
     }
-    const found = matches.sort((a,b) => Number(a.kind === 'file') - Number(b.kind === 'file')).slice(0, 4);
+    const sameFile = n => issue.locations.some(r=>r.repository===n.repository && r.path===n.path);
+    const sameRepository = n => issue.locations.some(r=>r.repository===n.repository);
+    const found = matches.sort((a,b) => Number(sameFile(b))-Number(sameFile(a)) ||
+      Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') ||
+      Number(sameRepository(b))-Number(sameRepository(a)) || Number(a.kind === 'file')-Number(b.kind === 'file')).slice(0,4);
     searches.push({ symbol, matches: found.length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
     for (const n of found) if (refs.length < 16 && !refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))

@@ -228,3 +228,17 @@ test('requested initialization survives generic framework context under the byte
  assert.equal(p.gaps.filter(g=>g.path==='control.py').length,0);
  assert.ok(Buffer.byteLength(JSON.stringify(p.records))<=42000);
 });
+
+test('named control retrieval prioritizes production implementations before matching test helpers',async t=>{
+ const extras=Array.from({length:8},(_,i)=>[`repo0/fixture_${i}.py`,'def PermissionFilter():\n    return True\n']);
+ const f=await threatFixture(t,extras);
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const {threatIssue}=await import('../src/threat-validation-state.mjs');
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,threatIssue(f.model,f.model.aiReview.threats[0]),[],{},['Inspect PermissionFilter']);
+ const refs=packet.records.filter(r=>r.basis==='requested-symbol' || r.basis==='combined hash-matched source windows');
+ assert.ok(refs.some(r=>r.repository==='repo11' && r.path==='PermissionFilter.cs'));
+ const search=packet.retrieval.controlSearches.find(r=>r.symbol==='PermissionFilter');
+ assert.ok(search.requested);
+ const first=f.graph.node(f.model.sourceGraph.generation,search.nodeIds[0]);
+ assert.equal(first.repository,'repo11');
+});

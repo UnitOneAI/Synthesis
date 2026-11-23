@@ -151,9 +151,10 @@ export function redact(value) {
     )
     .replace(
       /^.*(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization|connectionstring|connection_string|accountkey|clientsecret)\s*["']?\s*[:=].*$/gim,
-      // Preserve a narrowly recognized dependency-injection signature. No
-      // literals or function body are permitted by this exception.
+      // Preserve dependency-injection signatures and identifier-only conditions.
+      // Neither exception permits literals or an inline function/condition body.
       (line) => /^\s*(?:async\s+)?def\s+\w+\(\w+:\s*(?:Optional\[str\]|str)\s*=\s*(?:Security|Depends)\(\w+\)\)\s*(?:->\s*\w+\s*)?:\s*$/.test(line)
+        || /^\s*(?:if|elif)\s+(?:not\s+)?[A-Za-z_]\w*\s*:\s*$/.test(line)
         ? line : "[sensitive assignment omitted]",
     )
     .replace(
