@@ -15,7 +15,8 @@ import {serve} from '../src/server.mjs';
 import {systemModel} from '../src/system-model.mjs';
 import {diagramModel} from '../src/diagram-model.mjs';
 async function fixture(t) {
- const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'poc-')));t.after(()=>fs.rm(dir,{recursive:true,force:true}));const root=path.join(dir,'sources');
+ const cleanup=[];
+ const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'poc-')));t.after(async()=>{for(const close of cleanup.reverse())await close();await fs.rm(dir,{recursive:true,force:true});});const root=path.join(dir,'sources');
  await fs.mkdir(path.join(root,'app','Controllers'),{recursive:true});await fs.mkdir(path.join(root,'support'));
  await fs.writeFile(path.join(root,'app','Controllers','EmailController.cs'),'class EmailController : RootController {\n[HttpPost("/email")]\npublic void Write() { service.Save(); }\n}');
  await fs.writeFile(path.join(root,'app','Controllers','OtherController.cs'),'class OtherController {\n[HttpGet("/other")]\npublic void Read() {}\n}');
@@ -24,7 +25,7 @@ async function fixture(t) {
  const manifest={title:'POC fixture',profile:'test',repositories:[{name:'app'},{name:'support'}]};
  const model=await analyze(manifest,{sourceRoot:root});
  model.pocScope={title:'Email external surface',profile:'on-prem assumption',operations:[{repository:'app',pathContains:'EmailController.cs'}]};
- return {root,manifest,model};
+ return {root,manifest,model,cleanup};
 }
 test('POC selects explicit operations, retains shared evidence, rejects empty and over-broad scope',async t=>{
  const {model,root,manifest}=await fixture(t), before=JSON.stringify(model.sourceGraph);
@@ -66,7 +67,7 @@ test('POC saved scope resumes without requests and preserves full-system paid re
 });
 test('POC scope API saves on the existing graph and refuses unknown selections',async t=>{
  const f=await fixture(t), dir=path.join(f.root,'..','state'),store=await workspaceStore(f.root,dir);await store.save({model:f.model,manifest:f.manifest});await store.close();
- const app=await serve({sourceRoot:f.root,workspace:dir,port:0,quiet:true,persist:true});t.after(()=>app.close());
+ const app=await serve({sourceRoot:f.root,workspace:dir,port:0,quiet:true,persist:true});f.cleanup.push(()=>app.close());
  const base=app.url.split('/#')[0],headers={'X-Synthesis-Token':app.token,'Content-Type':'application/json'};
  const r=await fetch(base+'/api/poc-scope',{method:'POST',headers,body:JSON.stringify({modelRevision:f.model.modelRevision,scope:f.model.pocScope})});
  assert.equal(r.status,200,await r.clone().text());const m=await r.json();assert.equal(m.sourceGraph.fingerprint,f.model.sourceGraph.fingerprint);
