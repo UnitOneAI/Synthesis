@@ -178,3 +178,80 @@ test('worker routes system scope and checkpoints the other scope before completi
   assert.ok(checkpoints.length);
   assert.ok(checkpoints.every(c=>c.savedStrideScopes.deep.coverage.completedBatches===1));
 });
+
+
+test('system review recovers transient failure and invalid citation, retains every attempt, and completes twelve repos', async t => {
+  const f = await fixture(t);
+  const trace = [];
+  let calls = 0;
+  const transport = async (_, request) => {
+    const packet = JSON.parse(JSON.parse(request.body).messages[0].content);
+    calls++;
+    if (calls === 1) throw Error('network reset with private details');
+    if (calls === 2) {
+      const data = await reply(packet).json();
+      const value = JSON.parse(data.content[0].text);
+      value.threats = [{ ...(value.threats[0] || {}), title: 'Invalid reference', interfaceIds: ['invented'], evidenceIds: ['invented'] }];
+      data.content[0].text = JSON.stringify(value);
+      return Response.json(data);
+    }
+    if (calls === 3) assert.match(JSON.parse(request.body).system, /Validation retry:/);
+    return reply(packet);
+  };
+  await enrichGraphModel(f.model, config, new Map(), transport, { reviewScope: 'system', runUntilComplete: true, concurrency: 1, recoveryDelayMs: 0, trace: (e, d) => trace.push({ e, d }) });
+  assert.equal(f.model.aiReview.status, 'completed-needs-review');
+  assert.equal(f.model.aiReview.coverage.failedBatches, 0);
+  assert.equal(f.model.aiReview.coverage.pendingBatches, 0);
+  assert.equal(f.model.aiReview.scope.repositories.length, 12);
+  assert.equal(f.model.usageLedger.attempts.filter(a => a.status === 'failed').length, 2);
+  assert.equal(f.model.usageLedger.attempts.filter(a => a.usage === null).length, 1);
+  assert.equal(trace.filter(x => x.e === 'review.retry-scheduled').length, 2);
+  assert.ok(!JSON.stringify(f.model.aiReview).includes('private details'));
+  const before = calls;
+  await enrichGraphModel(f.model, config, new Map(), transport, { reviewScope: 'system', runUntilComplete: true });
+  assert.equal(calls, before, 'Completed paid work must be reused');
+});
+
+test('system recovery is bounded, honors long gateway cooldowns, and stops immediately on authorization failures', async t => {
+  const f = await fixture(t, 1);
+  for (const [status, headers, expected] of [[503, {}, 3], [429, { 'Retry-After': '120' }, 1], [403, {}, 1]]) {
+    const model = structuredClone(f.model); let calls = 0;
+    await enrichGraphModel(model, config, new Map(), async () => { calls++; return new Response('secret provider details', { status, headers }); }, { reviewScope: 'system', runUntilComplete: true, concurrency: 1, recoveryDelayMs: 0 });
+    assert.equal(calls, expected);
+    assert.equal(model.aiReview.stopReason, 'provider-failure');
+    assert.equal(model.aiReview.stopFailure.httpStatus, status);
+    assert.equal(model.usageLedger.attempts.length, expected);
+    assert.ok(model.usageLedger.attempts.every(a => a.status === 'failed'));
+    assert.ok(!JSON.stringify(model).includes('secret provider details'));
+  }
+});
+
+test('cancellation during STRIDE recovery sends no replacement request', async t => {
+  const f = await fixture(t, 1), controller = new AbortController(); let calls = 0;
+  await enrichGraphModel(f.model, config, new Map(), async () => { calls++; throw Error('reset'); }, {
+    reviewScope: 'system', runUntilComplete: true, concurrency: 1, signal: controller.signal,
+    trace: event => { if (event === 'review.retry-scheduled') controller.abort(); },
+  });
+  assert.equal(calls, 1);
+  assert.equal(f.model.aiReview.stopReason, 'cancelled');
+  assert.equal(f.model.usageLedger.attempts[0].status, 'failed');
+});
+
+
+test('an isolated invalid system unit does not hide later internal scope or become completed coverage', async t => {
+  const f = await fixture(t, 3), plan = systemReviewPlan(f.model);
+  const first = plan.batches[0]; first.reviewStage = 1;
+  for (const b of plan.batches.slice(1)) b.reviewStage = 2;
+  let failedPacket;
+  await enrichGraphModel(f.model, config, new Map(), async (_, request) => {
+    const packet = JSON.parse(JSON.parse(request.body).messages[0].content);
+    failedPacket ||= JSON.stringify(packet);
+    if (JSON.stringify(packet) === failedPacket) return Response.json({ stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'invalid' }] });
+    return reply(packet);
+  }, { plan, runUntilComplete: true, concurrency: 1, recoveryDelayMs: 0 });
+  assert.equal(f.model.aiReview.coverage.failedBatches, 1);
+  assert.equal(f.model.aiReview.coverage.pendingBatches, 0);
+  assert.equal(f.model.aiReview.coverage.completedBatches, plan.batches.length - 1);
+  assert.equal(f.model.aiReview.status, 'partial');
+  assert.equal(f.model.aiReview.stopReason, 'plan-exhausted');
+});

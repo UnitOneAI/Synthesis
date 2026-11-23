@@ -34,3 +34,15 @@ The report projection also preserves source-associated candidate boundaries for 
 ## Remaining limits
 
 Deployment declarations are indexed, not a compiler-level effective configuration model. Profile conflicts are not automatically resolved. Five topic-level optional questions apply to their listed scope; heterogeneous deployments should keep conservative assumptions or select mixed/unknown. No runtime validation occurs. Native Windows behavior is covered by existing CI when the branch is published; local macOS execution alone does not constitute a Windows pass.
+
+## Continuous-review recovery qualification
+
+- Twelve-repository system fixture: an initial transport failure followed by invalid evidence recovers, completes all planned system units, meters both failed attempts and performs zero requests on unchanged resume.
+- Transient service failures have a two-retry ceiling; long Retry-After values and HTTP 403 do not loop.
+- Cancellation during recovery sends no replacement request.
+- An isolated invalid system unit remains failed while later stages run; final status remains partial.
+- Provider deadline defaults to 300 seconds and accepts a bounded process setting; a timed test confirms cancellation.
+- Diagnostic export identifies system/deep scope and the exact stopping failure rather than the first older invalid response.
+- These deterministic provider simulations do not establish live customer gateway throughput or customer scan completion.
+
+Local recovery verification: 248 backend tests passed, three conditional scanner skips; 29 browser tests passed, two conditional skips. Reopening the previously saved live open-autofix system result retained all three completed units with zero provider calls. Its remaining 216 system units were not run by this recovery check. Customer gateway completion has not been verified from the development environment.

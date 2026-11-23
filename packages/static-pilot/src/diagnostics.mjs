@@ -402,13 +402,17 @@ export async function errorReport({
     ...pick(r, [
       "status",
       "outputContract",
+      "reviewScope",
       "stopReason",
       "completedBatches",
       "pendingBatches",
       "totalBatches",
     ]),
+    stopFailure: r?.stopFailure ? pick(r.stopFailure, ["code", "httpStatus", "retryable", "action", "batchId", "attemptId"]) : undefined,
     failure: r?.lastRunFailure
       ? pick(r.lastRunFailure, ["code", "httpStatus", "retryable", "action"])
+      : r?.stopFailure
+        ? pick(r.stopFailure, ["code", "httpStatus", "retryable", "action", "batchId", "attemptId"])
       : r?.error &&
           (r.status === "failed" ||
             r.batches?.some((b) => b.status === "failed"))
@@ -476,6 +480,8 @@ export async function errorReport({
       job: pick(job, ["status", "mode", "message"]),
       stride: {
         ...review(model?.aiReview),
+        reviewScope: model?.aiReview ? (model.aiReview.reviewScope === 'system' ? 'system' : 'deep') : null,
+        scope: model?.aiReview?.scope ? { inScopeInterfaces: model.aiReview.scope.interfaceIds?.length, deferredInterfaces: model.aiReview.scope.deferredInterfaces } : undefined,
         failedAttemptCountsForSavedReviewRun: Object.fromEntries(
           [...(model?.usageLedger?.attempts || [])]
             .filter(

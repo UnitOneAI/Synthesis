@@ -1,3 +1,4 @@
+import { setTimeout as recoveryWait } from 'node:timers/promises';
 import { systemReviewPlan } from './system-review-units.mjs';
 import { reviewRunControl, updateReviewProgress } from "./review-run.mjs";
 import { reviewConcurrency, runReviewPool } from "./review-pool.mjs";
@@ -865,7 +866,9 @@ export async function enrichGraphModel(
   const poolResult = await runReviewPool(selected, {
     concurrency,
     stage: (index) => review.plan.batches[index].reviewStage,
-    shouldAdvanceStage: (stage) => !review.batches.some(
+    // System review must reach the other components even when an isolated unit
+    // remains unresolved. Failed units stay failed; global failure guards still stop.
+    shouldAdvanceStage: (stage) => selectedScope === 'system' || !review.batches.some(
       (b) => b.status === "failed" && b.reviewStage <= stage,
     ),
     signal: options.signal,
@@ -987,7 +990,7 @@ export async function enrichGraphModel(
             },
           );
         };
-        const result = await requestReview(config, batch.packet, dispatch, {
+        const requestOnce = () => requestReview(config, batch.packet, dispatch, {
           validationRetry: entry.validationRetry,
           ...(options.systemPrompt
             ? { systemPrompt: options.systemPrompt }
@@ -1032,6 +1035,42 @@ export async function enrichGraphModel(
             await save();
           },
         });
+        let result;
+        let transportRetries = 0, validationRetries = 0;
+        for (;;) {
+          try { result = await requestOnce(); break; }
+          catch (error) {
+            if (!attempt || coordinationFailure) throw error;
+            const detail = failureDetail(error.message);
+            const invalid = ["response-format", "evidence-validation", "output-limit"].includes(detail.code);
+            const transient = /HTTP (408|429|500|502|503|504|529)\b|request failed or timed out/.test(error.message);
+            finishAttempt(attempt, options.signal?.aborted ? "interrupted" : "failed");
+            attempt.failure = detail;
+            recordOutcome(invalid);
+            entry.status = "failed";
+            entry.error = error.message;
+            await emit("model.request-failed", { runKey, batchId: batch.id, attemptId: attempt.id, failure: detail });
+            await save();
+            // Recovery is bounded and separately metered. A timeout may have consumed
+            // provider tokens; never erase that unknown-usage attempt.
+            const retry = continuous && !options.signal?.aborted && !shouldStop() &&
+              ((transient && transportRetries < 2) || (invalid && validationRetries < 1));
+            const delayMs = Math.max(error.retryAfterMs || 0, options.recoveryDelayMs ?? (transient ? 2000 * 2 ** transportRetries : 1000));
+            // Long server cooldowns require a later resume, never an early retry.
+            if (!retry || delayMs > 60000) throw error;
+            if (transient) transportRetries++;
+            else { validationRetries++; entry.validationRetry = true; }
+            review.recovery = { batchId: batch.id, reason: detail.code, transportRetries, validationRetries, delayMs, state: "waiting" };
+            await emit("review.retry-scheduled", review.recovery);
+            options.progress?.(`STRIDE recovery: ${detail.code}; retrying this packet after ${Math.ceil(delayMs / 1000)}s. Completed work is retained.`);
+            await save();
+            await recoveryWait(delayMs, undefined, { signal: options.signal });
+            if (options.signal?.aborted || shouldStop()) throw error;
+            delete entry.responseShape;
+            review.recovery = { ...review.recovery, state: "retrying" };
+          }
+        }
+        delete entry.error;
         recordOutcome(false);
         finishAttempt(attempt, "succeeded");
         Object.assign(entry, {
@@ -1059,30 +1098,20 @@ export async function enrichGraphModel(
           }
           throw error;
         }
-        if (attempt) {
-          finishAttempt(
-            attempt,
-            options.signal?.aborted ? "interrupted" : "failed",
-          );
+        if (attempt.status === "in-flight") {
+          finishAttempt(attempt, options.signal?.aborted ? "interrupted" : "failed");
           attempt.failure = failureDetail(error.message);
+          recordOutcome(["response-format", "evidence-validation", "output-limit"].includes(attempt.failure.code));
+          await emit("model.request-failed", { runKey, batchId: batch.id, attemptId: attempt.id, failure: attempt.failure });
         }
         entry.status = "failed";
         entry.error = error.message;
-        recordOutcome(
-          ["response-format", "evidence-validation", "output-limit"].includes(
-            failureDetail(error.message).code,
-          ),
-        );
-        terminalFailure ||= /HTTP \d{3}|request failed or timed out/.test(
-          error.message,
-        );
-        await emit("model.request-failed", {
-          runKey,
-          batchId: batch.id,
-          attemptId: attempt?.id,
-          failure: failureDetail(error.message),
-        });
+        if (/HTTP \d{3}|request failed or timed out/.test(error.message)) {
+          terminalFailure = true;
+          review.stopFailure ||= { ...failureDetail(error.message), batchId: batch.id, attemptId: attempt.id };
+        }
       }
+      if (review.recovery?.batchId === batch.id) review.recovery.state = entry.status === 'completed' ? 'recovered' : 'stopped';
       entry.durationMs = Math.round(performance.now() - requestStartedAt);
       attempt.durationMs = entry.durationMs;
       await emit("review.agent-finished", {
@@ -1116,6 +1145,8 @@ export async function enrichGraphModel(
           : continuous
             ? "Review pass finished; inspect failed packets and source or graph coverage gaps."
             : "Review budget reached; continue to review pending batches. Source and graph coverage gaps remain.");
+  if (terminalFailure && review.stopFailure)
+    review.error = `Provider failure stopped this action: ${review.stopFailure.code}. Completed work is retained; bounded recovery was exhausted or this failure is not retryable.`;
   if (formatFailureStop)
     review.error =
       "Stopped after repeated invalid model responses (3 consecutive or 6 of the last 12). Successful packets and usage are retained. Export errors and resolve the failure before continuing.";

@@ -713,3 +713,13 @@ test("STRIDE error export identifies control endpoints and validation guard with
   assert.equal(guard.retryable, false);
   assert.ok(!JSON.stringify(guard).includes("private response text"));
 });
+
+
+test('error export separates the stopping provider failure from earlier invalid evidence and identifies scope', async () => {
+  const model = await fixture();
+  model.aiReview = { status: 'partial', reviewScope: 'system', stopReason: 'provider-failure', error: 'older evidence validation error', stopFailure: { code: 'transport-or-timeout', batchId: 'stopping-batch', attemptId: 'stopping-attempt', retryable: true }, batches: [] };
+  const result = await errorReport({ model, config });
+  assert.equal(result.stride.failure.code, 'transport-or-timeout');
+  assert.equal(result.stride.failure.batchId, 'stopping-batch');
+  assert.equal(result.stride.reviewScope, 'system');
+});

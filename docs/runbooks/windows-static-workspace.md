@@ -470,3 +470,19 @@ The same PDF remains available under **System model → Export review package �
 After updating and restarting Synthesis, existing saved findings export with the UnitOne logo and **Confidential — Do not share** notice. No graph rebuild, model rerun, new VM dependency or report setting is required. Use **CWE code review → CWE evidence · PDF** or **STRIDE matrix → Export STRIDE review · PDF**. The CWE report starts with a compact summary by CWE, candidate count, scanner/model totals and distinct affected repository counts; unmapped security issues remain included.
 
 In Edge/Chrome's print dialog choose **Save as PDF** and turn **Headers and footers** off to exclude browser-added timestamps, URLs and titles. Save outside the repositories. The downloaded CWE HTML uses the same layout and embeds the logo for offline printing. Detailed execution/coverage data remain in the UI and JSON exports; STRIDE's partial or historical review status remains in its PDF.
+
+### Recovering an interrupted STRIDE review
+
+A saved `2,309 packets` result (or any old deep-review count) is not proof that a new **System threat model** action ran. Check the saved review scope separately from the selector for the next action. Use **Preview system scope**, then select **System threat model** before starting. Existing compatible system and deep results remain separately resumable; switching scope does not declare deep work completed.
+
+STRIDE **Run until complete** now retries a transient transport/timeout or HTTP 408/429/500/502/503/504/529 failure at most twice per packet, with backoff. It attempts one corrective retry for an invalid response using the existing strict citation rules. Each actual request retains its own token record, including unknown usage after timeout. Bounded request-budget actions do not add automatic retries. Authorization/configuration failures remain immediate stops. Persistent invalid output still trips the existing failure guard. A gateway Retry-After longer than 60 seconds stops for later continuation rather than retrying early.
+
+An isolated invalid system-review unit remains failed but does not prevent later system stages from being attempted. That pass stays **partial**, never completed coverage. Systemic provider failures and the invalid-response guard still stop further dispatch. Deep-code review retains its existing stage gating.
+
+The default provider deadline is now five minutes. To set it explicitly in the same PowerShell window before starting the server:
+
+```powershell
+$env:SYNTHESIS_REQUEST_TIMEOUT_MS = '300000'
+```
+
+This only controls the local request deadline; it cannot extend a gateway's own timeout. Export errors now includes the saved review scope and the specific stopping request separately from earlier citation failures. Do not rebuild an unchanged graph or delete successful reviews to resolve a transient provider error.

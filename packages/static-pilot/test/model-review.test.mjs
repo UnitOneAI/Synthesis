@@ -1015,3 +1015,18 @@ test("STRIDE native contract restricts connections and standards without changin
   standards.standardsReviews[0].status = "needs-context";
   assert.doesNotThrow(() => validateReview(standards, packet));
 });
+
+
+test('provider deadline is configurable, bounded, and defaults to five minutes', async () => {
+  assert.equal(config.requestTimeoutMs, 300000);
+  for (const value of ['no', '0', '600001', '1.5']) assert.throws(() => modelConfig('anthropic', 'model', { ANTHROPIC_API_KEY: 'test', SYNTHESIS_REQUEST_TIMEOUT_MS: value }), /SYNTHESIS_REQUEST_TIMEOUT_MS/);
+  const short = modelConfig('anthropic', 'model', { ANTHROPIC_API_KEY: 'test', SYNTHESIS_REQUEST_TIMEOUT_MS: '1000' });
+  const model = await fixture();
+  const packet = reviewPacket(model);
+  const started = Date.now();
+  await assert.rejects(requestReview(short, packet, async (_, { signal }) => new Promise((resolve, reject) => {
+    const keepAlive = setTimeout(resolve, 5000);
+    signal.addEventListener('abort', () => { clearTimeout(keepAlive); reject(signal.reason); }, { once: true });
+  })), /request failed or timed out/);
+  assert.ok(Date.now() - started < 3000);
+});
