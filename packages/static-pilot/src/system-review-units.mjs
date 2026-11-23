@@ -53,10 +53,11 @@ export function systemReviewPlan(model, excerpts = new Map(), selection = null) 
       { ...system, flows: contextFlows }, undefined, [...requiredIds],
     );
     packet.deploymentContext = contextForInterfaces(context, interfaces.map(i => i.id));
-    if (selection) packet.reviewFocus.qualityRules = 'Only report scenarios about the primary operation in this packet. Neighboring handlers are context, never alternative anchors: do not attach a PATCH/write scenario to a GET/read interface. A scenario for another operation belongs in its own review unit. ' + 'Investigate the current operation, not a hypothetical future change. A static 404 with no data operation is not an authorization bypass. Dependencies without a specific advisory or source-supported attack path are inventory obligations, not vulnerability scenarios. Resolve applicable global, inherited and route-specific controls from sourceContext; name exact missing implementations as questions. Do not infer absence from omitted controls. Assess spoofing, tampering, repudiation, disclosure, availability and privilege separately; no finding is required in every category.';
+    if (selection) packet.reviewFocus.qualityRules = 'Only report scenarios about the primary operations in this packet. Neighboring handlers are context, never alternative anchors: do not attach a PATCH/write scenario to a GET/read interface. A scenario for another operation belongs in its own review unit. ' + 'Investigate the current operation, not a hypothetical future change. A static 404 with no data operation is not an authorization bypass. Dependencies without a specific advisory or source-supported attack path are inventory obligations, not vulnerability scenarios. Resolve applicable global, inherited and route-specific controls from sourceContext; name exact missing implementations as questions. Do not infer absence from omitted controls. Assess spoofing, tampering, repudiation, disclosure, availability and privilege separately; no finding is required in every category.';
     if (selection) packet.reviewFocus.selectedProfile = {name:selection.profile,basis:'analysis assumption; not deployment verification'};
     packet.reviewFocus.responseContract = 'Return concise actionable scenarios. Anchor each threat to exactly ONE interfaceId and one or more evidenceIds owned by that interface, copied from the evidenceOwnership table. Do not add evidence from other interfaces to threat.evidenceIds: supporting controls belong in analysis.controlEvidenceIds when supplied and relevant; other path context belongs in narrative with explicit uncertainty. This anchor does not prove the entire connected path. Return connections as [] because static connections are already supplied. Assess all six STRIDE categories; do not invent a scenario to fill a category. Return at most six distinct scenarios and preserve missing evidence as questions.';
     packet.reviewFocus.evidenceOwnership = packet.records.map(r => ({ interfaceId: r.id, evidenceIds: r.evidence.map(e => e.id) }));
+    if(selection?.repositoryScope){packet.reviewFocus.repositoryAssessment=true;packet.reviewFocus.interpretation='Review every primary interface and parsed definition. Definitions are review subjects, not automatically entry points. Establish callers, controls and sensitive operations from cited source or record the exact missing binding. Assess all six categories, including internal processing and supporting/test code.';}
     packet.reviewUnit = { flowIds: flows.map(f => f.id), primaryInterfaceIds: members.map(i => i.id), omittedRelatedControls: Math.max(0, related.length - selectedControls.length) };
     const missingFlows = flows.filter(f => !packet.systemContext.flows.some(x => x.id === f.id));
     if (missingFlows.length) throw Error('Required system flow missing from review context');
@@ -99,12 +100,12 @@ export function systemReviewPlan(model, excerpts = new Map(), selection = null) 
   if (selection) {
     const groups = new Map();
     for (const i of model.interfaces.filter(i => primary.has(i.id))) {
-      const key=operationSignature(i,evidence);
+      const key=selection.repositoryScope ? JSON.stringify([i.repository,i.component,i.kind,i.direction,i.protocol,[...new Set(i.evidence.map(id=>evidence.get(id)?.path).filter(Boolean))].sort()]) : operationSignature(i,evidence);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(i);
     }
-    for (const group of groups.values()) for (let at = 0; at < group.length; at += 8) {
-      const members = group.slice(at, at + 8), ids = new Set(members.map(i => i.id));
+    for (const group of groups.values()) for (let at = 0; at < group.length; at += selection.repositoryScope ? 4 : 8) {
+      const members = group.slice(at, at + (selection.repositoryScope ? 4 : 8)), ids = new Set(members.map(i => i.id));
       const flows = system.flows.filter(f => f.interfaceIds?.some(i => ids.has(i)))
         .map(f => ({...f, interfaceIds:f.interfaceIds.filter(i => ids.has(i))}));
       add(members, flows, `${indexes.components.get(members[0].component)?.name || members[0].repository} · selected operations`);

@@ -21,3 +21,16 @@ test('saved-graph POC selector imports, previews and survives restart without ch
   const restored=await (await page.request.get(new URL(app.url).origin+'/api/model',{headers:{'X-Synthesis-Token':app.token}})).json();expect(restored.pocScope.id).toBe(m.pocScope.id);
  }finally{await page.goto('about:blank');await app?.close();await fs.rm(f.dir,{recursive:true,force:true});}
 });
+test('primary repositories are selectable without customer-specific names',async({page})=>{
+ const f=await reportFixture();let app;
+ try{
+  const store=await workspaceStore(f.root,f.workspace);await store.save({model:f.model,manifest:f.manifest});await store.close();
+  app=await serve({sourceRoot:f.root,workspace:f.workspace,persist:true,port:0,quiet:true});
+  await page.goto(app.url);await page.getByRole('button',{name:'Open saved graph',exact:true}).click();await page.getByRole('button',{name:'4 · STRIDE matrix',exact:true}).click();
+  await page.locator('[data-primary-repo][value="service"]').check();await page.locator('#ws-repo-title').fill('Selected application');
+  await page.getByRole('button',{name:'Save repository scope',exact:true}).click();await expect(page.locator('#ws-review-scope')).toHaveValue('poc');
+  await page.getByRole('button',{name:'Preview system scope',exact:true}).click();await expect(page.locator('#ws-scope-preview')).toContainText('system review units');
+  const m=await (await page.request.get(new URL(app.url).origin+'/api/model',{headers:{'X-Synthesis-Token':app.token}})).json();
+  expect(m.pocScope.kind).toBe('repositories');expect(m.pocScope.repositories).toEqual(['service']);expect(m.sourceGraph.fingerprint).toBe(f.model.sourceGraph.fingerprint);
+ }finally{await page.goto('about:blank');await app?.close();await fs.rm(f.dir,{recursive:true,force:true});}
+});

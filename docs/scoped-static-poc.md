@@ -1,5 +1,7 @@
 # Scoped static threat-model POC
 
+For whole selected repositories, use [Selected-repository STRIDE review](selected-repository-review.md). The operation-only mode documented below remains narrower and has different limits.
+
 The POC reviews named inbound operations using the existing graph. It is an analysis scope, unlike the External actor display filter. Other selected clones remain available for supporting evidence, without scheduling a complete review of them.
 
 ## Scope and preservation

@@ -578,6 +578,10 @@ function retryReferenceInstructions(packet) {
 // Native output constraints use only submitted identifiers; local ownership validation remains authoritative.
 export function boundStrideSchema(schema, packet) {
   if (!schema?.properties?.threats) return schema;
+  // Repository assessments use one reusable native grammar. Source IDs still
+  // undergo exact ownership/line validation locally; per-packet enum grammars
+  // otherwise require provider compilation on every request.
+  if(packet.reviewFocus?.repositoryAssessment && schema.properties.categoryReviews)return schema;
   const value = structuredClone(schema);
   const restrict = (field, ids) => {
     if (!field) return;

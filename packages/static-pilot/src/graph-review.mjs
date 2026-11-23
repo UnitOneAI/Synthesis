@@ -1,3 +1,4 @@
+import {REPOSITORY_PROMPT,REPOSITORY_SCHEMA,validateRepositoryReview} from './repository-assessment.mjs';
 import {pocReviewPlan} from './poc-scope.mjs';
 import { setTimeout as recoveryWait } from 'node:timers/promises';
 import { systemReviewPlan } from './system-review-units.mjs';
@@ -508,6 +509,10 @@ export async function enrichGraphModel(
           `Preparing STRIDE plan: ${state.stage}${state.preparedPackets ? " · " + state.preparedPackets + " packets prepared" : ""} · ${Math.round(state.elapsedMs / 1000)}s · no model calls yet`,
         ),
     }));
+  if(plan.scope?.poc?.kind==='repositories'){
+    if(!options.prepareBatch)throw Error('Repository STRIDE requires source evidence; enable source excerpts before review');
+    options={...options,systemPrompt:REPOSITORY_PROMPT,responseSchema:REPOSITORY_SCHEMA,validate:validateRepositoryReview};
+  }
   const planningMs = Math.round(performance.now() - planningStarted);
   if (!options.plan)
     await options.trace?.("review.planning-completed", {
@@ -530,7 +535,7 @@ export async function enrichGraphModel(
           ),
         }
       : {}),
-    promptKind: options.systemPrompt ? "static-investigation" : "stride",
+    promptKind: plan.scope?.poc?.kind==='repositories' ? "repository-assessment" : options.systemPrompt ? "static-investigation" : "stride",
     promptVersion: GRAPH_REVIEW_VERSION,
     promptHash: sha(options.systemPrompt || SYSTEM_PROMPT),
     guidance: {

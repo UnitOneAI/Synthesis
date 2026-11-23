@@ -101,3 +101,79 @@ test('Python control context includes application composition and prefers produc
  assert.ok(result.searches.some(s=>s.symbol==='create_app'));
  assert.equal(result.references[0].path,'api/server.py');
 });
+
+import {validateRepositoryReview,REPOSITORY_CATEGORIES,repositoryAssessmentSummary} from '../src/repository-assessment.mjs';
+function categoryResponse(packet){return {summary:'Static category assessment of supplied source.',threats:[],connections:[],questions:[],explorationRequests:[],categoryReviews:REPOSITORY_CATEGORIES.map(category=>({category,status:'no-scenario-identified',interfaceIds:packet.reviewUnit.primaryInterfaceIds,rationale:'The supplied code was reviewed for this category; no scenario was identified in this bounded evidence.',citations:packet.sourceContext.records.map(r=>({recordId:r.id,line:r.startLine,endLine:r.endLine,role:'context'})),threatIndexes:[],missingEvidence:[],deploymentConditions:['Deployed exposure is not verified.'],remediation:''}))};}
+test('repository scope has no operation cutoff, retains internal surfaces and keeps supporting source available',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Primary application',profile:'Static declared configuration',repositories:['app']};
+ const selected=resolvePocScope(f.model),plan=pocReviewPlan(f.model);
+ assert.deepEqual(selected.repositories,['app']);assert.deepEqual(selected.supportingRepositories,['support']);
+ assert.ok(selected.interfaceIds.includes(f.model.interfaces.find(i=>i.operation.includes('/other')).id));
+ assert.ok(selected.interfaceIds.length>1);assert.ok(plan.scope.repositoryInventory.files.some(f=>f.path==='Startup.cs'));
+ const covered=new Set(plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds));assert.deepEqual([...covered].sort(),selected.interfaceIds);
+ assert.throws(()=>resolvePocScope(f.model,{...f.model.pocScope,repositories:['missing']}),/not in saved graph/);
+ assert.throws(()=>resolvePocScope(f.model,{...f.model.pocScope,repositories:['app','app']}),/unique/);
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root);
+ const first=await prepareStrideEvidence(plan.batches.find(b=>b.packet.records.some(r=>r.operation.includes('/email'))).packet,source);
+ assert.ok(first.packet.sourceContext.records.some(r=>r.repository==='support'));
+});
+test('repository category contract rejects missing categories, invented source and false negative claims',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Primary application',profile:'Static',repositories:['app']};
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root),{packet}=await prepareStrideEvidence(pocReviewPlan(f.model).batches[0].packet,source);
+ const value=categoryResponse(packet);assert.equal(validateRepositoryReview(value,packet).categoryReviews.length,6);
+ const absent=structuredClone(value);absent.categoryReviews.pop();assert.throws(()=>validateRepositoryReview(absent,packet),/six STRIDE/);
+ const fabricated=structuredClone(value);fabricated.categoryReviews[0].citations[0].recordId='invented';assert.throws(()=>validateRepositoryReview(fabricated,packet),/unavailable source/);
+ const outside=structuredClone(value);outside.categoryReviews[0].citations[0].endLine=999999;assert.throws(()=>validateRepositoryReview(outside,packet),/unavailable source/);
+ const ruled=structuredClone(value);ruled.categoryReviews[0].status='ruled-out';assert.equal(validateRepositoryReview(ruled,packet).categoryReviews[0].status,'evidence-gap');
+ const condition=structuredClone(value);condition.categoryReviews[0].status='supported-conditional';assert.equal(validateRepositoryReview(condition,packet).categoryReviews[0].status,'evidence-gap');
+ const incomplete=structuredClone(value);incomplete.categoryReviews[0].citations=[];
+ assert.equal(validateRepositoryReview(incomplete,packet).categoryReviews[0].status,'evidence-gap');
+ const gapPacket=structuredClone(packet);gapPacket.sourceContext.gaps.push({reason:'missing-custom-guard'});
+ assert.ok(validateRepositoryReview(value,gapPacket).categoryReviews.every(c=>c.status==='evidence-gap'));
+});
+test('repository review persists six-category outcomes, reuses completed requests and reports uncovered files',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Primary application',profile:'Static',repositories:['app']};
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root),config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'});let calls=0;
+ const fetchImpl=async(url,options)=>{calls++;const req=JSON.parse(options.body),packet=JSON.parse(req.messages[0].content);return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(categoryResponse(packet))}],usage:{input_tokens:7,output_tokens:9}});};
+ const options={reviewScope:'poc',runUntilComplete:true,concurrency:2,prepareBatch:b=>prepareStrideEvidence(b.packet,source)};
+ await enrichGraphModel(f.model,config,new Map(),fetchImpl,options);
+ assert.equal(f.model.aiReview.coverage.failedBatches,0,JSON.stringify(f.model.aiReview.batches.map(b=>b.error)));assert.equal(f.model.aiReview.coverage.pendingBatches,0);
+ assert.ok(f.model.aiReview.batches.every(b=>b.review.categoryReviews.length===6));
+ const prior=calls;await enrichGraphModel(f.model,config,new Map(),fetchImpl,options);assert.equal(calls,prior);
+ const summary=repositoryAssessmentSummary(f.model.aiReview);assert.equal(summary.rows.length,6);assert.ok(summary.inventory.files.length);const withGap=structuredClone(f.model.aiReview);withGap.scope.repositoryInventory.gaps.push({repository:'app',path:'unmapped.txt',reason:'no-security-surface-mapping'});assert.equal(repositoryAssessmentSummary(withGap).complete,false,'Unmapped files are not cleared by completed requests');
+ const system=systemModel(f.model);assert.equal(system.repositoryAssessment.rows.length,6);
+ const report=systemPrintReport(f.model);for(const c of REPOSITORY_CATEGORIES)assert.ok(report.includes(c));assert.match(report,/Selected repository assessment/);assert.match(report,/Primary repositories: app/);assert.match(report,/Supporting repositories: support/);
+ const dir=path.join(f.root,'..','state'),store=await workspaceStore(f.root,dir);await store.save({model:f.model,manifest:f.manifest});await store.close();
+ const app=await serve({sourceRoot:f.root,workspace:dir,port:0,quiet:true,persist:true});f.cleanup.push(()=>app.close());
+ const response=await fetch(app.url.split('/#')[0]+'/api/model',{headers:{'X-Synthesis-Token':app.token}});const restored=await response.json();assert.notEqual(restored.aiReview.status,'stale','Repository prompt provenance survives restart');
+});
+test('each STRIDE category retains a conditional source conclusion and rejects contradictory absence',async t=>{
+ const f=await fixture(t);f.model.pocScope={kind:'repositories',title:'Primary application',profile:'Static',repositories:['app']};
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root),{packet}=await prepareStrideEvidence(pocReviewPlan(f.model).batches.find(b=>b.packet.records.some(r=>r.operation.includes('/email'))).packet,source);
+ const record=packet.records.find(r=>packet.reviewUnit.primaryInterfaceIds.includes(r.id));
+ for(const category of REPOSITORY_CATEGORIES){
+  const value=categoryResponse(packet);value.threats=[{title:'Synthetic conditional scenario for '+category,category,actor:'Untrusted caller',startingAccess:'Reachable fixture entry',asset:'Fixture data',scenario:'Conditional misuse of the supplied operation.',prerequisites:'Caller can reach the fixture.',controls:'Fixture controls require review.',mitigation:'Enforce the relevant control.',interfaceIds:[record.id],evidenceIds:record.evidence.map(e=>e.id),analysis:{attackSteps:['Caller supplies input to the operation.'],impact:'Fixture asset affected.',assumptions:['Static fixture only.'],controlEvidenceIds:[],boundaryIds:[],mappings:[]}}];
+  const c=value.categoryReviews.find(c=>c.category===category);c.status='supported-conditional';c.threatIndexes=[0];c.remediation='Enforce the relevant control.';
+  c.citations.push({...c.citations[0],role:'input'},{...c.citations[0],role:'operation'});
+  const result=validateRepositoryReview(value,packet);assert.equal(result.categoryReviews.find(c=>c.category===category).status,'supported-conditional');
+  c.status='no-scenario-identified';assert.equal(validateRepositoryReview(value,packet).categoryReviews.find(c=>c.category===category).status,'evidence-gap');
+  c.status='ruled-out';c.citations.push({...c.citations[0],role:'counterevidence'});assert.equal(validateRepositoryReview(value,packet).categoryReviews.find(c=>c.category===category).status,'ruled-out');
+ }
+});
+test('repository scope keeps more than twelve units and includes definitions with no routes',async t=>{
+ const f=await fixture(t);
+ for(let n=0;n<20;n++)await fs.writeFile(path.join(f.root,'app',`helper${n}.py`),`def transform_${n}(value):\n    return value.strip()\n`);
+ const model=await analyze(f.manifest,{sourceRoot:f.root});model.pocScope={kind:'repositories',title:'Whole selected repo',profile:'Static',repositories:['app']};
+ const plan=pocReviewPlan(model);assert.ok(plan.batches.length>12);
+ const expected=model.interfaces.filter(i=>i.repository==='app'&&i.connection?.role==='symbol').map(i=>i.id);
+ const planned=new Set(plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds));assert.ok(expected.length>=20);assert.ok(expected.every(id=>planned.has(id)));
+});
+import {failureDetail} from '../src/diagnostics.mjs';
+import {REPOSITORY_SCHEMA} from '../src/repository-assessment.mjs';
+import {boundStrideSchema} from '../src/model-review.mjs';
+test('repository native schema is reusable and failed category validation triggers the invalid-response guard classification',()=>{
+ const packet={reviewFocus:{repositoryAssessment:true}};
+ assert.equal(boundStrideSchema(REPOSITORY_SCHEMA,packet),REPOSITORY_SCHEMA);
+ assert.equal(REPOSITORY_SCHEMA.properties.connections,undefined);
+ try{validateRepositoryReview({},packet);assert.fail('Must reject invalid response');}catch(error){assert.equal(failureDetail(error.message).code,'evidence-validation');}
+});
