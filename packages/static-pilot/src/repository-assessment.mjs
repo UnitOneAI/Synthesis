@@ -1,3 +1,4 @@
+import { citationCoversEvidence } from "./source-citation.mjs";
 import {
   STRIDE_INVESTIGATION_PROMPT,
   STRIDE_INVESTIGATION_SCHEMA,
@@ -206,13 +207,7 @@ function validateRepositoryResponse(value, packet) {
       if (
         !c.citations.some((ref) => {
           const r = records.get(ref.recordId);
-          return owns.some(
-            (e) =>
-              e.repository === r.repository &&
-              e.path === r.path &&
-              ref.line <= e.line &&
-              ref.endLine >= e.line,
-          );
+          return owns.some((e) => citationCoversEvidence(ref, r, e));
         })
       )
         missing.push(
@@ -239,6 +234,8 @@ function validateRepositoryResponse(value, packet) {
       );
     return {
       ...c,
+      proposedStatus: c.status,
+      modelMissingEvidence: c.missingEvidence.map(redact),
       threatIndexes: expected,
       normalizationNotes,
       rationale: redact(c.rationale),

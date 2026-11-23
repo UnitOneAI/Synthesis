@@ -195,3 +195,13 @@ test('an isolated repository packet failure does not suppress later internal rev
  await enrichGraphModel(f.model,modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'}),new Map(),fetchImpl,{plan,reviewScope:'poc',runUntilComplete:true,concurrency:1,recoveryDelayMs:0,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
  assert.equal(f.model.aiReview.coverage.failedBatches,1);assert.equal(f.model.aiReview.coverage.pendingBatches,0);assert.ok(f.model.aiReview.batches.some(b=>b.reviewStage===2&&b.status==='completed'));
 });
+import {citationCoversEvidence} from '../src/source-citation.mjs';
+test('body citations cover only their hash-matched parsed owner, not neighboring handlers',()=>{
+ const record={repository:'service',path:'routes.py',blobSha256:'hash',startLine:10,endLine:30,functionContext:{startLine:10,endLine:30,complete:true}};
+ const body={line:15,endLine:20},anchor={repository:'service',path:'routes.py',blobSha256:'hash',line:10};
+ assert.equal(citationCoversEvidence(body,record,anchor),true);
+ assert.equal(citationCoversEvidence(body,record,{...anchor,line:35}),false);
+ assert.equal(citationCoversEvidence(body,record,{...anchor,blobSha256:'changed'}),false);
+ assert.equal(citationCoversEvidence(body,{...record,functionContext:{...record.functionContext,complete:false}},anchor),false);
+ assert.equal(citationCoversEvidence({line:10,endLine:12},record,anchor),true);
+});

@@ -1,3 +1,4 @@
+import {citationCoversEvidence} from './source-citation.mjs';
 import {repositoryAssessmentSummary} from './repository-assessment-summary.mjs';
 import {actorAccess, threatAccess} from './threat-access.mjs';
 import { threatAssessment } from './threat-validation-state.mjs';
@@ -120,8 +121,8 @@ export function addReviewPresentation(s, model) {
     const sourceBatch=sourceBatches.get(sourceThreat?.batchId);
     const categoryAssessment=sourceBatch?.review?.categoryReviews?.find(c=>t.categories.includes(c.category));
     if(categoryAssessment && t.reviewState!=='stale'){
-      t.categoryAssessment={...categoryAssessment,citations:categoryAssessment.citations.map(c=>({...c,...sourceBatch.evidenceContext?.records?.find(r=>r.id===c.recordId),line:c.line,endLine:c.endLine}))};
-      if(model.aiReview.mode==='source-excerpts'&&t.categoryAssessment.citations.some(c=>refs.some(r=>c.repository===r.repository&&c.path===r.path&&c.line<=r.line&&c.endLine>=r.line)))t.metadataOnly=false;
+      t.categoryAssessment={...categoryAssessment,citations:categoryAssessment.citations.map(c=>({...c,...sourceBatch.evidenceContext?.records?.find(r=>r.id===c.recordId),windowEndLine:sourceBatch.evidenceContext?.records?.find(r=>r.id===c.recordId)?.endLine,line:c.line,endLine:c.endLine}))};
+      if(model.aiReview.mode==='source-excerpts'&&t.categoryAssessment.citations.some(c=>refs.some(r=>citationCoversEvidence(c,{...c,endLine:c.windowEndLine||c.endLine},r))))t.metadataOnly=false;
       if(categoryAssessment.status==='supported-conditional'&&rank<4){rank=1;label='Conditional concern — source assessment';reasons.unshift(categoryAssessment.rationale);}
       if(categoryAssessment.status==='ruled-out'){rank=5;label='Category ruled out with cited counterevidence';reasons.unshift(categoryAssessment.rationale);}
     }
