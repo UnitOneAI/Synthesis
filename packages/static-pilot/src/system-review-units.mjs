@@ -1,11 +1,11 @@
 import { id, sha } from './sources.mjs';
 import { reviewPacket } from './model-review.mjs';
-import { systemModel, interactionContext, interactionFlowIndex, CATEGORIES } from './system-model.mjs';
+import { systemModel, interactionContext, CATEGORIES } from './system-model.mjs';
 import { sourceScope } from './architecture.mjs';
 import { deploymentContext, contextForInterfaces } from './deployment-context.mjs';
 import { interfacePriorities, batchStage } from './review-order.mjs';
 
-export const SYSTEM_REVIEW_VERSION = 'system-review-2';
+export const SYSTEM_REVIEW_VERSION = 'system-review-3';
 export function systemReviewPlan(model, excerpts = new Map()) {
   const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
   const context = deploymentContext(model, system);
@@ -20,7 +20,7 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     controls.get(i.component).push(i);
   }
   const indexes = { evidence, components: new Map(model.components.map(c => [c.id, c])) };
-  const flowIndex = interactionFlowIndex(system), priorities = interfacePriorities(model, system);
+  const priorities = interfacePriorities(model, system);
   const batches = [], omitted = [], gaps = [], obligations = [], splits = [];
   const covered = new Set(), flowGroups = new Map();
   const add = (records, flows, label, extraControls = []) => {
@@ -29,15 +29,34 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     const related = [...new Map([...members.flatMap(i => controls.get(i.component) || []), ...extraControls].map(i => [i.id, i])).values()].filter(i => !memberIds.has(i.id));
     const controlRank = r => r.kind === 'control' ? 0 : r.connection?.role === 'execution-identity' ? 1 : 2;
     related.sort((a, b) => controlRank(a) - controlRank(b));
-    const selectedControls = related.slice(0, 6);
+    const memberFiles = new Set(members.flatMap(i => i.evidence.map(id => {
+      const e = evidence.get(id);
+      return e && JSON.stringify([e.repository, e.path]);
+    })));
+    // Only source-local controls accompany an operation automatically. Other
+    // declarations get their own review units and remain available for follow-up.
+    const supportingUnit = members.every(i => i.kind === 'control' || i.kind === 'connection-config');
+    const selectedControls = (supportingUnit ? [] : related.filter(i => i.evidence.some(id => {
+      const e = evidence.get(id);
+      return e && memberFiles.has(JSON.stringify([e.repository, e.path]));
+    }))).slice(0, 6);
     const interfaces = [...members, ...selectedControls];
     const packet = reviewPacket({ ...model, interfaces }, excerpts, new Map(), indexes);
     packet.reviewFocus = { phase: 'system-review', scope: label, categories: CATEGORIES, interpretation: 'Review each member operation and the connected path, actors, assets and control enforcement. Grouping does not establish equivalent authorization policies. Source declarations do not establish deployed exposure. State conditional threats under the supplied assumptions; do not treat assumptions as verified facts.' };
-    packet.systemContext = interactionContext({ ...model, interfaces }, interfaces.map(i => i.id), system, flowIndex);
+    const requiredIds = new Set(flows.map(f => f.id));
+    const contextFlows = flows.length
+      ? system.flows.filter(f => requiredIds.has(f.id))
+      : [];
+    packet.systemContext = interactionContext(
+      { ...model, interfaces }, interfaces.map(i => i.id),
+      { ...system, flows: contextFlows }, undefined, [...requiredIds],
+    );
     packet.deploymentContext = contextForInterfaces(context, interfaces.map(i => i.id));
     packet.reviewFocus.responseContract = 'Return concise actionable scenarios. Anchor each threat to exactly ONE interfaceId and one or more evidenceIds owned by that interface, copied from the evidenceOwnership table. Do not add evidence from other interfaces to threat.evidenceIds: supporting controls belong in analysis.controlEvidenceIds when supplied and relevant; other path context belongs in narrative with explicit uncertainty. This anchor does not prove the entire connected path. Return connections as [] because static connections are already supplied. Assess all six STRIDE categories; do not invent a scenario to fill a category. Return at most six distinct scenarios and preserve missing evidence as questions.';
     packet.reviewFocus.evidenceOwnership = packet.records.map(r => ({ interfaceId: r.id, evidenceIds: r.evidence.map(e => e.id) }));
     packet.reviewUnit = { flowIds: flows.map(f => f.id), primaryInterfaceIds: members.map(i => i.id), omittedRelatedControls: Math.max(0, related.length - selectedControls.length) };
+    const missingFlows = flows.filter(f => !packet.systemContext.flows.some(x => x.id === f.id));
+    if (missingFlows.length) throw Error('Required system flow missing from review context');
     if (members.length > 8 || packet.records.length !== interfaces.length || Buffer.byteLength(JSON.stringify(packet)) > 72 * 1024) {
       if (flows.length > 1) {
         const midpoint = Math.ceil(flows.length / 2);
@@ -91,6 +110,9 @@ export function systemReviewPlan(model, excerpts = new Map()) {
     const missing = group.filter(i => !included.has(i.id));
     for (let at = 0; at < missing.length; at += 8) add(missing.slice(at, at + 8), [], `${missing[at].repository} · configuration and controls`);
   }
+  // Every supplied interface retains an explicit obligation, including controls.
+  for (const batch of batches) for (const record of batch.packet.records)
+    obligations.push({ id: id('system-interface-obligation', record.id), kind: 'system-interface', subject: record.id, interfaceIds: [record.id], batchIds: [batch.id] });
   const uniqueObligations = new Map();
   for (const o of obligations) {
     const prior = uniqueObligations.get(o.id);
@@ -98,7 +120,18 @@ export function systemReviewPlan(model, excerpts = new Map()) {
   }
   const scopedIds = [...new Set(batches.flatMap(b => b.packet.records.map(r => r.id)))];
   const scopeSet = new Set(scopedIds);
-  return { batches, omitted: [...new Set(omitted)], splits, refinements: [], obligations: [...uniqueObligations.values()], gaps,
+  const recordCounts = new Map();
+  for (const b of batches) for (const r of b.packet.records)
+    recordCounts.set(r.id, (recordCounts.get(r.id) || 0) + 1);
+  const preview = {
+    packets: batches.length,
+    packetBytes: batches.reduce((n, b) => n + Buffer.byteLength(JSON.stringify(b.packet)), 0),
+    repeatedRecordAppearances: [...recordCounts.values()].reduce((n, count) => n + count - 1, 0),
+    blockedObligations: [...uniqueObligations.values()].filter(o => !o.batchIds.length).length,
+    flowObligations: [...uniqueObligations.values()].filter(o => o.kind === 'system-flow').length,
+    interpretation: 'Metadata bytes before source retrieval. Token cost and duration require provider measurements. All selected operations remain individually cited.',
+  };
+  return { preview, batches, omitted: [...new Set(omitted)], splits, refinements: [], obligations: [...uniqueObligations.values()], gaps,
     limits: { packetBytes: 72 * 1024, flowsPerUnit: 4, standaloneInterfacesPerUnit: 8 },
     semantics: 'System flows, security interfaces and related configuration/controls. Deep callable and supporting/test-code review is deferred, not completed.',
     reviewScope: 'system', scope: { version: SYSTEM_REVIEW_VERSION, interfaceIds: scopedIds, primaryInterfaces: primary.size, deferredInterfaces: model.interfaces.length - scopeSet.size,

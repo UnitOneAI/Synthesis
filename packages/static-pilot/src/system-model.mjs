@@ -978,7 +978,7 @@ export function interactionFlowIndex(projection) {
   });
   return byInterface;
 }
-export function interactionContext(model, ids, projection, flowIndex) {
+export function interactionContext(model, ids, projection, flowIndex, requiredFlowIds = []) {
   const s = projection || systemModel(model, { matrix: false }),
     included = new Set(ids),
     relevant = (f) => f.interfaceIds?.some((i) => included.has(i));
@@ -987,7 +987,9 @@ export function interactionContext(model, ids, projection, flowIndex) {
         .sort((a, b) => a - b)
         .map((index) => s.flows[index])
     : s.flows.filter(relevant);
-  const flows = relevantFlows.slice(0, 20),
+  const required = new Set(requiredFlowIds);
+  relevantFlows.sort((a, b) => Number(required.has(b.id)) - Number(required.has(a.id)));
+  const flows = relevantFlows.slice(0, Math.max(20, required.size)),
     nodes = new Set(flows.flatMap((f) => [f.source, f.target]));
   const allowedEvidence = new Set(
     model.interfaces

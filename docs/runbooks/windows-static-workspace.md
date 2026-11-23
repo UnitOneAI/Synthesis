@@ -502,3 +502,14 @@ Export the current partial or completed report with **Export STRIDE review · PD
 The STRIDE matrix reports coverage of the selected system/deep scope. **Partially analyzed** means some interfaces in that row have a completed review; **Not analyzed** means none have. A returned threat does not mean its entire component is reviewed. Saved-threat follow-up assesses existing scenarios and cannot advance unrelated STRIDE packets.
 
 Saved-threat validation reports how many selected scenarios received valid assessments, how many still need code evidence, and how many calls failed. **Source-supported** is a conditional code conclusion; deployment assumptions are shown separately and remain unverified. **Needs context** means missing code, callers, controls or evidence still prevents the code conclusion. A completed assessment request is distinct from resolving every assumption. Continue system STRIDE separately to finish its remaining selected units.
+
+
+## Preview the optimized system plan
+
+Open the saved graph and select **System threat model**, then **Preview system scope**. Check unassigned obligations, planned metadata size and repeated record appearances before running. Source windows add to the metadata size. The existing timing estimate updates from completed provider calls.
+
+The planner places each assigned production flow in its review context. Standalone operation and control packets retain their source references. Mixed production/test flows remain explicit scope gaps. Supporting control records accompany operations from the same source file. Other control and configuration records retain explicit review obligations and remain available through graph follow-up. File proximity alone does not establish enforcement.
+
+Planner changes can alter packet hashes. Compatible completed packets are reused; previous system review is retained in `stridePlanHistory` for comparison. Changed packets need review under the new context. Keep your saved graph and export the previous report before updating. The preview does not estimate token savings from metadata bytes alone.
+
+For a 4,000-packet review, the prior open-autofix rate of roughly three packets per minute implies approximately 22 hours. Treat this as a baseline only. Use measured JCI latency, token throughput and remaining packet count after the first completed calls.

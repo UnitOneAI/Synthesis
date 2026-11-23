@@ -9,7 +9,7 @@ import { deploymentContext, updateDeploymentContext } from '../src/deployment-co
 import { deploymentArtifact } from '../src/deployment-artifacts.mjs';
 import { enrichGraphModel } from '../src/graph-review.mjs';
 import { modelConfig } from '../src/model-review.mjs';
-import { systemModel } from '../src/system-model.mjs';
+import { systemModel, interactionContext, interactionFlowIndex } from '../src/system-model.mjs';
 import { systemPrintReport } from '../src/system-exports.mjs';
 import { verifiedStrideSource, prepareStrideEvidence, STRIDE_EVIDENCE_VERSION } from '../src/stride-evidence.mjs';
 import { workspaceStore } from '../src/workspace-store.mjs';
@@ -254,4 +254,38 @@ test('an isolated invalid system unit does not hide later internal scope or beco
   assert.equal(f.model.aiReview.coverage.completedBatches, plan.batches.length - 1);
   assert.equal(f.model.aiReview.status, 'partial');
   assert.equal(f.model.aiReview.stopReason, 'plan-exhausted');
+});
+
+test('required flow survives unrelated control flow fanout and all scope interfaces retain obligations', async t => {
+  const f = await fixture(t, 2);
+  const plan = systemReviewPlan(f.model);
+  assert.equal(plan.preview.blockedObligations, 0);
+  for (const id of plan.scope.interfaceIds)
+    assert.ok(plan.obligations.some(o => o.kind === 'system-interface' && o.subject === id && o.batchIds.length));
+  const s = systemModel(f.model, {matrix: false});
+  const flow = s.flows[0];
+  const crowded = {...s, flows: Array.from({length: 30}, (_, i) => ({...flow, id: 'flow-' + i}))};
+  const context = interactionContext(f.model, flow.interfaceIds, crowded, interactionFlowIndex(crowded), ['flow-29']);
+  assert.ok(context.flows.some(f => f.id === 'flow-29'));
+  assert.equal(context.omittedFlowCount, 10);
+});
+
+test('system flow packets contain their own flows and control-only packets avoid repeated supporting declarations', async t => {
+  const f = await fixture(t, 12);
+  const plan = systemReviewPlan(f.model);
+  for (const b of plan.batches) {
+    const unit = b.packet.reviewUnit;
+    if (unit.flowIds.length)
+      assert.deepEqual(new Set(b.packet.systemContext.flows.map(f => f.id)), new Set(unit.flowIds));
+    const primary = b.packet.records.filter(r => unit.primaryInterfaceIds.includes(r.id));
+    if (primary.every(r => r.kind === 'control' || r.kind === 'connection-config'))
+      assert.equal(primary.length, b.packet.records.length);
+  }
+});
+
+test('planner transition retains prior paid system review for comparison', async t => {
+  const f = await fixture(t, 1);
+  f.model.aiReview = {reviewScope: 'system', scope: {version: 'system-review-2'}, status: 'partial', batches: [], threats: [{id: 'historical-threat'}]};
+  await enrichGraphModel(f.model, modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'fixture'}), new Map(), async()=>{throw Error('fixture provider unavailable');}, {reviewScope:'system',maxBatches:1});
+  assert.equal(f.model.stridePlanHistory[0].review.threats[0].id, 'historical-threat');
 });
