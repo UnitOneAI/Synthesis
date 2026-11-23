@@ -598,6 +598,12 @@ export function systemPrintReport(model, options = {}) {
               ["Deployment assumptions — not verified", t.validation?.deploymentAssumptions?.join('; ')],
               ["Recommended code change", t.validation?.remediation?.codeFix],
               ["Validated source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
+              ["Why this actor is in scope", t.actorRationale ? `${t.actorRationale.profiles}. Required condition: ${t.actorRationale.whyInScope}` : null],
+              ["Actor entry evidence", t.actorRationale?.entryEvidence],
+              ["Proposed misuse path", t.actorRationale?.proposedPath],
+              ["Actor interpretation", t.actorRationale?.interpretation],
+              ["Validation to perform", t.validation?.remediation?.validation],
+              ["Remediation owner", t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
               ["Impact", t.analysis?.impact || t.asset],
               [
                 "Access and prerequisites",
@@ -665,7 +671,12 @@ export function systemPrintReport(model, options = {}) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}.dfd-sheet{break-inside:avoid;margin:16px 0}.dfd-sheet svg{width:100%;height:auto;max-height:850px}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}${pocSummary}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories selected. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
     ["Repository", "Collection status"],
     model.sources.map((r) => [r.name, r.status]),
-  )}${deployment}${summary}${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
+  )}<h2>Evidence basis · what was analyzed</h2>${table(['Area','Basis and limits'],[
+    ['Code and saved graph','Selected operation definitions and bounded, hash-checked source windows; named callers and controls are followed through the saved graph. Exact citations and missing links appear in each threat. This is not a compiler-complete execution trace.'],
+    ['Declared configuration','Repository configuration, environment-variable reads and defaults, installer or deployment definitions may support a conclusion when collected and cited. A setting in source is intended configuration, not proof of its effective value. Uncited configuration remains unverified.'],
+    ['Deployment profile','The selected profile is an explicit assumption. Actual ingress, network reachability, service identities, permissions and overrides have not been verified.'],
+    ['Runtime','Not analyzed. No target code, requests, exploit attempts or live-system probes are executed. The scanner host environment and model gateway are not evidence of the target deployment.'],
+  ])}${deployment}${summary}${tokenUsageHtml(model)}${PRINT_FOOTER}</body></html>`;
 }
 
 function printDiagrams(model, s, scenarios) {

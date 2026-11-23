@@ -168,3 +168,18 @@ test("access filtering preserves mixed and unresolved actors without inferring i
   assert.equal(actorAccess({name:'External attacker',accessClassification:'internal'}).kind,'internal');
   assert.throws(()=>accessFilter('invented'), /Invalid/);
 });
+
+test('actor rationale separates capability assumptions from cited entry evidence and actual attribution', () => {
+  const {s,m}=fixture();
+  s.actors=[{id:'caller',name:'Authenticated API caller',startingAccess:'Valid ordinary API key'}];
+  const t=s.threats[0];t.actorIds=['caller'];t.prerequisites='Caller can reach the settings operation and admin keys are not configured';
+  t.analysis={attackSteps:['Call settings with an ordinary key','Attempt a privileged write']};
+  addReviewPresentation(s,m);
+  assert.match(t.actorRationale.profiles,/Valid ordinary API key/);
+  assert.equal(t.actorRationale.whyInScope,t.prerequisites);
+  assert.match(t.actorRationale.entryEvidence,/No independently assessed/);
+  assert.match(t.actorRationale.interpretation,/not evidence of an actual attacker/);
+  assert.match(t.actorRationale.proposedPath,/Attempt a privileged write/);
+  assert.equal(t.reviewState,'pending');
+  assert.equal(s.actors[0].access.kind,'unresolved');
+});
