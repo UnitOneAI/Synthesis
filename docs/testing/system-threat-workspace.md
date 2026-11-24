@@ -79,3 +79,17 @@ Collectors are bounded and framework-specific. They do not perform compiler-wide
 | UX-05 | Wait for a pending save before opening another editor; delayed responses cannot replace a new draft | Delayed-save browser test |
 
 Real qualification remains source-only against the operator-selected repository. Record source revision, inspected files/bytes, graph nodes/edges, parser statuses, worklist size, gap categories, token totals and observed provider errors. Synthetic scale tests establish collector/scheduler behavior, not complete language/framework semantics or live gateway qualification.
+
+## Saved-graph repository selection acceptance
+
+`test/browser/poc.spec.mjs` exercises a 13-repository disk graph with two primary repositories and eleven supporting repositories. Acceptance requires:
+
+- Checkboxes align beside their names at desktop and narrow widths. Clicking the name or pressing Space changes only that repository. Rows identify Review versus Supporting evidence, with a live selected count.
+- Empty selection disables Save. Unsaved changes disable preview and review, survive matrix redraws, and can be discarded. Select all and Clear selection update both roles and counts.
+- A failed save retains the draft for retry. A pending save disables repeat submission and edits. Successful save names the actual saved repositories and selects the repository review mode.
+- The preview includes every primary subject and retains the remaining clones as supporting evidence. Saving after graph export and restarting use the saved disk graph without rebuilding.
+- Starting review submits the saved repository scope, chosen worker count and run-until-complete setting. This dispatch test intercepts the request; it does not make a provider call or claim a completed threat review.
+
+`test/browser/saved-repository-scope.spec.mjs` additionally accepts an offline workspace through `SYNTHESIS_VALIDATION_WORKSPACE` and `SYNTHESIS_VALIDATION_SOURCE_ROOT`. It copies the snapshot and graph into temporary state, saves and previews the existing scope, exports the saved six-category STRIDE PDF, and restarts. Existing review records and graph identity must remain unchanged; no analysis or model-review request may occur. This is a real saved-output workflow check, not a new live model qualification.
+
+`test/browser/startup.spec.mjs` delays the CWE view script to verify that initial server status cannot arrive before the views register. The application controller must load after the view scripts. The regression fails with the previous script order (CWE review stays disabled despite ready status) and passes with the corrected order. Review and security-investigation buttons must be enabled when a saved model and configured provider are available.

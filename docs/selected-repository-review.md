@@ -35,9 +35,9 @@ Resume uses scope identity, packet hashes and provider/prompt provenance. Prior 
 
 1. Keep supporting repositories loaded in Sources and choose **Open saved graph**.
 2. Enable **Include hash-checked, redacted code context in STRIDE**.
-3. Open **4 · STRIDE matrix → Select primary repositories**.
-4. Check the primary repositories, enter a review title and a deployment assumption, then choose **Save repository scope**.
-5. **Selected repositories** becomes the next review scope. Choose **Preview system scope** to see planned work before model calls.
+3. Open **4 · STRIDE matrix → Choose repositories to review**.
+4. Click the checkbox or repository name on the same row. Checked rows say **Review**; unchecked rows say **Supporting evidence**. Check the selected count, enter a review title and deployment assumption, then choose **Save repository scope**. Saving does not start model calls.
+5. Confirm **Saved for review** lists the intended repositories. **Scope for next run → Selected repositories** becomes the next review scope. Choose **Preview saved scope** to see planned work before model calls.
 6. Qualify one request with one worker. After a successful response, select up to four workers, enable **Run until complete**, and start or continue the review.
 7. Read the six-category table: conclusive, evidence-gap, pending and failed cases are separate. The matrix does not treat an empty category as reviewed unless an explicit cited assessment exists.
 8. Export the review package for the full inventory and category records. **Export STRIDE review · PDF** includes partial results, category counts, cited conclusions, actors, boundaries and assumptions. Independent validation is a separate action.
@@ -56,3 +56,5 @@ A JSON scope can also be imported:
 Names must exactly match the saved inventory. Do not deselect supporting clones in Sources to reduce primary review scope.
 
 Saving and previewing repository scope open the existing disk graph read-only, including after exports or a server restart. Reopening a saved workspace restores its selected review scope; it does not rebuild the graph or call the model. If an older installation reports `Cannot read properties of null (reading 'prepare')` when saving, update Synthesis, restart the server, open the saved graph and save the scope again. Keep the existing workspace and graph files.
+
+Selection changes remain drafts until saved. Preview and run controls stay disabled while changes are unsaved; use **Discard changes** to return to the saved scope. Empty selections cannot be saved. A save failure retains the draft for retry. Repository names remain beside their checkboxes on desktop and narrow screens, and Space toggles a focused checkbox. Selecting a smaller scope does not remove supporting clones or count them as fully reviewed.

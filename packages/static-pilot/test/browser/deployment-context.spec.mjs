@@ -16,7 +16,7 @@ test('saved graph system review needs no answers; optional cards preserve eviden
     await page.getByRole('button',{name:'Open saved graph',exact:true}).click();
     await page.getByRole('button',{name:'4 · STRIDE matrix',exact:true}).click();
     await expect(page.locator('#ws-review-scope')).toHaveValue('system');
-    await page.getByRole('button',{name:'Preview system scope',exact:true}).click();
+    await page.getByRole('button',{name:'Preview saved scope',exact:true}).click();
     await expect(page.locator('#ws-scope-preview')).toContainText('system review units');
     let submitted;
     await page.route('**/api/review',route=>{submitted=route.request().postDataJSON();return route.fulfill({status:202,json:{status:'ready'}});});
