@@ -9,6 +9,7 @@ import { unzipSync } from "fflate";
 import {
   GraphStore,
   attachGraph,
+  graphReader,
   sqliteSupported,
 } from "../src/graph-store.mjs";
 import { analyze } from "../src/engine.mjs";
@@ -85,6 +86,7 @@ diskTest(
     assert.ok(plan.obligations.some((o) => o.kind === "candidate-call-path"));
     assert.ok(plan.obligations.every((o) => o.batchIds.length));
     store.close();
+    assert.equal(graphReader(initial.sourceGraph),undefined,"Closed readers cannot remain available through saved graph bindings");
     const again = await analyze(f.manifest, options);
     assert.equal(again.sourceGraph.reuse.parsedFiles, 0);
     assert.equal(again.sourceGraph.reuse.reusedFiles, 4);
@@ -525,4 +527,29 @@ diskTest('repository inventory reads the published disk ledger without rebuildin
   assert.deepEqual(plan.scope.poc.supportingRepositories,['two']);
   assert.ok(plan.scope.poc.interfaceIds.every(id=>model.interfaces.find(i=>i.id===id).repository==='one'));
  }finally{graph.close();}
+});
+
+diskTest('repository scope saves and previews a restored disk graph after export and restart', async t => {
+  const f = await fixture(t);
+  const model = await analyze(f.manifest, {sourceRoot:f.root,graphDatabase:f.file});
+  const {workspaceStore} = await import('../src/workspace-store.mjs');
+  const persistence = await workspaceStore(f.root,f.workspace);
+  await persistence.save({model,manifest:f.manifest});await persistence.close();
+  const options={sourceRoot:f.root,workspace:f.workspace,graphStorage:'sqlite',persist:true,port:0,quiet:true};
+  let app=await serve(options);
+  try {
+    const scope={kind:'repositories',title:'Primary application',profile:'Static declarations',repositories:['one']};
+    for(let phase=0;phase<3;phase++){
+      if(phase===2){await app.close();app=await serve(options);}
+      const base=new URL(app.url).origin,headers={'X-Synthesis-Token':app.token,'Content-Type':'application/json'};
+      if(phase<2){const exportOptions=await fetch(base+'/api/graph-package-options',{headers});assert.equal(exportOptions.status,200);await exportOptions.json();}
+      const saved=await fetch(base+'/api/poc-scope',{method:'POST',headers,body:JSON.stringify({modelRevision:model.modelRevision,scope})});
+      assert.equal(saved.status,200,await saved.clone().text());
+      const result=await saved.json();assert.deepEqual(result.pocScope.repositories,['one']);assert.equal(result.sources.length,2);
+      assert.equal(result.sourceGraph.generation,model.sourceGraph.generation);assert.equal(result.sourceGraph.fingerprint,model.sourceGraph.fingerprint);
+      const preview=await fetch(base+'/api/system-review-plan?scope=poc',{headers});assert.equal(preview.status,200,await preview.clone().text());
+      const plan=await preview.json();assert.ok(plan.units>0);assert.ok(plan.scope.repositoryInventory.files.length>0);
+      assert.ok(plan.scope.repositoryInventory.files.every(file=>file.repository==='one'));
+    }
+  }finally{await app.close();}
 });

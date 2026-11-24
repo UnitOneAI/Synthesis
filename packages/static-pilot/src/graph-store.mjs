@@ -15,7 +15,12 @@ export function sqliteSupported() {
   return a > 3 || (a === 3 && (b > 51 || (b === 51 && c >= 3)));
 }
 export function graphReader(graph) {
-  return graph && bindings.get(graph);
+  const reader = graph && bindings.get(graph);
+  if (reader && !reader.db) {
+    bindings.delete(graph);
+    return undefined;
+  }
+  return reader;
 }
 export function attachGraph(graph, store) {
   if (graph?.storage === "sqlite") bindings.set(graph, store);

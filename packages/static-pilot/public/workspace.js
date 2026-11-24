@@ -1087,6 +1087,7 @@
   });
   window.SynthesisWorkspace = {
     render(value, callbacks) {
+      if (!model) reviewScope = value.pocScope ? 'poc' : 'system';
       model = value;
       s = value.systemModel;
       threatIndex = new Map((s?.threats || []).map((t) => [t.id, t]));

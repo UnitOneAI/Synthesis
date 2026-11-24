@@ -54,3 +54,5 @@ A JSON scope can also be imported:
 ```
 
 Names must exactly match the saved inventory. Do not deselect supporting clones in Sources to reduce primary review scope.
+
+Saving and previewing repository scope open the existing disk graph read-only, including after exports or a server restart. Reopening a saved workspace restores its selected review scope; it does not rebuild the graph or call the model. If an older installation reports `Cannot read properties of null (reading 'prepare')` when saving, update Synthesis, restart the server, open the saved graph and save the scope again. Keep the existing workspace and graph files.
