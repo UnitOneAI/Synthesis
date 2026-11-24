@@ -1470,7 +1470,7 @@ export async function serve({
         if (input.modelRevision !== model.modelRevision) return send(409,{error:'Refresh the current graph'});
         const scope = resolvePocScope(model,input.scope);
         const candidate = {...model,pocScope:scope};
-        const plan = pocReviewPlan(candidate);
+        const plan = await withGraph(() => pocReviewPlan(candidate));
         if (scope.kind !== 'repositories' && plan.batches.length > 12) throw Error('POC exceeds 12 review packets; narrow operation selectors');
         model.pocScope = scope;
         await checkpoint(); if (persistenceError) throw Error('POC scope could not be saved');
@@ -1478,7 +1478,7 @@ export async function serve({
       }
       if (req.method === "GET" && url.pathname === "/api/system-review-plan") {
         if (!model) return send(409, { error: 'Open a saved graph first' });
-        const plan = url.searchParams.get('scope') === 'poc' ? pocReviewPlan(model) : systemReviewPlan(model);
+        const plan = await withGraph(() => url.searchParams.get('scope') === 'poc' ? pocReviewPlan(model) : systemReviewPlan(model));
         return send(200, { reviewScope: 'system', preview: plan.preview, units: plan.batches.length, obligations: plan.obligations.length, gaps: plan.gaps.length, scope: plan.scope, semantics: plan.semantics });
       }
       if (req.method === "GET" && url.pathname === "/api/deployment-evidence") {
