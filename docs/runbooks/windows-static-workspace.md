@@ -2,7 +2,7 @@
 
 ## Selected repositories: smaller scope without an endpoint cutoff
 
-After updating, reuse the existing graph. In STRIDE, open **Select primary repositories**, select the repositories to assess, and save the scope. Leave other loaded clones available as supporting evidence. Enable source context, preview the scope, then run **Selected repositories** with up to four workers and **Run until complete**. Repository mode covers extracted internal definitions and interfaces as well as external routes; it has no operation-POC packet cutoff. The six-category table separates cited conclusions, evidence gaps, pending work and failures. See the [scope contract and full UI procedure](../selected-repository-review.md).
+After updating, reuse the existing graph. In STRIDE, open **Choose repositories to review**, select the repositories to assess, and save the scope. Leave other loaded clones available as supporting evidence. Enable source context, preview the scope, then run **Selected repositories** with up to four workers and **Run until complete**. Repository mode covers extracted internal definitions and interfaces as well as external routes; it has no operation-POC packet cutoff. The six-category table separates cited conclusions, evidence gaps, pending work and failures. See the [scope contract and full UI procedure](../selected-repository-review.md).
 
 The new category contract does not convert old responses into conclusive assessments. Earlier reviews remain saved; compatible work within the new scope resumes. No source graph rebuild is needed for this review-selection change.
 
@@ -12,7 +12,7 @@ Update from `main` using the commands below. The saved graph and compatible comp
 
 1. Restart with the same source root and workspace. In Sources choose **Open saved graph**. No extraction rebuild is required for unchanged compatible source.
 2. Enable **Include hash-checked, redacted code context in STRIDE** in Sources for source-backed review. Restarted graphs retrieve hash-checked windows from the local clones; the model does not need stored raw excerpts.
-3. Open **4 · STRIDE matrix**. Set **Review scope → System threat model** and click **Preview system scope**. It reports the smaller system-unit plan and the code scope deferred to deeper review, without making a model call.
+3. Open **4 · STRIDE matrix**. Set **Scope for next run → System threat model** and click **Preview saved scope**. It reports the smaller system-unit plan and the code scope deferred to deeper review, without making a model call.
 4. Start with one request and one worker. After a valid result appears, use up to four workers and **Run until complete**. The request budget is disabled in this mode. The token target is advisory; the invalid-response and provider-error guards still stop a broken run.
 5. Review current threats, their priorities, evidence, actors and boundary transitions. Partial current results can be exported immediately using **Export STRIDE review · PDF**.
 6. **System model → Deployment context** is optional. Keep assumptions and run now, or answer the few cards. A non-default deployment statement requires a reviewer name. Answering a card reopens only dependent system units; choosing a profile or importing configuration conservatively reopens system review. None of these actions approves a trust boundary or verifies deployed access.
@@ -479,7 +479,7 @@ In Edge/Chrome's print dialog choose **Save as PDF** and turn **Headers and foot
 
 ### Recovering an interrupted STRIDE review
 
-A saved `2,309 packets` result (or any old deep-review count) is not proof that a new **System threat model** action ran. Check the saved review scope separately from the selector for the next action. Use **Preview system scope**, then select **System threat model** before starting. Existing compatible system and deep results remain separately resumable; switching scope does not declare deep work completed.
+A saved `2,309 packets` result (or any old deep-review count) is not proof that a new **System threat model** action ran. Check the saved review scope separately from the selector for the next action. Use **Preview saved scope**, then select **System threat model** before starting. Existing compatible system and deep results remain separately resumable; switching scope does not declare deep work completed.
 
 STRIDE **Run until complete** now retries a transient transport/timeout or HTTP 408/429/500/502/503/504/529 failure at most twice per packet, with backoff. It attempts one corrective retry for an invalid response using the existing strict citation rules. Each actual request retains its own token record, including unknown usage after timeout. Bounded request-budget actions do not add automatic retries. Authorization/configuration failures remain immediate stops. Persistent invalid output still trips the existing failure guard. A gateway Retry-After longer than 60 seconds stops for later continuation rather than retrying early.
 
@@ -499,7 +499,7 @@ Open the saved graph, then **4 · STRIDE matrix**. Current returned scenarios ap
 
 Expand **Validate saved threats against code and controls**. Enable source sharing only for the configured approved provider. Leave **Scenario scope → Top six priorities**, choose **6** requests, then select **Validate saved threats**. This uses the saved graph to retrieve named controls across selected repositories. It preserves STRIDE results. After inspecting the first results, select **All current source-referenced scenarios** and **Continue across saved scenarios** to drain the finite assessment queue. Each scenario has at most three rounds; missing deployment facts remain explicit gaps. This assessment action is serial. STRIDE discovery retains its separate parallel workers.
 
-For a useful system-level completion, select **Review scope → System threat model**, **Preview system scope**, four workers (subject to gateway limits), and **Run until complete**. This is a scoped architecture review, not exhaustive code-path coverage. System and deep review preserve separate compatible checkpoints. Do not rebuild an unchanged graph merely to continue review.
+For a useful system-level completion, select **Scope for next run → System threat model**, **Preview saved scope**, four workers (subject to gateway limits), and **Run until complete**. This is a scoped architecture review, not exhaustive code-path coverage. System and deep review preserve separate compatible checkpoints. Do not rebuild an unchanged graph merely to continue review.
 
 Export the current partial or completed report with **Export STRIDE review · PDF**, then **Print / Save as PDF**. **Export errors** includes assessment state and failure metadata. Browser exports go to the browser's download location; select your intended export folder explicitly. Automatic traces remain under the configured trace directory.
 
@@ -512,7 +512,7 @@ Saved-threat validation reports how many selected scenarios received valid asses
 
 ## Preview the optimized system plan
 
-Open the saved graph and select **System threat model**, then **Preview system scope**. Check unassigned obligations, planned metadata size and repeated record appearances before running. Source windows add to the metadata size. The existing timing estimate updates from completed provider calls.
+Open the saved graph and select **System threat model**, then **Preview saved scope**. Check unassigned obligations, planned metadata size and repeated record appearances before running. Source windows add to the metadata size. The existing timing estimate updates from completed provider calls.
 
 The planner places each assigned production flow in its review context. Standalone operation and control packets retain their source references. Mixed production/test flows remain explicit scope gaps. Supporting control records accompany operations from the same source file. Other control and configuration records retain explicit review obligations and remain available through graph follow-up. File proximity alone does not establish enforcement.
 
@@ -530,7 +530,7 @@ Classification comes from explicit actor descriptions or an **Edit record → Ac
 
 ## Smaller POC on an existing graph
 
-Keep the repository selection and saved graph unchanged. In **STRIDE matrix**, expand **Scoped POC**, import the operation-selector JSON described in [Scoped static POC](../scoped-static-poc.md), and choose **Save POC scope**. Set **Review scope → Scoped POC** and select **Preview system scope**. Empty or over-broad selectors stop with an error; narrow paths or add `operationContains` rather than treating an incomplete match as covered.
+Keep the repository selection and saved graph unchanged. In **STRIDE matrix**, expand **Advanced: select individual operations (JSON)**, import the operation-selector JSON described in [Scoped static POC](../scoped-static-poc.md), and choose **Save POC scope**. Set **Scope for next run → Scoped POC** and select **Preview saved scope**. Empty or over-broad selectors stop with an error; narrow paths or add `operationContains` rather than treating an incomplete match as covered.
 
 Enable source excerpts in Sources, choose up to four workers and **Run until complete**, then start STRIDE. After the selected packets complete, the POC automatically assesses saved scenarios against code and shared controls. This assessment is currently serial and bounded to three rounds per scenario; STRIDE requests use the chosen worker count. Keep the process running. A provider 403 requires gateway access correction before resuming; retrying unchanged credentials is not a completion strategy.
 

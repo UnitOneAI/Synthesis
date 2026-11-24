@@ -477,3 +477,28 @@ nav[aria-label="Workflow"] button {
 .dc-evidence { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; margin: 4px 0; font-size: 12px; }
 #dc-code pre { max-height: 440px; overflow: auto; background: #f3f6fa; padding: 16px; white-space: pre-wrap; }
 .ws-priority-panel{margin:16px 0;padding:18px;border:1px solid #98b4d4;border-left:5px solid #245a9a;border-radius:8px;background:#f4f8fd}.ws-priority-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.ws-priority-card{display:flex;flex-direction:column;gap:8px;text-align:left!important;background:white!important;color:#172f4b!important;border:1px solid #bacde2!important;padding:14px!important;white-space:normal}.ws-priority-card strong{line-height:1.4}.ws-priority-card p{margin:0}.ws-validation-badge{align-self:flex-start;border-radius:4px;padding:3px 7px;background:#e5edf6;font-size:12px;font-weight:600}.ws-priority-panel details{margin-top:16px}.ws-priority-panel details label{display:block;margin:8px 0}
+
+.ws-repository-scope { margin: 20px 0; padding: 20px; border: 1px solid #b9cce3; border-radius: 10px; background: #f7faff; }
+.ws-repository-scope h3 { margin-top: 0; }
+.ws-repository-scope fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ws-repository-scope legend { font-weight: 650; margin-bottom: 10px; }
+.ws-repository-list { max-height: 390px; overflow-y: auto; border: 1px solid #b9cce3; border-radius: 8px; background: white; }
+.ws-repository-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 14px; min-height: 48px; margin: 0; cursor: pointer; border-bottom: 1px solid #e0e7ef; }
+.ws-repository-row:last-child { border-bottom: 0; }
+.ws-repository-row:has(input:checked) { background: #e9f2ff; }
+.ws-repository-row:focus-within { outline: 2px solid #245a9a; outline-offset: -2px; }
+.ws-repository-row input[type="checkbox"] { width: 18px; height: 18px; margin: 0; }
+.ws-repository-name { overflow-wrap: anywhere; min-width: 0; }
+.ws-repository-role { font-size: 12px; font-weight: 500; color: #465b72; background: #edf1f5; padding: 3px 8px; border-radius: 4px; }
+.ws-repository-row:has(input:checked) .ws-repository-role { background: #245a9a; color: white; }
+.ws-repository-fields { display: grid; gap: 14px; margin: 16px 0; }
+#ws-repository-count, #ws-repository-save-status { font-size: 13px; }
+#ws-repository-saved { overflow-wrap: anywhere; padding-top: 12px; border-top: 1px solid #d1deed; }
+@media (max-width: 700px) {
+  .ws-repository-scope { padding: 12px; }
+  .ws-repository-row { grid-template-columns: 20px minmax(0, 1fr); gap: 6px 10px; }
+  .ws-repository-role { grid-column: 2; justify-self: start; }
+}
+.ws-repository-scope #ws-repo-all,
+.ws-repository-scope #ws-repo-clear,
+.ws-repository-scope #ws-repo-discard { background: white; color: #245a9a; border: 1px solid #9bb5d3; }

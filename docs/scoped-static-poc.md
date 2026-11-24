@@ -6,7 +6,7 @@ The POC reviews named inbound operations using the existing graph. It is an anal
 
 ## Scope and preservation
 
-Import a JSON definition in STRIDE → Scoped POC → Save POC scope:
+Import a JSON definition in STRIDE → Advanced: select individual operations (JSON) → Save POC scope:
 
 ```json
 {

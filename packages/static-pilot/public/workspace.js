@@ -26,6 +26,9 @@
     jobState = { status: "idle" },
     requestBudget = 12,
     reviewScope = 'system',
+    repositoryDraft,
+    repositoryDraftKey,
+    repositoryScopeSaving = false,
     showAllDeploymentQuestions = false,
     deploymentClaimCount = 20,
     reviewWorkers = 2,
@@ -237,13 +240,79 @@
   }
   const option = (id, label, chosen) =>
     `<option value="${e(id)}" ${chosen ? "selected" : ""}>${e(label)}</option>`;
+  function savedRepositorySelection() {
+    const scope = model.pocScope;
+    return {
+      repositories: scope?.kind === 'repositories' ? [...scope.repositories].sort() : [],
+      title: scope?.kind === 'repositories' ? scope.title : 'Selected repository review',
+      profile: scope?.profile || 'Declared code and configuration; deployed exposure unverified',
+    };
+  }
+  function repositorySelection() {
+    const key = JSON.stringify([model.modelRevision, model.pocScope?.id]);
+    if (key !== repositoryDraftKey) {
+      repositoryDraftKey = key;
+      repositoryDraft = savedRepositorySelection();
+    }
+    return repositoryDraft;
+  }
+  function repositoryScopeDirty() {
+    return JSON.stringify(repositorySelection()) !== JSON.stringify(savedRepositorySelection());
+  }
+  function repositoryScopeBlocked() {
+    return repositoryScopeSaving || repositoryScopeDirty() || (reviewScope === 'poc' && !model.pocScope);
+  }
+  function repositoryScopeHtml() {
+    const draft = repositorySelection(), selected = new Set(draft.repositories);
+    return `<section class="ws-repository-scope" aria-labelledby="ws-repository-heading">
+      <h3 id="ws-repository-heading">Choose repositories to review</h3>
+      <p>Checked repositories receive the primary STRIDE review across all six categories. Unchecked repositories stay available for supporting code and controls; they are not counted as fully reviewed.</p>
+      <p class="hint">This uses the saved graph. Saving a scope does not rebuild it or start model calls.</p>
+      <fieldset id="ws-repository-fields"><legend>Repository selection</legend>
+        <div class="toolbar"><button type="button" id="ws-repo-all">Select all</button><button type="button" id="ws-repo-clear">Clear selection</button></div>
+        <div class="ws-repository-list">${model.sources.map((source, index) => `<label class="ws-repository-row">
+          <input type="checkbox" data-primary-repo value="${e(source.name)}" aria-labelledby="ws-repository-name-${index}" aria-describedby="ws-repository-role-${index}" ${selected.has(source.name) ? 'checked' : ''}>
+          <span class="ws-repository-name" id="ws-repository-name-${index}">${e(source.name)}</span>
+          <span class="ws-repository-role" id="ws-repository-role-${index}">${selected.has(source.name) ? 'Review' : 'Supporting evidence'}</span>
+        </label>`).join('')}</div>
+        <p id="ws-repository-count" role="status"></p>
+        <div class="ws-repository-fields"><label>Review title<input id="ws-repo-title" maxlength="240" value="${e(draft.title)}"></label>
+        <label>Deployment assumption<input id="ws-repo-profile" maxlength="240" value="${e(draft.profile)}"></label></div>
+      </fieldset>
+      <div class="toolbar"><button id="ws-save-repositories">Save repository scope</button><button id="ws-repo-discard">Discard changes</button></div>
+      <p id="ws-repository-save-status" role="status"></p>
+      <p id="ws-repository-saved">${model.pocScope?.kind === 'repositories' ? '<strong>Saved for review:</strong> ' + e(model.pocScope.repositories.join(', ')) : 'No repository scope saved. Choose at least one repository, then save.'}</p>
+    </section>`;
+  }
+  function updateRepositoryControls() {
+    const panel = root.querySelector('.ws-repository-scope');
+    if (!panel) return;
+    const draft = repositorySelection(), dirty = repositoryScopeDirty();
+    const busy = repositoryScopeSaving || ['running', 'cancelling'].includes(jobState.status);
+    panel.querySelector('#ws-repository-fields').disabled = busy;
+    panel.querySelector('#ws-repository-count').textContent = `${draft.repositories.length} of ${model.sources.length} repositories selected for review · ${model.sources.length - draft.repositories.length} available as supporting evidence`;
+    for (const input of panel.querySelectorAll('[data-primary-repo]')) {
+      input.closest('label').querySelector('.ws-repository-role').textContent = input.checked ? 'Review' : 'Supporting evidence';
+    }
+    const save = panel.querySelector('#ws-save-repositories');
+    save.disabled = busy || !draft.repositories.length || !draft.title.trim() || !draft.profile.trim();
+    save.textContent = repositoryScopeSaving ? 'Saving repository scope…' : 'Save repository scope';
+    const discard = panel.querySelector('#ws-repo-discard');
+    discard.hidden = !dirty; discard.disabled = busy;
+    panel.querySelector('#ws-repository-save-status').textContent = repositoryScopeSaving ? 'Saving scope against the existing graph…' : dirty ? 'Unsaved changes. Save or discard before previewing or starting a review.' : model.pocScope?.kind === 'repositories' ? 'Scope saved. Preview the selected scope, then start review.' : 'Select the repositories you want to review.';
+    if (dirty) root.querySelector('#ws-scope-preview').textContent = 'Save the repository selection to preview its planned work.';
+    const preview = root.querySelector('#ws-preview-scope');
+    if (preview) preview.disabled = busy || repositoryScopeBlocked();
+    const run = root.querySelector('[data-start-review]');
+    if (run) run.disabled = !providerAvailable || busy || repositoryScopeBlocked();
+  }
   function render() {
     if (!model) {
       root.innerHTML =
         "<h2>System model</h2><p>Build the source graph to review the system architecture.</p>";
       return;
     }
-    root.innerHTML = `<div class="section-title"><div><p class="eyebrow">SYSTEM THREAT MODEL</p><h2>${e(s.title)}</h2><p>${e(s.profile)} · ${model.aiReview?.scope?.poc?.kind==='repositories' ? model.aiReview.scope.poc.repositories.length+' primary repositories · '+s.coverage.repositories+' repositories loaded' : s.coverage.repositories+' selected repositories'} · Static analysis</p></div><button id="ws-export">Export review package</button></div><div class="ws-status"><span>Draft</span><span>${s.flows.length} flows / candidates</span><span>${s.coverage.discoveredFlows || 0} discovered connections (${s.coverage.inferredConnections || 0} route hypotheses)</span><span>${s.coverage.unresolvedFlows} unresolved relationships</span><span>${s.coverage.pendingBoundaries} boundary decisions pending</span>${s.coverage.unavailable.length ? `<strong>Unavailable: ${e(s.coverage.unavailable.join(", "))}</strong>` : ""}</div><nav class="ws-tabs" aria-label="System model views">${[
+    root.innerHTML = `<div class="section-title"><div><p class="eyebrow">SYSTEM THREAT MODEL</p><h2>${e(s.title)}</h2><p>${e(s.profile)} · ${model.aiReview?.scope?.poc?.kind==='repositories' ? model.aiReview.scope.poc.repositories.length+' primary repositories · '+s.coverage.repositories+' repositories loaded' : s.coverage.repositories+' repositories loaded'} · Static analysis</p></div><button id="ws-export">Export review package</button></div><div class="ws-status"><span>Draft</span><span>${s.flows.length} flows / candidates</span><span>${s.coverage.discoveredFlows || 0} discovered connections (${s.coverage.inferredConnections || 0} route hypotheses)</span><span>${s.coverage.unresolvedFlows} unresolved relationships</span><span>${s.coverage.pendingBoundaries} boundary decisions pending</span>${s.coverage.unavailable.length ? `<strong>Unavailable: ${e(s.coverage.unavailable.join(", "))}</strong>` : ""}</div><nav class="ws-tabs" aria-label="System model views">${[
       ["system", "System DFD"],
       ["actors", "Threat actors"],
       ["boundaries", "Trust boundaries"],
@@ -351,7 +420,7 @@
         : "";
       const stageRows = !stale && review?.reviewOrder?.stages;
       const stagePanel = `<section class="ws-review-order"><h3>External interfaces first</h3><p>Review declared external interfaces, potential external entry points, their internal paths, remaining internal actors and boundaries, then supporting/test code. Unknown exposure stays high priority without being labeled internet-facing. ${review?.reviewScope === "system" ? "System stages proceed in priority order. Isolated failed units remain visible while later stages are reviewed; repeated failures still stop the run." : "Each stage settles before the next starts; failed stages keep later work pending."}</p>${stageRows ? `<table><thead><tr><th>Review stage</th><th>Completed / planned</th><th>Failed</th><th>Pending</th></tr></thead><tbody>${stageRows.map((stage) => `<tr><th>${e(stage.label)}<small>${e(stage.description)}</small></th><td>${stage.completed} / ${stage.total}</td><td>${stage.failed}</td><td>${stage.pending}</td></tr>`).join("")}</tbody></table><p>Counts are packets, not confirmed exposure or approved trust boundaries. Shared packets can include supporting context.</p>` : `<p>Current stage coverage is not available yet. Start a review to prepare the plan; historical counts are not current coverage.</p>`}</section>`;
-      body.innerHTML = `${accessControls()}${failureNotice}${staleNotice}<p class="callout">System threat modeling reviews connected flows, entry points, workers, stores and controls first. Deployment assumptions let review proceed without answering questions. Deep code-path coverage remains separately selectable.</p><p class="hint">${model.aiReview ? `Saved results shown: ${model.aiReview.reviewScope === 'system' ? (model.aiReview.scope?.poc ? (model.aiReview.scope.poc.kind==='repositories'?'Selected repositories — ':'Scoped POC — ')+e(model.aiReview.scope.poc.title) : 'System threat model') : 'Deep code-path STRIDE'}.` : 'No saved STRIDE results.'} The scope selector controls the next action. Each scope retains its compatible completed work.</p><div id="ws-scope-preview">${model.aiReview?.reviewScope === 'system' ? `${model.aiReview.scope.interfaceIds.length} review subjects; ${model.aiReview.scope.deferredInterfaces} other graph records remain outside primary review. This is not whole-codebase clearance.` : ''}</div><details open><summary>Select primary repositories</summary><p>Review all identified security surfaces in the repositories you select, across all six STRIDE categories. Other loaded repositories remain supporting evidence. Unmapped files and parser limits remain explicit gaps.</p><label>Review title<input id="ws-repo-title" value="${e(model.pocScope?.kind==='repositories'?model.pocScope.title:'Selected repository review')}"></label><label>Deployment assumption<input id="ws-repo-profile" value="${e(model.pocScope?.profile||'Declared code and configuration; deployed exposure unverified')}"></label><fieldset><legend>Primary repositories</legend>${model.sources.map(source=>`<label><input type="checkbox" data-primary-repo value="${e(source.name)}" ${model.pocScope?.kind==='repositories'&&model.pocScope.repositories.includes(source.name)?'checked':''}>${e(source.name)}</label>`).join('')}</fieldset><button id="ws-save-repositories">Save repository scope</button></details><details><summary>Scoped POC · choose operations from the saved graph</summary><p>Import a scope JSON with title, profile and operations (repository, pathContains, optional operationContains). Only matching inbound operations are reviewed; supporting code remains available across selected clones. A POC automatically assesses saved scenarios after STRIDE packets finish. Unresolved evidence remains explicit.</p><input id="ws-poc-file" aria-label="POC scope file" type="file" accept=".json"><button id="ws-import-poc">Save POC scope</button><p>${e(model.pocScope ? model.pocScope.title + ' · ' + model.pocScope.interfaceIds.length + ' primary interfaces · profile assumption: ' + model.pocScope.profile : 'No POC scope saved')}</p></details>${model.aiReview?.scope?.poc && model.aiReview.scope.poc.kind!=='repositories' ? `<section class="callout"><h3>POC code conclusions</h3><p>${e(Object.entries(s.threats.filter(t=>t.origin==='analysis').reduce((a,t)=>{const k=t.validation?.assessment || 'not-assessed';a[k]=(a[k]||0)+1;return a;},{})).map(([k,n])=>n+' '+k).join(' · ') || 'No scenarios returned')}</p><p>STRIDE packet coverage, code conclusions, deployment assumptions and reviewer acceptance are separate. Needs-context and unassessed scenarios are not complete. Review resumes saved compatible work.</p></section>` : ''}${priorityThreatsHtml()}${stagePanel}<div class="ws-analysis"><div><strong>${stale ? "Historical packet counts · " : ""}${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Review scope<select id="ws-review-scope" ${['running', 'cancelling'].includes(jobState.status) ? 'disabled' : ''}><option value="system" ${reviewScope === 'system' ? 'selected' : ''}>System threat model</option><option value="poc" ${reviewScope === 'poc' ? 'selected' : ''}>${model.pocScope?.kind==='repositories'?'Selected repositories':'Scoped POC'}</option><option value="deep" ${reviewScope === 'deep' ? 'selected' : ''}>Deep code-path STRIDE</option></select></label><button id="ws-preview-scope">Preview system scope</button><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}" ${runUntilComplete ? "disabled" : ""}></label><label>Parallel review workers<select id="ws-review-workers" ${["running", "cancelling"].includes(jobState.status) ? "disabled" : ""}>${[1, 2, 3, 4].map((v) => option(v, v, v === reviewWorkers)).join("")}</select></label><label><input id="ws-until-complete" type="checkbox" ${runUntilComplete ? "checked" : ""}>Run until complete</label><label>Token target this action (advisory)<input id="ws-token-target" type="number" min="1" step="1" placeholder="No target" value="${e(tokenTarget)}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p id="ws-run-progress" role="status">${e(window.SynthesisReviewRun?.(model.aiReview) || "")}</p>${model.aiReview?.coverageEvidence ? `<div class="callout" role="status"><strong>Source and control review</strong><p>${e(model.aiReview.coverageEvidence.sourceWindows)} code windows supplied; ${e(model.aiReview.coverageEvidence.unresolved)} unresolved evidence items. Use Exploration to follow missing callers, controls and configuration across repositories.</p><p>ASVS requirement assessments: ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "source-supported").length)} source-supported, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "needs-context").length)} need context, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-reviewed").length)} not reviewed, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-applicable").length)} marked not applicable. Counts are per packet and requirement; they do not establish ASVS compliance.</p></div>` : ""}<div class="toolbar"><button data-ws-export="pdf">Export STRIDE review · PDF</button><span class="hint">Exports the latest saved review snapshot, including partial results, threat actors and trust boundaries. In-flight requests are not included until saved.</span></div><p class="hint">Parallel workers review separate packets using the same model; they reduce waiting, not total token usage. Reduce workers if the gateway limits concurrent requests. The limit does not increase automatically. Run until complete reviews pending packets across the saved repository scope without the 100-call or elapsed-time stop. Token targets are advisory and never stop a run. Stop at any time; provider failures and repeated invalid responses require attention. In bounded mode, request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.filter(matchesAccess).map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Partial means some interfaces in this row have completed STRIDE review; not analyzed means none have. Following a saved threat checks its evidence but does not complete the remaining STRIDE packets. Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap ws-matrix-scroll" role="region" aria-label="STRIDE matrix scroll area" tabindex="0"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
+      body.innerHTML = `${accessControls()}${failureNotice}${staleNotice}<p class="callout">System threat modeling reviews connected flows, entry points, workers, stores and controls first. Deployment assumptions let review proceed without answering questions. Deep code-path coverage remains separately selectable.</p><p class="hint">${model.aiReview ? `Saved results shown: ${model.aiReview.reviewScope === 'system' ? (model.aiReview.scope?.poc ? (model.aiReview.scope.poc.kind==='repositories'?'Selected repositories — ':'Scoped POC — ')+e(model.aiReview.scope.poc.title) : 'System threat model') : 'Deep code-path STRIDE'}.` : 'No saved STRIDE results.'} The scope selector controls the next action. Each scope retains its compatible completed work.</p><div id="ws-scope-preview">${model.aiReview?.reviewScope === 'system' ? `${model.aiReview.scope.interfaceIds.length} review subjects; ${model.aiReview.scope.deferredInterfaces} other graph records remain outside primary review. This is not whole-codebase clearance.` : ''}</div>${repositoryScopeHtml()}<details><summary>Advanced: select individual operations (JSON)</summary><p>Import a scope JSON with title, profile and operations (repository, pathContains, optional operationContains). Only matching inbound operations are reviewed; supporting code remains available across selected clones. A POC automatically assesses saved scenarios after STRIDE packets finish. Unresolved evidence remains explicit.</p><input id="ws-poc-file" aria-label="POC scope file" type="file" accept=".json"><button id="ws-import-poc">Save POC scope</button><p>${e(model.pocScope?.kind !== 'repositories' && model.pocScope ? model.pocScope.title + ' · ' + model.pocScope.interfaceIds.length + ' primary interfaces · profile assumption: ' + model.pocScope.profile : 'No operation-only scope saved')}</p></details>${model.aiReview?.scope?.poc && model.aiReview.scope.poc.kind!=='repositories' ? `<section class="callout"><h3>POC code conclusions</h3><p>${e(Object.entries(s.threats.filter(t=>t.origin==='analysis').reduce((a,t)=>{const k=t.validation?.assessment || 'not-assessed';a[k]=(a[k]||0)+1;return a;},{})).map(([k,n])=>n+' '+k).join(' · ') || 'No scenarios returned')}</p><p>STRIDE packet coverage, code conclusions, deployment assumptions and reviewer acceptance are separate. Needs-context and unassessed scenarios are not complete. Review resumes saved compatible work.</p></section>` : ''}${priorityThreatsHtml()}${stagePanel}<div class="ws-analysis"><div><strong>${stale ? "Historical packet counts · " : ""}${s.analysisStatus?.state === "failed" ? "STRIDE analysis failed · " : s.analysisStatus?.state === "partially-analyzed" ? "Partial STRIDE analysis · " : ""}${c ? `${c.completedBatches || 0} / ${c.totalBatches || 0} batches completed · ${c.failedBatches || 0} failed · ${c.pendingBatches || 0} pending` : "Analysis has not run"}</strong><p>${e(review?.stopReason === "request-budget" && !c?.failedBatches ? "Request limit reached successfully. Continue STRIDE analysis to review the remaining packets; completed results are retained." : review?.error || "Review the selected source evidence and declared interactions. Completed requests do not establish semantic completeness.")}</p>${!providerAvailable ? "<p>Start Synthesis with a configured provider and key to enable analysis. Connection details are shown in Sources.</p>" : ""}</div><div class="toolbar"><label>Scope for next run<select id="ws-review-scope" ${['running', 'cancelling'].includes(jobState.status) ? 'disabled' : ''}><option value="system" ${reviewScope === 'system' ? 'selected' : ''}>System threat model</option><option value="poc" ${reviewScope === 'poc' ? 'selected' : ''}>${model.pocScope?.kind==='repositories'?'Selected repositories':'Scoped POC'}</option><option value="deep" ${reviewScope === 'deep' ? 'selected' : ''}>Deep code-path STRIDE</option></select></label><button id="ws-preview-scope">Preview saved scope</button><label>Request budget<input id="ws-request-budget" type="number" min="1" max="100" value="${requestBudget}" ${runUntilComplete ? "disabled" : ""}></label><label>Parallel review workers<select id="ws-review-workers" ${["running", "cancelling"].includes(jobState.status) ? "disabled" : ""}>${[1, 2, 3, 4].map((v) => option(v, v, v === reviewWorkers)).join("")}</select></label><label><input id="ws-until-complete" type="checkbox" ${runUntilComplete ? "checked" : ""}>Run until complete</label><label>Token target this action (advisory)<input id="ws-token-target" type="number" min="1" step="1" placeholder="No target" value="${e(tokenTarget)}"></label><button data-start-review ${!providerAvailable || jobState.status === "running" ? "disabled" : ""}>Run or continue STRIDE analysis</button><button data-stop-review ${jobState.status === "running" && jobState.mode === "review" ? "" : "hidden"}>Stop review</button></div></div><p id="ws-run-progress" role="status">${e(window.SynthesisReviewRun?.(model.aiReview) || "")}</p>${model.aiReview?.coverageEvidence ? `<div class="callout" role="status"><strong>Source and control review</strong><p>${e(model.aiReview.coverageEvidence.sourceWindows)} code windows supplied; ${e(model.aiReview.coverageEvidence.unresolved)} unresolved evidence items. Use Exploration to follow missing callers, controls and configuration across repositories.</p><p>ASVS requirement assessments: ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "source-supported").length)} source-supported, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "needs-context").length)} need context, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-reviewed").length)} not reviewed, ${e((model.aiReview.coverageEvidence.standards || []).filter((r) => r.status === "not-applicable").length)} marked not applicable. Counts are per packet and requirement; they do not establish ASVS compliance.</p></div>` : ""}<div class="toolbar"><button data-ws-export="pdf">Export STRIDE review · PDF</button><span class="hint">Exports the latest saved review snapshot, including partial results, threat actors and trust boundaries. In-flight requests are not included until saved.</span></div><p class="hint">Parallel workers review separate packets using the same model; they reduce waiting, not total token usage. Reduce workers if the gateway limits concurrent requests. The limit does not increase automatically. Run until complete reviews pending packets across the saved repository scope without the 100-call or elapsed-time stop. Token targets are advisory and never stop a run. Stop at any time; provider failures and repeated invalid responses require attention. In bounded mode, request budget is the maximum number of model calls for this action. A budget of 1 reviews one evidence packet, not one complete repository or the whole system. Continue to process pending packets without losing completed analysis.</p><div class="toolbar"><label>Rows<select aria-label="Rows" id="ws-row-kind">${["boundary", "flow", "component"].map((k) => option(k, k, k === (window.wsRowKind || "component"))).join("")}</select></label><label>Actor<select aria-label="Actor" id="ws-matrix-actor"><option value="">All actors</option>${s.actors.filter(matchesAccess).map((a) => option(a.id, a.name, a.id === actor)).join("")}</select></label></div><p class="hint">Partial means some interfaces in this row have completed STRIDE review; not analyzed means none have. Following a saved threat checks its evidence but does not complete the remaining STRIDE packets. Cells count returned threat scenarios. Checklist prompts are available in the cell details and do not count as threats. Empty results require a review decision. Actor filtering does not change full-model coverage.</p><div class="table-wrap ws-matrix-scroll" role="region" aria-label="STRIDE matrix scroll area" tabindex="0"><table class="ws-matrix"><thead><tr><th>Review subject</th>${["Spoofing", "Tampering", "Repudiation", "Information disclosure", "Denial of service", "Elevation of privilege"].map((c, i) => `<th><b>${"STRIDE"[i]}</b><small>${c}</small></th>`).join("")}</tr></thead><tbody>${s.matrix
         .filter((r) => r.rowKind === (window.wsRowKind || "component"))
         .filter(r => accessScope === 'all' || r.cells.some(c => c.threatIds.some(id => matchesAccess(threatIndex.get(id)))))
         .map(
@@ -386,6 +455,7 @@
         "beforeend",
         `<section id="ws-coverage">${coverageHtml(model)}</section><section id="ws-usage">${usageHtml(jobState.tokenUsage || model.tokenUsage)}</section>`,
       );
+      updateRepositoryControls();
       return;
     }
     let rows = s[view] || [];
@@ -792,14 +862,25 @@
         const includeSourceCode = root.querySelector('#ws-validation-source')?.checked === true;
         await validateThreats({ threatIds: ids, includeSourceCode, budget: Number(root.querySelector('#ws-validation-budget')?.value || 6), runUntilComplete: root.querySelector('#ws-validation-continuous')?.checked === true });
       } catch (error) { notify(error.message, true); }
+    } else if (['ws-repo-all', 'ws-repo-clear', 'ws-repo-discard'].includes(b.id)) {
+      if (repositoryScopeSaving || ['running', 'cancelling'].includes(jobState.status)) return;
+      const draft = repositorySelection();
+      if (b.id === 'ws-repo-discard') repositoryDraft = savedRepositorySelection();
+      else draft.repositories = b.id === 'ws-repo-all' ? model.sources.map(source => source.name).sort() : [];
+      renderBody();
     } else if (b.id === 'ws-save-repositories') {
+      if (repositoryScopeSaving || ['running', 'cancelling'].includes(jobState.status)) return;
       try {
-        const repositories=[...root.querySelectorAll('[data-primary-repo]:checked')].map(n=>n.value);
-        const result=await api('poc-scope',{modelRevision:model.modelRevision,scope:{kind:'repositories',title:root.querySelector('#ws-repo-title').value,profile:root.querySelector('#ws-repo-profile').value,repositories}});
+        const draft = repositorySelection();
+        if (!draft.repositories.length) throw Error('Choose at least one repository to review');
+        repositoryScopeSaving = true; updateRepositoryControls();
+        const result = await api('poc-scope', {modelRevision:model.modelRevision, scope:{kind:'repositories', ...draft}});
+        repositoryDraftKey = undefined;
         reviewScope='poc';update(result);notify('Repository scope saved. Preview the plan before starting.');
       } catch(error){notify(error.message,true);}
+      finally { repositoryScopeSaving = false; updateRepositoryControls(); }
     } else if (b.id === 'ws-import-poc') {
-      try { const file=root.querySelector('#ws-poc-file').files[0]; if(!file || file.size>32768) throw Error('Choose a scope JSON under 32 KiB');
+      try { if (repositoryScopeDirty()) throw Error('Save or discard repository changes before importing another scope'); const file=root.querySelector('#ws-poc-file').files[0]; if(!file || file.size>32768) throw Error('Choose a scope JSON under 32 KiB');
         const result=await api('poc-scope',{modelRevision:model.modelRevision,scope:JSON.parse((await file.text()).replace(/^\uFEFF/,''))});
         reviewScope='poc';update(result);notify('POC scope saved. Preview scope before starting.');
       } catch(error){notify(error.message,true);}
@@ -812,7 +893,7 @@
     } else if (b.id === 'dc-more-evidence') { deploymentClaimCount += 20; renderBody();
     } else if (b.id === 'dc-run-system') { view = 'matrix'; reviewScope = 'system'; render();
     } else if (b.id === 'ws-preview-scope') {
-      try { const plan = await api('system-review-plan?scope='+reviewScope); const panel = root.querySelector('#ws-scope-preview');
+      try { if (repositoryScopeBlocked()) throw Error('Save or discard repository changes before previewing'); const plan = await api('system-review-plan?scope='+reviewScope); const panel = root.querySelector('#ws-scope-preview');
         if (panel) panel.textContent = `${plan.units} system review units · ${plan.scope.interfaceIds.length} in-scope interfaces · ${plan.scope.poc?.kind === "repositories" ? "All selected primary subjects planned; supporting and navigation records retained as context" : plan.scope.deferredInterfaces + " deferred to deep review"} · ${plan.gaps} explicit context gaps. ${plan.preview?.blockedObligations ?? 0} unassigned obligations · ${Math.round((plan.preview?.packetBytes || 0) / 1024)} KiB planned metadata · ${plan.preview?.repeatedRecordAppearances ?? 0} repeated record appearances. Source windows add to request size; timing uses measured provider throughput. No model call was made.`;
       } catch (error) { notify(error.message, true); }
     } else if (b.dataset.deploymentAnswer) {
@@ -905,6 +986,7 @@
       renderBody();
     } else if (b.hasAttribute("data-start-review")) {
       try {
+        if (repositoryScopeBlocked()) throw Error('Save or discard repository changes before starting review');
         b.disabled = true;
         requestBudget = Number(root.querySelector("#ws-request-budget").value);
         await startReview(requestBudget, {
@@ -966,6 +1048,10 @@
     }
   });
   root.addEventListener("input", (event) => {
+    if (['ws-repo-title', 'ws-repo-profile'].includes(event.target.id)) {
+      repositorySelection()[event.target.id === 'ws-repo-title' ? 'title' : 'profile'] = event.target.value;
+      updateRepositoryControls(); return;
+    }
     if (event.target.id === "ws-gap-search") {
       gapQuery = event.target.value;
       const pos = event.target.selectionStart;
@@ -986,7 +1072,11 @@
     }
   });
   root.addEventListener("change", (event) => {
-    if (event.target.id === 'ws-review-scope') { reviewScope = event.target.value; return; }
+    if (event.target.id === 'ws-review-scope') { reviewScope = event.target.value; updateRepositoryControls(); return; }
+    if (event.target.hasAttribute('data-primary-repo')) {
+      repositorySelection().repositories = [...root.querySelectorAll('[data-primary-repo]:checked')].map(n => n.value).sort();
+      updateRepositoryControls(); return;
+    }
     if (event.target.id === 'dc-profile') { saveDeployment({ action: 'profile', profile: event.target.value }); return; }
 
     const id = event.target.id;
@@ -1130,7 +1220,7 @@
         stop = root.querySelector("[data-stop-review]");
       if (run)
         run.disabled =
-          !value.inference || ["running", "cancelling"].includes(value.status);
+          !value.inference || ["running", "cancelling"].includes(value.status) || repositoryScopeBlocked();
       for (const button of root.querySelectorAll('[data-validate-threats]')) button.disabled = !value.inference || ['running','cancelling'].includes(value.status);
       const validationStop = root.querySelector('[data-stop-validation]');
       if (validationStop) validationStop.hidden = !(value.status === 'running' && value.mode === 'threat-validation');
@@ -1139,6 +1229,7 @@
         workers.disabled = ["running", "cancelling"].includes(value.status);
       if (stop)
         stop.hidden = !(value.status === "running" && value.mode === "review");
+      updateRepositoryControls();
     },
     showReferences(anchors = []) {
       const interfaceIds = new Set(
