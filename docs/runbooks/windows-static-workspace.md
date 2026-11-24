@@ -261,6 +261,14 @@ Run the local scanner first for fast, zero-model-token results. In the same tab,
 
 The diagnostic bundle includes source graph, discovered connections, CWE coverage, failure traces and model token accounting. Model source segments are not saved in it. Inspect confidential architecture metadata before transferring the bundle. See the [architecture](../design/connected-dfd-cwe-review.md) and [test specification](../testing/connected-dfd-cwe-review.md) for supported cases and limits.
 
+## Preview the saved scope before starting STRIDE
+
+After saving repository scope, select **Scope for next run → Selected repositories**, then **Preview saved scope**. The preview appears directly below those controls and scrolls into view. It shows **Preparing the saved scope** while reading the existing graph, then lists primary review repositories, supporting repositories, planned units, interfaces and evidence gaps. Previewing makes no model calls. If planning fails, the error appears in the same panel; retry the preview after resolving it.
+
+**Actor access · display filter → External** filters displayed threats and the PDF. It does not change the saved repository selection, planned work or the six STRIDE categories. Changing display filters preserves the preview. Previous completed/failed/pending counts describe the saved review; the preview describes the next scope and does not claim those units have been reviewed.
+
+If the previous action stopped on a provider HTTP error, first use **Request budget 1**, **1 worker**, and **Run until complete off** to check that a request succeeds. Preview success verifies local planning, not gateway availability. After a successful request, enable **Run until complete** and the approved worker count to continue compatible pending work.
+
 ## Small error export and large DFD previews (0.7.1)
 
 Select **Export errors** at the top of the application to download `synthesis-errors.json`. It works before a successful source build and includes request outcomes, scanner errors, connection extraction counts and recent failure events. It excludes the source graph, source excerpts and model response prose. Lists retain at most 100 entries and each scanner repository retains at most 10 errors; omitted counts are explicit. Keep the full diagnostic bundle locally for omitted history. The small file still contains confidential architecture metadata.

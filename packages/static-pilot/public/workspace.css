@@ -502,3 +502,8 @@ nav[aria-label="Workflow"] button {
 .ws-repository-scope #ws-repo-all,
 .ws-repository-scope #ws-repo-clear,
 .ws-repository-scope #ws-repo-discard { background: white; color: #245a9a; border: 1px solid #9bb5d3; }
+
+.ws-scope-preview { margin-top: 14px; padding: 14px; border: 1px solid #abc1dc; border-radius: 6px; background: white; overflow-wrap: anywhere; }
+.ws-scope-preview h4 { margin: 0 0 10px; }
+.ws-scope-preview p:last-child { margin-bottom: 0; }
+.ws-scope-preview:focus-visible { outline: 2px solid #245a9a; outline-offset: 2px; }

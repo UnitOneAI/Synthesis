@@ -29,6 +29,8 @@ test('existing repository review saves scope, previews, exports and reopens with
   await expect(page.locator('#ws-repository-save-status')).toContainText('Scope saved');
   await page.getByRole('button',{name:'Preview saved scope',exact:true}).click();
   await expect(page.locator('#ws-scope-preview')).toContainText('All selected primary subjects planned');
+  await expect(page.locator('#ws-scope-preview')).toBeInViewport();
+  await page.locator('#ws-scope-preview').screenshot({path:testInfo.outputPath('saved-scope-preview.png')});
   const saved=await readModel();expect(saved.aiReview).toEqual(initial.aiReview);expect(saved.sourceGraph.fingerprint).toBe(initial.sourceGraph.fingerprint);
   await page.locator('.ws-repository-scope').screenshot({path:testInfo.outputPath('saved-repository-scope.png')});
   const popup=context.waitForEvent('page');await page.getByRole('button',{name:'Export STRIDE review · PDF',exact:true}).click();const report=await popup;

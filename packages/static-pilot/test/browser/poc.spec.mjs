@@ -89,7 +89,32 @@ test('repository selection makes review roles explicit, protects drafts and subm
   releaseSave();await expect(save).toHaveText('Save repository scope');await expect(page.locator('#ws-review-scope')).toHaveValue('poc');
   await expect(page.locator('#ws-repository-saved')).toContainText('application-portal, service');
   await expect(page.locator('#ws-repository-save-status')).toContainText('Scope saved');
-  await preview.click();await expect(page.locator('#ws-scope-preview')).toContainText('All selected primary subjects planned');
+  // The result belongs beside the button, survives redraws, and never starts paid review.
+  const previewPanel=page.locator('#ws-scope-preview');let releasePreview;
+  const previewWaiting=new Promise(resolve=>{releasePreview=resolve;});
+  await page.route('**/api/system-review-plan?scope=poc',async route=>{await previewWaiting;await route.continue();},{times:1});
+  await preview.click();await expect(preview).toHaveText('Preparing scope…');await expect(preview).toBeDisabled();await expect(run).toBeDisabled();
+  await expect(previewPanel).toHaveAttribute('aria-busy','true');await expect(previewPanel).toBeInViewport();
+  await page.getByLabel('Actor access',{exact:true}).selectOption('external');
+  await expect(previewPanel).toContainText('Preparing the saved scope');await expect(preview).toBeDisabled();
+  releasePreview();await expect(previewPanel).toContainText('All selected primary subjects planned');
+  await expect(previewPanel).toContainText('application-portal, service');await expect(previewPanel).toContainText('All six STRIDE categories');
+  await expect(previewPanel).toBeInViewport();await expect(previewPanel).toHaveAttribute('aria-busy','false');await expect(run).toBeEnabled();
+  const buttonBounds=await preview.boundingBox(),previewBounds=await previewPanel.boundingBox();expect(previewBounds.y).toBeGreaterThan(buttonBounds.y);
+  await page.getByLabel('Rows',{exact:true}).selectOption('component');await expect(previewPanel).toContainText('All selected primary subjects planned');
+  await page.route('**/api/system-review-plan?scope=poc',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Synthetic preview unavailable'})}),{times:1});
+  await preview.click();await expect(previewPanel).toContainText('Scope preview failed');await expect(previewPanel).toContainText('Synthetic preview unavailable');await expect(previewPanel).toBeInViewport();await expect(preview).toBeEnabled();
+  await preview.click();await expect(previewPanel).toContainText('All selected primary subjects planned');
+  await previewPanel.screenshot({path:testInfo.outputPath('saved-scope-preview.png')});
+  // A late response from another scope cannot overwrite the selected plan.
+  let releaseOld;const oldWaiting=new Promise(resolve=>{releaseOld=resolve;});
+  await page.route('**/api/system-review-plan?scope=poc',async route=>{await oldWaiting;await route.continue();},{times:1});
+  await preview.click();await page.locator('#ws-review-scope').selectOption('system');
+  await expect(previewPanel).not.toContainText('All selected primary subjects planned');await preview.click();await expect(previewPanel).toContainText('System threat model · scope preview');
+  const oldResponse=page.waitForResponse(response=>response.url().endsWith('/api/system-review-plan?scope=poc'));releaseOld();await oldResponse;
+  await expect(previewPanel).toContainText('System threat model · scope preview');
+  await page.locator('#ws-review-scope').selectOption('deep');await preview.click();await expect(previewPanel).toContainText('Deep code-path scope preview');await expect(previewPanel).not.toContainText('undefined');
+  await page.locator('#ws-review-scope').selectOption('poc');await preview.click();await expect(previewPanel).toContainText('All selected primary subjects planned');
   const headers={'X-Synthesis-Token':app.token},base=new URL(app.url).origin;
   const plan=await(await page.request.get(base+'/api/system-review-plan?scope=poc',{headers})).json();
   expect(plan.scope.poc.repositories).toEqual(['application-portal','service']);expect(plan.scope.poc.supportingRepositories).toHaveLength(11);
