@@ -367,6 +367,9 @@ test("staged worker continues and cancels disk review without rescanning source"
       headers = {
         "X-Synthesis-Token": info.token,
         "Content-Type": "application/json",
+        // Busy Windows runners can resume polling as an idle pooled socket closes.
+        // This test checks worker lifecycle and persistence, not keep-alive reuse.
+        Connection: "close",
       };
     const post = (route, body) =>
       fetch(base + "/api/" + route, {
