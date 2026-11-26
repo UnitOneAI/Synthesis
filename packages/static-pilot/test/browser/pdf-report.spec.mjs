@@ -305,8 +305,8 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
     ).toBeEnabled();
     for (const name of [
       "Overall system DFD",
-      "Threat actors linked to returned scenarios",
-      "Trust boundaries linked to returned scenarios",
+      "Threat actors linked to supported threats",
+      "Trust boundaries linked to supported threats",
       "STRIDE matrix",
       "Threat details",
     ])
@@ -318,11 +318,11 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
       "1 / 4 STRIDE packets completed; 0 failed; 3 pending",
     );
     await expect(content).toContainText("Partial STRIDE review");
-    await expect(content).toContainText("External untrusted caller");
-    await expect(content).toContainText("Caller to service identity");
+    await expect(content).toContainText("No current individually supported threats");
+    await expect(content).toContainText("Named connections below are static context");
     await expect(content).toContainText("Conditional caller identity bypass");
     await expect(content).toContainText(threatReference);
-    await expect(content).toContainText(boundaryReference);
+    await expect(report.locator("article")).toHaveCount(0);
     await expect(content).toContainText("accepted");
     const pdf = await report.pdf({
       path: testInfo.outputPath("partial-stride-review.pdf"),

@@ -863,8 +863,10 @@ test("partial STRIDE results default to component scenarios without requiring de
     "component",
   );
   await expect(page.locator('.ws-priority-panel')).toContainText('Priority threats');
-  await expect(page.locator('.ws-priority-card')).toContainText('Unauthorized operation');
-  await page.locator('.ws-priority-card').click();
+  await expect(page.locator('.ws-priority-card')).toHaveCount(0);
+  await expect(page.locator('.ws-priority-panel')).toContainText('No current individually supported threats');
+  await page.getByText('Investigations requiring code · 1', {exact:true}).click();
+  await page.locator('.ws-priority-panel .ws-record').click();
   await expect(page.locator('#ws-inspector')).toContainText('Independent source assessment');
   await page.getByText('Validate saved threats against code and controls', {exact:true}).click();
   await expect(page.locator('#ws-validation-source')).not.toBeChecked();

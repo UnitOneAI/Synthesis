@@ -1,3 +1,4 @@
+import {investigationAction} from './threat-outcome.mjs';
 import {matchesAccess, accessFilter} from './threat-access.mjs';
 import { PRINT_STYLE, PRINT_HEADER, PRINT_FOOTER } from "./print-style.mjs";
 import { diagramModel, layoutDiagram, actorPath } from "./diagram-model.mjs";
@@ -464,7 +465,9 @@ export function systemPrintReport(model, options = {}) {
   const contextQuestions = current.filter(t => metadataOnly(t) && matchesAccess(t, filter.scope, filter.includeUnresolved));
   const currentScenarioIds = new Set(scenarios.map((t) => t.id));
   const questionIds = new Set(contextQuestions.map(t=>t.id));
-  const detailed = scenarios.filter(t=>!t.followUpKind).slice(0, 12);
+  const supported = scenarios.filter(t => t.outcome?.kind === 'supported');
+  const investigations = [...scenarios, ...contextQuestions].filter(t => t.outcome?.kind === 'investigation');
+  const detailed = supported;
   const table = (headers, rows) =>
     rows.length
       ? `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
@@ -491,13 +494,18 @@ export function systemPrintReport(model, options = {}) {
           : "Source reference unavailable";
       })
       .join("; ") || "No source citation recorded";
+  const investigationGroups = [...new Set(investigations.map(investigationAction))].map((action,index)=>({
+    reference:`A-${String(index+1).padStart(2,'0')}`, action,
+    scenarios:investigations.filter(t=>investigationAction(t)===action),
+  }));
+  const investigationRefs = new Map(investigationGroups.flatMap(g=>g.scenarios.map(t=>[t.id,g.reference])));
   const disposition = (r) =>
     r.reviewState === "pending"
       ? `${r.basis}; awaiting reviewer confirmation`
       : `${r.basis}; ${r.reviewState}`;
-  const linkedActors = new Set(scenarios.flatMap((t) => t.actorIds || []));
+  const linkedActors = new Set(supported.flatMap((t) => t.actorIds || []));
   const linkedBoundaries = new Set(
-    scenarios.flatMap((t) => t.boundaryIds || []),
+    supported.flatMap((t) => t.boundaryIds || []),
   );
   const threatRefs = (kind, id) => {
     const refs = scenarios
@@ -525,20 +533,20 @@ export function systemPrintReport(model, options = {}) {
   const assessments = scenarios.reduce((a,t)=>{const k=t.validation?.assessment || 'not-assessed';a[k]=(a[k]||0)+1;return a;},{});
   const repoAssessment=s.repositoryAssessment;
   const repoSummary=repoAssessment ? `<section><h2>Selected repository assessment</h2><p>Primary repositories: ${e(poc.repositories.join(', '))}. Supporting repositories: ${e(poc.supportingRepositories.join(', ')||'None')}. Profile assumption: ${e(poc.profile)}.</p><p>${e(repoAssessment.interpretation)}</p>${table(['STRIDE category','Conclusive cases','Evidence gaps','Pending','Failed','Conditional','Ruled out','No scenario'],repoAssessment.rows.map(r=>[r.category,r.conclusive,r.gaps,r.pending,r.failed,r.supported,r.ruledOut,r.noScenario]))}<h3>File coverage</h3>${table(['Primary repository','Inventory entries','Identified interfaces','File/collection gaps'],(repoAssessment.inventory?.repositories||[]).map(r=>[r.repository,r.files,r.identifiedInterfaces,r.gapCount]))}<p>${repoAssessment.complete?'All planned category cases have cited conclusions and no recorded file gaps.':'Repository assessment remains incomplete where category, file or collection gaps are recorded. Completed requests are not complete repository clearance.'}</p></section>` : '';
-  const pocSummary = poc && poc.kind!=='repositories' ? `<section><h2>Scoped POC · ${e(poc.title)}</h2><p>Profile assumption: ${e(poc.profile)}. ${poc.interfaceIds.length} selected inbound interfaces; ${poc.operationGroups || poc.interfaceIds.length} operation definitions; ${(poc.operationGroups || poc.interfaceIds.length) * 6} planned STRIDE category review cases. Other source remains evidence context, not whole-repository clearance.</p>${table(['Repository','Operation path'],poc.operations.map(o=>[o.repository,o.pathContains]))}<p>Code conclusions: ${e(Object.entries(assessments).map(([k,n])=>n+' '+k).join('; ') || 'No returned scenarios')}. Packet completion, code conclusions, deployment assumptions and reviewer acceptance are separate. Unassessed or needs-context scenarios are not fully assessed.</p></section>` : '';
+  const pocSummary = poc && poc.kind!=='repositories' ? `<section><h2>Scoped POC · ${e(poc.title)}</h2><p>Profile assumption: ${e(poc.profile)}. ${poc.interfaceIds.length} selected inbound interfaces; ${poc.operationGroups || poc.interfaceIds.length} operation definitions; ${(poc.operationGroups || poc.interfaceIds.length) * 6} planned STRIDE category review cases. Other source remains evidence context, not whole-repository clearance.</p>${table(['Repository','Operation path'],poc.operations.map(o=>[o.repository,o.pathContains]))}<p>Automated scenario assessments: ${e(Object.entries(assessments).map(([k,n])=>n+' '+k).join('; ') || 'No returned scenarios')}. Packet completion, code conclusions, deployment assumptions and reviewer acceptance are separate. Unassessed or needs-context scenarios are not fully assessed.</p></section>` : '';
   const snapshot = `<section class="review-snapshot"><p>Actor access filter: ${e(filter.scope)} · Unresolved access ${filter.includeUnresolved ? "included" : "excluded"}. External and internal views include mixed actor scenarios. Packet coverage below describes the full review scope. DFDs show bounded system context and focused paths; complete graph exports retain omitted objects.</p><h2>${state}</h2><p>Exported from the latest available review checkpoint. Requests still in progress are not included. Exporting does not stop or restart analysis.</p>${
     stale
       ? `<p>Historical STRIDE review: ${allScenarios.length} saved scenarios and ${completed} completed packets are historical, not current valid coverage. Their details are excluded from this report. Revalidate before relying on them; the complete HTML/JSON export retains the historical records.</p>`
       : !hasResults
         ? "<p>STRIDE analysis has not produced a successful current review checkpoint. Static checklist prompts, candidate actors and inferred boundaries are planning inputs, not completed threat analysis; they are excluded here.</p>"
-        : `<p>${scenarios.length} current returned threat scenarios; ${contextQuestions.length} architecture-only questions. These are conditional analysis results, not confirmed vulnerabilities. ${partial ? "Pending, failed and unreviewed areas are not cleared by this report." : "Completion covers planned packets, not proof of complete security coverage."}</p>`
+        : `<p>${scenarios.length} current returned threat scenarios; ${contextQuestions.length} architecture-only questions. ${supported.length} supported conditional threats; ${scenarios.filter(t=>t.outcome?.kind === "ruled-out").length} ruled out for the cited path; ${investigations.length} require investigation. Returned hypotheses are not supported threats. ${partial ? "Pending, failed and unreviewed areas are not cleared by this report." : "Completion covers planned packets, not proof of complete security coverage."}</p>`
   }
     ${review?.coverage ? `<p>${stale ? "Historical counts: " : ""}${completed} / ${review.coverage.totalBatches || 0} STRIDE packets completed; ${failed} failed; ${pending} pending.</p>` : "<p>STRIDE analysis has not run.</p>"}
     ${review?.stopReason ? `<p>Last recorded stop reason: ${e(review.stopReason)}.</p>` : ""}
     ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
-  const conclusions = current.filter(t => t.sourceConclusion && matchesAccess(t, filter.scope, filter.includeUnresolved)).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
+  const conclusions = current.filter(t => t.sourceConclusion?.status === 'open' && matchesAccess(t, filter.scope, filter.includeUnresolved)).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
   const categoryCounts = hasResults ? `<h3>Returned scenarios by STRIDE category</h3>
     ${table(CATEGORIES, [CATEGORIES.map(category => scenarios.filter(t => t.categories.includes(category)).length)])}
     <p>Each count includes current source-referenced scenarios assigned to that category. Scenarios can overlap. A zero means no scenario returned in the reviewed scope.</p>` : "";
@@ -547,21 +555,23 @@ export function systemPrintReport(model, options = {}) {
     return `<article><h3>${e(t.reference)} · ${c.status === "open" ? "Open question" : "Conditional threat"}</h3><p>${e(c.statement)}</p><p><b>Condition or missing link</b> · ${e(c.condition)}</p><p><b>Next action</b> · ${e(c.nextAction)}</p><p>Reviewed by ${e(c.reviewer)} · Automated assessment: ${e(t.validation.assessment)}</p><ul>${c.citations.map(r => `<li>${e(r.repository)} / ${e(r.path)}:${e(r.startLine)}–${e(r.endLine)}</li>`).join("")}</ul></article>`;
   }).join("")}` : "";
   const summary = hasResults
-    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Highest review priorities from returned scenarios. This order is not a confirmed severity rating.</p>${scenarios.filter(t=>!t.followUpKind && t.validation?.assessment !== 'ruled-out').slice(0, 6).map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>${e(t.reviewPriority.label)}</strong> · Automated assessment: ${e(t.validation?.assessment || 'not-assessed')}</p><p>${e(t.analysis?.impact || t.asset)}</p><p><strong>Actor:</strong> ${e(names(t.actorIds, 'Not established'))}</p><p><strong>Trust crossing:</strong> ${e(names(t.boundaryIds, 'Not established; needs evidence'))}</p><p><strong>Control evidence:</strong> ${e(t.validation?.counterEvidence || t.controls || 'Not established')}</p>${t.validation?.deploymentAssumptions?.length ? `<p><strong>Deployment assumptions — not verified:</strong> ${e(t.validation.deploymentAssumptions.join('; '))}</p>` : ''}<p><strong>Next action:</strong> ${e(t.sourceConclusion?.nextAction || t.validation?.missingEvidence?.join('; ') || t.validation?.remediation?.codeFix || t.mitigation)}</p></article>`).join('')}${stageCoverage}<h2>What needs attention</h2><p>Start with the highest review priority below, check the stated access and controls, then assign a reviewer and remediation owner. Review order is not a severity score. Test-only and architecture-only records do not establish production exposure.</p>${table(
-        ["Threat / affected scope", "Why it matters", "Next action"],
-        scenarios.map((t) => [
-          `${t.reference} — ${t.name}. Source scope: ${(t.sourceScopes || []).join(", ") || "not established"}`,
-          `${t.analysis?.impact || t.asset || t.scenario} ${t.reviewPriority.label}: ${t.reviewPriority.reasons.join(" ")}`,
-          `${t.mitigation || "Establish controls and applicability."} Severity: ${!t.decision?.stale ? t.decision?.severity || "unassessed" : "unassessed"}. Owner: ${!t.decision?.stale ? t.decision?.owner || "unassigned" : "unassigned"}.`,
-        ]),
-      )}<h2>System context from static extraction</h2><p>The DFD below is code/configuration context for the analysis. It is not proof that every depicted path was reviewed. Dashed or inferred connections and boundaries require confirmation.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,scenarios)}
+    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Only current individual source assessments or evidence-linked reviewer conclusions appear here. Category-level conclusions alone do not validate each returned scenario. Deployment conditions remain explicit.</p>${supported.length ? table(['Threat','Decision basis','Remediation'],supported.map(t=>[`${t.reference} — ${t.name}`,t.sourceConclusion ? 'Evidence-linked engineering conclusion; automated assessment: '+t.validation.assessment : 'Independent static source assessment',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation])) : '<p>No current individually supported threats. The review has produced analysis leads, not an established remediation list.</p>'}${stageCoverage}<h2>Complete scenario disposition register</h2><p>Every returned scenario is retained below. IDs track the original review; they are not vulnerability counts. Investigation tasks are analysis work for Synthesis, not requests for a reviewer to find source code.</p>${table(
+    ['Reference / scenario','Outcome','Evidence and next action'], scenarios.map(t=>[
+      `${t.reference} — ${t.name}`,
+      `${t.outcome?.label || 'Investigation required'}${t.decision && !t.decision.stale ? '; reviewer decision: '+t.reviewState : ''}`,
+      `${citations(t)}. ${t.outcome?.kind === 'investigation' ? 'Analysis task '+investigationRefs.get(t.id) : t.validation?.remediation?.codeFix || t.sourceConclusion?.nextAction || t.validation?.counterEvidence || 'See source assessment.'}`,
+    ]))}
+  <h2>Focused investigation work</h2><p>Follow missing code, bindings and controls in the saved graph before asking deployment questions. A missing search result is not proof that a control is absent. These tasks do not count as fully analyzed threats. Matching requests are grouped for readability; every path still requires its own assessment. A- references identify tasks in this export only.</p>${table(['Analysis task','Related scenarios','Starting source'], investigationGroups.map(g=>{
+    return [g.reference+': '+g.action,g.scenarios.map(t=>t.reference).join(', '),[...new Set(g.scenarios.map(citations))].join('; ')];
+  }))}
+  <h2>System context from static extraction</h2><p>Named connections below are static context, not runtime reachability or proof of complete review. Unresolved peers stay in the connection worklist instead of appearing as unknown HTTP boxes.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,scenarios)}
   <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
     ["Component", ...CATEGORIES],
     s.matrix
       .filter(
         (r) =>
           r.rowKind === "component" &&
-          (r.reviewedInterfaces || r.cells.some((c) => c.failedEvidence)) &&
+          (!review?.scope?.interfaceIds?.length || r.interfaceIds.some(id=>review.scope.interfaceIds.includes(id))) &&
           (filter.scope === 'all' || r.cells.some(c => c.threatIds?.some(id => currentScenarioIds.has(id)))),
       )
       .map((r) => [
@@ -571,7 +581,7 @@ export function systemPrintReport(model, options = {}) {
             `${filter.scope !== 'all' && ['scenarios-identified','context-required','analyzed-no-scenario'].includes(c.analysisStatus) ? 'Reviewed scope' : c.analysisLabel}; ${(c.threatIds || []).filter((id) => currentScenarioIds.has(id)).length} scenarios${c.threatIds.filter(id=>questionIds.has(id)).length ? `; ${c.threatIds.filter(id=>questionIds.has(id)).length} architecture questions` : ''}${c.failedEvidence ? "; failed packets" : ""}`,
         ),
       ]),
-  )}<h2>Threat actors linked to returned scenarios</h2><p>Showing up to 20 linked actor profiles; the complete HTML/JSON retains every actor and link. These profiles describe the access assumed by the scenarios. Awaiting reviewer confirmation means the access assumption has not been accepted; it does not mean a model request is still running.</p>${table(
+  )}<h2>Threat actors linked to supported threats</h2><p>Showing up to 20 linked actor profiles; the complete HTML/JSON retains every actor and link. These profiles describe the access assumed by the scenarios. Awaiting reviewer confirmation means the access assumption has not been accepted; it does not mean a model request is still running.</p>${table(
     ["Actor / initial access", "Related threats", "Evidence / review"],
     s.actors
       .filter((a) => linkedActors.has(a.id)).slice(0,20)
@@ -580,12 +590,12 @@ export function systemPrintReport(model, options = {}) {
         threatRefs("actorIds", a.id),
         disposition(a),
       ]),
-  )}<h2>Trust boundaries linked to returned scenarios</h2><p>A boundary describes a change of trust at a flow crossing, not a repository boundary. These links are inferred through shared interfaces; validate their relevance and enforcement for each threat.</p>${table(
+  )}<h2>Trust boundaries linked to supported threats</h2><p>A boundary describes a change of trust at a flow crossing, not a repository boundary. Only resolved crossings linked to supported threats are listed. Shared-interface associations alone do not prove that a boundary enforces this path; confirm relevance and enforcement. Unresolved candidates remain in the workspace.</p>${table(
     ["Boundary / transition", "Flow crossing", "Enforcement / related threats"],
     s.boundaries
       .filter((b) => linkedBoundaries.has(b.id))
       .flatMap((b) =>
-        (b.crossings?.length ? b.crossings : [null]).map((c) => [
+        (b.crossings || []).filter(c=>c.basis !== 'unresolved' && supported.some(t=>t.flowIds?.includes(c.id))).map((c) => [
           `${b.reference}: ${b.name} (${b.dimension}). ${b.before} → ${b.after}`,
           c
             ? `${c.reference}: ${c.from} → ${c.to}`
@@ -593,67 +603,24 @@ export function systemPrintReport(model, options = {}) {
           `${b.enforcement || "Enforcement not established"}. ${c?.basis === 'unresolved' ? 'Candidate crossing: peer/access unresolved. ' : ''}${disposition(b)}. Threats: ${threatRefs("boundaryIds", b.id)}`,
         ]),
       ),
-  )}<h2>Threat details</h2><p>${detailed.length} of ${scenarios.length} scenarios shown in detail, ordered by review priority. Every current scenario is in the summary above; complete details remain in the HTML/JSON exports. This report excludes repeated checklist text and empty property rows.</p>${
+  )}<h2>Threat details</h2><p>${detailed.length} supported threats shown in detail. Unassessed and unresolved scenarios remain in the disposition register; they are not expanded into speculative finding narratives. This report excludes repeated checklist text and empty property rows.</p>${
     detailed.length
       ? detailed
           .map((t) => {
             const paragraphs = [
-              ["Category source assessment", t.categoryAssessment ? t.categoryAssessment.status + ': ' + t.categoryAssessment.rationale : null],
-              ["Category evidence", t.categoryAssessment?.citations.map(c=>`${c.role}: ${c.repository} / ${c.path}:${c.line}–${c.endLine}`).join('; ')],
-              ["Category evidence gaps", t.categoryAssessment?.missingEvidence.join('; ')],
-              ["Category deployment conditions", t.categoryAssessment?.deploymentConditions.join('; ')],
-              ["Independent source assessment", t.validation?.assessment !== 'not-assessed' ? t.validation?.assessment : 'Not assessed'],
-              ["Validation counterevidence", t.validation?.counterEvidence],
-              ["Missing code evidence", t.validation?.missingEvidence?.join('; ')],
-              ["Deployment assumptions — not verified", t.validation?.deploymentAssumptions?.join('; ')],
-              ["Recommended code change", t.validation?.remediation?.codeFix],
-              ["Cited source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
-              ["Why this actor is in scope", t.actorRationale ? `${t.actorRationale.profiles}. Required condition: ${t.actorRationale.whyInScope}` : null],
-              ["Actor entry evidence", t.actorRationale?.entryEvidence],
-              ["Proposed misuse path", t.actorRationale?.proposedPath],
-              ["Actor interpretation", t.actorRationale?.interpretation],
-              ["Validation to perform", t.validation?.remediation?.validation],
-              ["Remediation owner", t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
-              ["Impact", t.analysis?.impact || t.asset],
-              [
-                "Access and prerequisites",
-                `${names(t.actorIds, "Actor not established")}. ${t.prerequisites || "Access prerequisites need confirmation."}`,
-              ],
-              [
-                "Code path",
-                t.flowIds.length ? names(t.flowIds) : t.candidateFlowIds?.length
-                  ? "Candidate path; peer or deployment unresolved: " + names(t.candidateFlowIds)
-                  : "No connected flow established for this scenario",
-              ],
-              [
-                "Trust crossing",
-                names(
-                  t.boundaryIds,
-                  "No trust boundary established for this scenario",
-                ),
-              ],
-              [
-                "Controls and counterevidence",
-                t.controls || "Control effectiveness is not established",
-              ],
-              ["Recommended action", t.mitigation],
-              ["Supporting source", citations(t)],
-              [
-                "Evidence limits",
-                `${t.evidenceStatus}. ${display(t.analysisQuality?.gaps || "")}`,
-              ],
-              [
-                "Unresolved assumptions",
-                display(t.analysis?.assumptions || t.assumptions),
-              ],
-              [
-                "Reviewer decision",
-                t.decision && !t.decision.stale
-                  ? display(t.decision)
-                  : "Awaiting reviewer assessment",
-              ],
+              ['Decision basis',t.sourceConclusion ? `Engineering review by ${t.sourceConclusion.reviewer}. Automated assessment remains ${t.validation.assessment}; this decision does not change automated coverage.` : 'Independent static source assessment; no runtime validation.'],
+              ['Actor and necessary access',names(t.actorIds,'Actor not established')],
+              ['Condition',t.sourceConclusion?.condition || (t.validation?.deploymentAssumptions || []).join('; ') || t.prerequisites],
+              ['Input, operation and controls',t.sourceConclusion
+                ? t.sourceConclusion.citations.map(r=>`${r.repository} / ${r.path}:${r.startLine}–${r.endLine}`).join('; ')
+                : t.validation?.trace?.map(r=>`${r.role}: ${r.repository} / ${r.path}:${r.line}–${r.endLine} — ${r.reason}`).join('; ')],
+              ['Counterevidence considered',t.validation?.counterEvidence || t.controls],
+              ['Required action',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation],
+              ['Validation to perform',t.sourceConclusion ? null : t.validation?.remediation?.validation],
+              ['Automation still requested',t.sourceConclusion && t.validation.assessment==='needs-context' ? (t.validation.missingEvidence || []).join('; ') : null],
+              ['Remediation owner',t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
             ];
-            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${paragraphs
+            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · Reviewer decision: ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.scenario)}</p>${paragraphs
               .filter(([, v]) => v)
               .map(
                 ([label, value]) =>
@@ -662,7 +629,7 @@ export function systemPrintReport(model, options = {}) {
               .join("")}</article>`;
           })
           .join("")
-      : "<p>No current threat scenarios recorded. Completed packets did not establish a scenario; inspect remaining coverage and context questions.</p>"
+      : "<p>No individually supported threat details to publish. Inspect the disposition register and remaining review coverage.</p>"
   }
   ${
     contextQuestions.length
@@ -678,7 +645,17 @@ export function systemPrintReport(model, options = {}) {
     : "<p>No current threat scenarios recorded in this report. Resume a successful STRIDE review before producing a findings report. Historical records and static planning inputs remain available in the workspace and complete exports.</p>";
   const deployment = hasResults && review.reviewScope === 'system'
     ? `<h2>Deployment assumptions and review scope</h2><p>${e(s.deploymentContext.profile)} · ${e(s.deploymentContext.profileStatus)}. ${repoAssessment ? `${review.scope.interfaceIds.length} selected primary subjects are planned. Import/call records and supporting repositories remain available as navigation and evidence context. Completion and gaps are reported above.` : `${review.scope.interfaceIds.length} interfaces in system scope; ${review.scope.deferredInterfaces} deferred to deep code review. Deferred scope is not security clearance.`}</p>${table(['Area', 'Assumption or reported context', 'Basis'], s.deploymentContext.questions.map(q => [q.name, q.statement, q.state]))}<p>Responses are optional. Unconfirmed deployment context remains explicit; completed analysis does not approve actor access or trust boundaries.</p>` : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}.dfd-sheet{break-inside:avoid;margin:16px 0}.dfd-sheet svg{width:100%;height:auto;max-height:850px}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}${repoSummary}${pocSummary}${repoAssessment ? `<details><summary>Category conclusions and specific evidence gaps</summary>${table(['Batch / category','Outcome','Conclusion','Evidence','Missing evidence / conditions'],(review.batches||[]).filter(b=>b.status==='completed').flatMap(b=>(b.review?.categoryReviews||[]).map(c=>[b.id+' / '+c.category,c.status,c.rationale,c.citations.map(ref=>{const source=b.evidenceContext?.records?.find(r=>r.id===ref.recordId);return source ? source.repository+' / '+source.path+':'+ref.line+'–'+ref.endLine+' ('+ref.role+')' : ref.recordId+':'+ref.line+'–'+ref.endLine;}).join('; '),[...c.missingEvidence,...c.deploymentConditions].join('; ')])))}</details>` : ''}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories ${repoAssessment?'loaded for source and supporting context; primary review scope is listed above':'selected'}. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
+  const attempts = review?.runId ? (model.usageLedger?.attempts || []).filter(a=>a.runId===review.runId) : [];
+  const actionTokens=attempts.reduce((sum,a)=>sum+(a.usage?.totalTokens || 0),0);
+  const receipt = `<h2>Review execution receipt</h2>${table(['Item','Recorded value'],[
+    ['STRIDE action',review?.runId || 'Run identifier not recorded in this saved review'],
+    ['Source revision',review?.basedOnRevision || model.modelRevision || 'Not recorded'],
+    ['Graph fingerprint',model.sourceGraph?.fingerprint || 'Not recorded'],
+    ['Primary scope',(poc?.repositories || review?.scope?.repositories || []).map(r=>typeof r === 'string' ? r : r.repository || r.name || 'Unnamed repository').join(', ') || 'See saved scope and collection inventory below'],
+    ['Latest STRIDE action usage',attempts.length ? `${attempts.length} requests; ${actionTokens.toLocaleString('en-US')} reported tokens; ${attempts.filter(a=>a.usage?.totalTokens==null).length} requests with unknown usage` : 'Usage cannot be attributed to this STRIDE action from the saved record'],
+    ['Interpretation','A completed packet is a returned assessment, not necessarily a conclusive threat decision. Workspace token history below includes earlier actions.'],
+  ])}`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}.dfd-sheet{break-inside:avoid;margin:16px 0}.dfd-sheet svg{width:100%;height:auto;max-height:850px}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}${receipt}${repoSummary}${pocSummary}${repoAssessment ? `<details><summary>Category conclusions and specific evidence gaps</summary>${table(['Batch / category','Outcome','Conclusion','Evidence','Missing evidence / conditions'],(review.batches||[]).filter(b=>b.status==='completed').flatMap(b=>(b.review?.categoryReviews||[]).map(c=>[b.id+' / '+c.category,c.status,c.rationale,c.citations.map(ref=>{const source=b.evidenceContext?.records?.find(r=>r.id===ref.recordId);return source ? source.repository+' / '+source.path+':'+ref.line+'–'+ref.endLine+' ('+ref.role+')' : ref.recordId+':'+ref.line+'–'+ref.endLine;}).join('; '),[...c.missingEvidence,...c.deploymentConditions].join('; ')])))}</details>` : ''}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories ${repoAssessment?'loaded for source and supporting context; primary review scope is listed above':'selected'}. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
     ["Repository", "Collection status"],
     model.sources.map((r) => [r.name, r.status]),
   )}<h2>Evidence basis · what was analyzed</h2>${table(['Area','Basis and limits'],[
@@ -690,8 +667,10 @@ export function systemPrintReport(model, options = {}) {
 }
 
 function printDiagrams(model, s, scenarios) {
-  const interfaces = new Set(model.aiReview?.scope?.poc?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []));
-  const focus = s.components.filter(c=>c.interfaceIds?.some(id=>interfaces.has(id))).slice(0,6);
-  const selection = model.aiReview?.scope?.poc ? {interfaceIds:[...interfaces],showUnresolved:true} : {};
-  return `<p>${selection.interfaceIds ? 'Selected POC interface flows only; downstream paths without a selected interface are outside this diagram.' : 'System overview and up to six focused component diagrams.'} Each diagram is capped at eight objects; omitted relationships remain in the complete graph export. Dashed links are unresolved candidates, not proved calls.</p><section class="dfd-sheet">${systemSvg(model,{level:'system',limit:8,...selection})}</section>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · interface context</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:true,limit:8,...selection})}</section>`).join('');
+  const scope = model.aiReview?.scope?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []);
+  const selected = new Set(scope);
+  const flows = s.flows.filter(f => f.basis !== 'unresolved' && !['rejected','stale'].includes(f.reviewState) && f.interfaceIds?.some(id=>selected.has(id)));
+  if (!flows.length) return '<p>No resolved component-to-component path is available for this reviewed scope. No overview diagram is published. Use the cited source paths and resolve caller/destination bindings in Connection declarations; this does not imply that the components are disconnected.</p>';
+  const focus = s.components.filter(c=>flows.some(f=>f.source===c.id || f.target===c.id)).slice(0,6);
+  return `<p>${flows.length} resolved static flow records in the selected scope. Up to six component views show at most 24 objects each; omitted relationships remain in the complete graph export. Static connections do not establish deployed reachability.</p>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · connected paths</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:false,limit:24,interfaceIds:scope})}</section>`).join('');
 }

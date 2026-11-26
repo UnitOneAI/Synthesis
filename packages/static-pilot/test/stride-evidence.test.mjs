@@ -46,6 +46,9 @@ test("saved STRIDE graph retrieves current hashed code, retains gaps, and never 
   const plan = reviewPlan(model);
   assert.ok(plan.batches.length);
   const prepared = await prepareStrideEvidence(plan.batches[0].packet, source);
+  assert.ok(prepared.packet.sourceContext.records.every(r=>!('lines' in r)), 'Code is transmitted once, with numbered lines and unchanged citation metadata');
+  const duplicateBytes=Buffer.byteLength(JSON.stringify({...prepared.packet,sourceContext:{...prepared.packet.sourceContext,records:prepared.packet.sourceContext.records.map(r=>({...r,lines:r.code.split('\n')}))}}));
+  assert.ok(Buffer.byteLength(JSON.stringify(prepared.packet)) < duplicateBytes);
   assert.ok(
     prepared.packet.sourceContext.records.some((r) =>
       r.code.includes("authorize_request"),
