@@ -1,3 +1,4 @@
+import { ENGINEERING_SCHEMA, ENGINEERING_PROMPT, validateEngineeringArgument } from './threat-engineering.mjs';
 import {sourceScope} from './architecture.mjs';
 import {controlSymbols, controlContext} from './control-context.mjs';
 import { SECURITY_RESPONSE_SCHEMA } from './security-schemas.mjs';
@@ -8,19 +9,19 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-6';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-7';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 export const THREAT_ASSESSMENT_SCHEMA = {
   ...SECURITY_RESPONSE_SCHEMA,
-  properties: {...SECURITY_RESPONSE_SCHEMA.properties, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
-  required:[...SECURITY_RESPONSE_SCHEMA.required,'deploymentAssumptions','inputEvidence','sinkEvidence'],
+  properties: {...SECURITY_RESPONSE_SCHEMA.properties, engineering:ENGINEERING_SCHEMA, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
+  required:[...SECURITY_RESPONSE_SCHEMA.required,'engineering','deploymentAssumptions','inputEvidence','sinkEvidence'],
 };
-export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + `
+export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + ENGINEERING_PROMPT + `
 Challenge the original claim before extending it. A name/path search miss is not evidence of an absent control. In standard ASP.NET Core, an unresolved named authorization policy throws; do not assert fail-open or fallback-policy bypass without evidence of a custom path and its behavior. Resolve controller/base attributes, global filters, policy registration, requirement handlers and middleware ordering from supplied code. Distinguish custom behavior and framework version from assumptions. Do not invent a tenant isolation requirement: identify the actual role/object ownership rule and its enforcement. Echoing a caller's own headers does not establish theft of another user's credentials; cite the additional trust crossing or rule out that claimed path. For SSRF establish destination provenance, caller control and filtering before asserting access to a chosen internal service. Evaluate intended current behavior, not a hypothetical future code change. A hardening guide is a declared baseline, not proof of effective deployment; infrastructure controls do not automatically repair a product control flaw. A directly cited unauthorized persistent write is itself a sensitive operation; downstream uses are needed only for additional claimed impacts. Do not require an inventory of other affected endpoints or proof that operators commonly choose a configuration to assess the stated conditional path. Keep those broader questions in remediation.validation. Reviewer questions must identify a specific deployment or intended-access decision and how each answer changes this path. Missing code and bindings are retrieval work for this investigation, not generic questions for the reviewer.
 For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
 export function validateThreatAssessment(value, packet) {
-  const {deploymentAssumptions,inputEvidence,sinkEvidence,...rest}=value || {};
+  const {deploymentAssumptions,inputEvidence,sinkEvidence,engineering,...rest}=value || {};
   const trace=Array.isArray(rest.trace)?[...rest.trace]:[];
   for(const [ref,role] of [[inputEvidence,'input'],[sinkEvidence,'sink']]) {
     if(ref===null)continue;
@@ -29,7 +30,11 @@ export function validateThreatAssessment(value, packet) {
   }
   rest.trace=trace;
   if(!Array.isArray(deploymentAssumptions) || deploymentAssumptions.length>8 || deploymentAssumptions.some(x=>typeof x!=='string'||!x.trim()||x.length>1600)) throw Error('Security assessment failed schema or evidence validation (deploymentAssumptions must contain at most eight bounded statements)');
-  return {...validateSecurityAssessment(rest,packet),deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
+  const assessed=validateSecurityAssessment(rest,packet);
+  const argument=validateEngineeringArgument(engineering,packet,rest.assessment);
+  if(argument.obligations.some(o=>o.status==='missing' || o.citations.some(c=>c.redacted))) assessed.assessment='needs-context';
+  assessed.missingEvidence=[...new Set([...assessed.missingEvidence,...argument.obligations.filter(o=>o.status==='missing').map(o=>o.reason)])];
+  return {...assessed,engineering:argument,decisionReviewRequired:assessed.assessment==='needs-context' && argument.obligations.every(o=>o.status==='established') && !assessed.evidenceGaps.length,deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
 }
 
 export { controlSymbols } from './control-context.mjs';
@@ -59,7 +64,8 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
-  const references = [...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...authContext.references, ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
+  const references = [...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -91,6 +97,10 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // Explicit code requests (including declaration windows) must precede
   // generic framework candidates and call neighbors under the byte limit.
   references.sort((a,b)=>Number(Boolean(b.required))-Number(Boolean(a.required)));
+  // Declaration defaults in the same files complete the conditions without a
+  // second model request; these remain candidate context, never proof of binding.
+  const declarations=[...new Map(references.filter(r=>r.required).map(r=>[r.repository+'\0'+r.path,{...r,line:1,required:false,basis:'source-declarations'}])).values()].slice(0,3);
+  references.splice(references.filter(r=>r.required).length,0,...bootstrapRefs,...declarations);
   let records=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
@@ -136,13 +146,13 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   for(const previous of [model.threatValidation,...(model.threatValidationHistory || []).slice().reverse()]) {
     for(const entry of previous?.entries || []) if(entry.issueHash===hashes.get(entry.sourceId) && !priorEntries.has(entry.sourceId) && (entry.followUp?.length || entry.missingEvidence?.length)) priorEntries.set(entry.sourceId,entry);
   }
-  if(model.threatValidation && model.threatValidation.contextKey !== threatValidationKey(model)) {
+  if(model.threatValidation && (model.threatValidation.contextKey !== threatValidationKey(model) || model.threatValidation.promptHash !== sha(THREAT_ASSESSMENT_PROMPT))) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
   const report = await reviewSecurityIssues(manifest, model, {
-    ...options, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
-    packetBuilder: (m, mf, root, issue, follow, context, missing, previous) => {
+    ...options, retainConclusiveOnPromptChange:true, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
+    packetBuilder: async (m, mf, root, issue, follow, context, missing, previous) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });
       const scoped = { ...context, analysisProfile:model.aiReview?.scope?.poc ? {statement:model.aiReview.scope.poc.profile,basis:'Explicit analysis assumption, not a verified deployment fact. Assess the code argument under this condition.'} : null, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
@@ -158,7 +168,15 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
         const initial=prior?.evidence?.find(r=>r.repository===ref.repository && r.path===ref.path && r.startLine===1);
         if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
       }
-      return threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8)],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      for(const ref of (prior?.engineering?.obligations || []).flatMap(o=>o.citations)) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
+      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8)],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      if(prior?.decisionReviewRequired) packet.decisionReview={
+        task:'Reconcile the previous code argument with its unresolved questions. It marked all four code obligations established but withheld the conclusion. Independently check the fresh code below. For each previous missing fact decide whether it changes this exact code path or is deployment context / broader follow-up. Return an honest supported conditional conclusion, a cited ruled-out path, or mark the exact code obligation missing. Do not change a status merely to satisfy this request. Narrow impact to the directly demonstrated operation; do not infer all downstream traffic, theft or exploitation from a configuration write. A reviewer answer establishes only that condition, not the full attack. Upstream authentication does not imply administrator authorization.',
+        previousConclusion:prior.engineering.conclusion,
+        questionsToResolve:prior.missingEvidence,
+      };
+      if(Buffer.byteLength(JSON.stringify(packet))>INVESTIGATION_LIMITS.packetBytes)throw Error('Security packet metadata exceeds size limit');
+      return packet;
     },
   });
   return report;

@@ -33,7 +33,7 @@ export async function threatFixture(t, extraFiles=[]) {
 function answer(packet, filename = 'PermissionFilter.cs') {
  const r=packet.records.find(r=>r.path===filename);assert.ok(r,'The named control in the twelfth repository must be retrieved');
  const ref={recordId:r.id,startLine:r.startLine,endLine:r.startLine,reason:'PermissionFilter checks authority on this fixture path'};
- return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({inputEvidence:null,sinkEvidence:null,deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
+ return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({engineering:{conclusion:'The cited permission control rejects the stated request.',obligations:['entry','sensitive-operation','path-binding','applicable-controls'].map(kind=>({kind,status:kind==='applicable-controls'?'blocks-attack':'established',reason:'Cited fixture behavior for '+kind,citations:[ref]})),reviewerQuestions:[]},inputEvidence:null,sinkEvidence:null,deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
 }
 test('saved SQLite graph finds named cross-repository controls, preserves STRIDE, and reuses validated results after restart',async t=>{
  const f=await threatFixture(t), before=JSON.stringify(f.model.aiReview);let calls=0;
@@ -124,7 +124,7 @@ test('deployment assumptions do not suppress a cited conditional code concern; m
  const r={id:'r',repository:'repo',path:'api.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'input'},{line:2,text:'sink'}]};
  const p={records:[r],availableFiles:[],gaps:[]};
  const raw=await answer({records:[{...r,path:'PermissionFilter.cs'}]}).json(),v=JSON.parse(raw.content[0].text);
- v.assessment='static-supported';v.trace=[{recordId:'r',startLine:1,endLine:1,role:'input',reason:'request'},{recordId:'r',startLine:2,endLine:2,role:'sink',reason:'operation'}];
+ v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');v.trace=[{recordId:'r',startLine:1,endLine:1,role:'input',reason:'request'},{recordId:'r',startLine:2,endLine:2,role:'sink',reason:'operation'}];
  v.deploymentAssumptions=['Endpoint is reachable in the selected deployment.'];
  assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
  assert.equal(validateThreatAssessment(v,p).deploymentStatus,'unverified-assumptions');
@@ -277,4 +277,62 @@ test('follow-up rechecks prior cited controls and cannot clear a path after that
  }});
  assert.equal(calls,2);
  assert.equal(f.model.threatValidation.entries[0].assessment,'needs-context',f.model.threatValidation.entries[0].error);
+});
+
+test('engineering obligations require exact evidence, preserve code gaps, and separate reviewer decisions',async()=>{
+ const {validateThreatAssessment}=await import('../src/threat-validation.mjs');
+ const r={id:'r',repository:'repo',path:'PermissionFilter.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'entry'},{line:2,text:'write'}]};
+ const p={records:[r],availableFiles:[],gaps:[]};
+ const data=await answer(p).json(),v=JSON.parse(data.content[0].text);
+ v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
+ v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'entry'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'write'};
+ v.engineering.reviewerQuestions=[{question:'Can a non-admin reach this entry?',ifYes:'Restrict this write to administrators.',ifNo:'This actor cannot use this path in that deployment.'}];
+ v.deploymentAssumptions=['Non-admin can reach the entry.'];
+ assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
+ const invalid=structuredClone(v);invalid.engineering.obligations[0].citations[0].recordId='invented';
+ assert.throws(()=>validateThreatAssessment(invalid,p),/engineering: citation/);
+ const uncited=structuredClone(v);uncited.engineering.obligations[1].citations=[];
+ assert.throws(()=>validateThreatAssessment(uncited,p),/requires source citations/);
+ const missing=structuredClone(v);missing.engineering.obligations[2]={kind:'path-binding',status:'missing',reason:'Caller to write binding missing',citations:[]};
+ const assessed=validateThreatAssessment(missing,p);
+ assert.equal(assessed.assessment,'needs-context');assert.ok(assessed.missingEvidence.includes('Caller to write binding missing'));
+ const opposed=structuredClone(v);opposed.engineering.obligations[3].status='blocks-attack';
+ assert.throws(()=>validateThreatAssessment(opposed,p),/blocking control contradicts/);
+ const redacted=structuredClone(p);redacted.records[0].lines[0].text='[sensitive assignment omitted]';
+ assert.equal(validateThreatAssessment(v,redacted).assessment,'needs-context');
+});
+
+test('a new engineering contract preserves settled paid conclusions and original discovery',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const before=JSON.stringify(f.model.aiReview),attempt=f.model.threatValidation.entries[0].attemptId;
+ f.model.threatValidation.key='previous-contract';f.model.threatValidation.promptHash='previous-prompt';
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ assert.equal(calls,1);assert.equal(f.model.threatValidation.entries[0].attemptId,attempt);
+ assert.equal(f.model.threatValidationHistory.at(-1).promptHash,'previous-prompt');
+ assert.equal(JSON.stringify(f.model.aiReview),before);
+});
+
+test('bootstrap evidence is retrieved before broad control candidates without rebuilding the graph',async t=>{
+ const f=await threatFixture(t,[['repo0/api.py','def change():\n    return store.write()\n'],['repo0/server.py','# imports\n'.repeat(140)+'def create_app():\n    app = FastAPI(dependencies=[Depends(require_admin)])\n    app.include_router(settings_router)\n    return app\n']]);
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const p=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'python',locations:[{repository:'repo0',path:'api.py',line:1}],controls:'',explanation:'Caller changes data'},[],{});
+ const startup=p.records.find(r=>r.path==='server.py');assert.ok(startup);
+ assert.ok(startup.lines.some(l=>l.text.includes('dependencies=[Depends(require_admin)]')));
+ assert.ok(p.retrieval.frameworkControlSearches.some(s=>s.symbol==='create_app'&&s.matches));
+});
+
+test('inconsistent settled-code assessment receives a bounded engineering decision review, not automatic promotion',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:2,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){v.assessment='needs-context';v.engineering.obligations.forEach(o=>o.status='established');v.missingEvidence=['Which network is used in production?'];v.followUp=[];}
+  else {assert.match(p.decisionReview.task,/Independently check/);assert.deepEqual(p.decisionReview.questionsToResolve,['Which network is used in production?']);}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.threatValidation.entries[0].history[0].assessment,'needs-context');
+ assert.equal(f.model.usageLedger.attempts.length,2);
 });

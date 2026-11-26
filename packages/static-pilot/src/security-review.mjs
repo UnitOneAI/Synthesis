@@ -313,6 +313,7 @@ export async function reviewSecurityIssues(
     systemPrompt = SECURITY_REVIEW_PROMPT,
     responseSchema = SECURITY_RESPONSE_SCHEMA,
     validateResponse = validateSecurityAssessment,
+    retainConclusiveOnPromptChange = false,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -355,7 +356,8 @@ export async function reviewSecurityIssues(
       : "prompt-json",
     staticOnly: true,
     status: "running",
-    entries: structuredClone(prior?.entries || []),
+    entries: structuredClone(prior?.entries || (retainConclusiveOnPromptChange && model[reportField]?.contextKey === contextKey
+      ? (model[reportField].entries || []).filter(e=>['static-supported','ruled-out'].includes(e.assessment)) : [])),
     events: structuredClone(prior?.events || []),
     droppedEvents: prior?.droppedEvents || 0,
     callsThisRun: 0,
@@ -435,7 +437,7 @@ export async function reviewSecurityIssues(
       if (
         old &&
         (old.rounds >= INVESTIGATION_LIMITS.contextRounds ||
-          (old.assessment === "needs-context" && !old.followUp?.length && !(followMissingControls && old.missingEvidence?.some(s => controlSymbols(s).length))))
+          (old.assessment === "needs-context" && !old.followUp?.length && !old.decisionReviewRequired && !(followMissingControls && old.missingEvidence?.some(s => controlSymbols(s).length))))
       )
         continue;
       const entry = {
@@ -581,7 +583,7 @@ export async function reviewSecurityIssues(
       if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         entry.assessment === "needs-context" &&
-        (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))) &&
+        (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))) &&
         entry.rounds < INVESTIGATION_LIMITS.contextRounds
       )
         queue.push(item);
