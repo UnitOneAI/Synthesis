@@ -476,6 +476,7 @@ export async function reviewSecurityIssues(
           old?.followUp || [],
           context,
           old?.missingEvidence || [],
+          old,
         );
         if (old?.error?.startsWith("Security assessment failed"))
           packet.previousValidationFailure = old.error;

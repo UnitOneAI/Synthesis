@@ -1,5 +1,7 @@
 # Windows: static system threat modeling
 
+For the 0.11.1 report and control-validation update, use the [short JCI update and saved-threat review instructions](jci-decision-review-windows.md). No graph rebuild or full STRIDE rerun is required to export the new layout.
+
 ## Selected repositories: smaller scope without an endpoint cutoff
 
 After updating, reuse the existing graph. In STRIDE, open **Choose repositories to review**, select the repositories to assess, and save the scope. Leave other loaded clones available as supporting evidence. Enable source context, preview the scope, then run **Selected repositories** with up to four workers and **Run until complete**. Repository mode covers extracted internal definitions and interfaces as well as external routes; it has no operation-POC packet cutoff. The six-category table separates cited conclusions, evidence gaps, pending work and failures. See the [scope contract and full UI procedure](../selected-repository-review.md).

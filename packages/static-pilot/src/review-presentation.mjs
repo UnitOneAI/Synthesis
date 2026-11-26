@@ -1,4 +1,5 @@
 import {citationCoversEvidence} from './source-citation.mjs';
+import {threatOutcome, investigationAction} from './threat-outcome.mjs';
 import {repositoryAssessmentSummary} from './repository-assessment-summary.mjs';
 import {actorAccess, threatAccess} from './threat-access.mjs';
 import { threatAssessment } from './threat-validation-state.mjs';
@@ -164,6 +165,8 @@ export function addReviewPresentation(s, model) {
       : t.analysisQuality?.status === "incomplete"
         ? "Limited analysis context"
         : "Source-referenced scenario; exploitability unverified";
+    t.outcome = threatOutcome(t);
+    t.investigationAction = investigationAction(t);
   }
   const review = model.aiReview,
     coverage = review?.coverage;

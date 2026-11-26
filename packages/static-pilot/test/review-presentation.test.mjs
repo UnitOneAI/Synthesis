@@ -183,3 +183,17 @@ test('actor rationale separates capability assumptions from cited entry evidence
   assert.equal(t.reviewState,'pending');
   assert.equal(s.actors[0].access.kind,'unresolved');
 });
+
+test('category support cannot promote an unassessed scenario into an individual finding', async () => {
+  const {threatOutcome} = await import('../src/threat-outcome.mjs');
+  const t={reviewState:'pending',categoryAssessment:{status:'supported-conditional'},validation:{assessment:'not-assessed'}};
+  assert.equal(threatOutcome(t).kind,'investigation');
+  t.validation={assessment:'static-supported'};
+  assert.equal(threatOutcome(t).kind,'supported');
+  t.reviewState='stale';
+  assert.equal(threatOutcome(t).kind,'historical');
+  t.reviewState='pending';t.validation={assessment:'ruled-out'};
+  assert.equal(threatOutcome(t).kind,'ruled-out');
+  t.sourceConclusion={status:'open'};t.validation={assessment:'static-supported'};
+  assert.equal(threatOutcome(t).kind,'investigation','An explicit open binding is not a supported conditional threat');
+});

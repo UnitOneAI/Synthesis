@@ -8,7 +8,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-5';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-6';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 export const THREAT_ASSESSMENT_SCHEMA = {
@@ -17,6 +17,7 @@ export const THREAT_ASSESSMENT_SCHEMA = {
   required:[...SECURITY_RESPONSE_SCHEMA.required,'deploymentAssumptions','inputEvidence','sinkEvidence'],
 };
 export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + `
+Challenge the original claim before extending it. A name/path search miss is not evidence of an absent control. In standard ASP.NET Core, an unresolved named authorization policy throws; do not assert fail-open or fallback-policy bypass without evidence of a custom path and its behavior. Resolve controller/base attributes, global filters, policy registration, requirement handlers and middleware ordering from supplied code. Distinguish custom behavior and framework version from assumptions. Do not invent a tenant isolation requirement: identify the actual role/object ownership rule and its enforcement. Echoing a caller's own headers does not establish theft of another user's credentials; cite the additional trust crossing or rule out that claimed path. For SSRF establish destination provenance, caller control and filtering before asserting access to a chosen internal service. Evaluate intended current behavior, not a hypothetical future code change. A hardening guide is a declared baseline, not proof of effective deployment; infrastructure controls do not automatically repair a product control flaw. A directly cited unauthorized persistent write is itself a sensitive operation; downstream uses are needed only for additional claimed impacts. Do not require an inventory of other affected endpoints or proof that operators commonly choose a configuration to assess the stated conditional path. Keep those broader questions in remediation.validation. Reviewer questions must identify a specific deployment or intended-access decision and how each answer changes this path. Missing code and bindings are retrieval work for this investigation, not generic questions for the reviewer.
 For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
 export function validateThreatAssessment(value, packet) {
   const {deploymentAssumptions,inputEvidence,sinkEvidence,...rest}=value || {};
@@ -141,11 +142,23 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
   const report = await reviewSecurityIssues(manifest, model, {
     ...options, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
-    packetBuilder: (m, mf, root, issue, follow, context, missing) => {
+    packetBuilder: (m, mf, root, issue, follow, context, missing, previous) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });
       const scoped = { ...context, analysisProfile:model.aiReview?.scope?.poc ? {statement:model.aiReview.scope.poc.profile,basis:'Explicit analysis assumption, not a verified deployment fact. Assess the code argument under this condition.'} : null, actors: system.actors.filter(a => projected.actorIds.includes(a.id)).slice(0,8).map(compact), boundaries: system.boundaries.filter(b => projected.boundaryIds.includes(b.id)).slice(0,12).map(compact), flows: system.flows.filter(f => [...projected.flowIds, ...(projected.candidateFlowIds || [])].includes(f.id)).slice(0, 12).map(compact) };
-      return threatInvestigationPacket(m,mf,root,issue,follow?.length?follow:priorEntries.get(issue.id)?.followUp || [],scoped,missing?.length?missing:priorEntries.get(issue.id)?.missingEvidence || [],sharedSource);
+      // Follow-up must extend the argument, not forget the control established
+      // in the preceding round. Re-read cited anchors with their recorded hashes;
+      // never treat a previous model conclusion as fresh source evidence.
+      const prior=previous || priorEntries.get(issue.id);
+      const anchors=[];
+      for(const role of ['control','input','sink']) for(const ref of (prior?.trace || []).filter(r=>r.role===role).slice(0,2)) {
+        if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.line)) anchors.push({...ref,line:ref.line || ref.startLine});
+      }
+      for(const ref of anchors.slice()) {
+        const initial=prior?.evidence?.find(r=>r.repository===ref.repository && r.path===ref.path && r.startLine===1);
+        if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
+      }
+      return threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8)],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
     },
   });
   return report;

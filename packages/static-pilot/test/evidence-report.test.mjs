@@ -299,19 +299,13 @@ test("shareable STRIDE report gates findings on current results and explains sou
   });
   const html = systemPrintReport(f.model);
   assert.match(html, /1 current returned threat scenarios/);
-  assert.match(html, /What needs attention/);
+  assert.match(html, /Complete scenario disposition register/);
   assert.match(html, /Review order and coverage/);
   assert.match(html, /Potential external entry points/);
-  assert.match(
-    html,
-    /<strong>Access and prerequisites:<\/strong> Network intermediary/,
-  );
-  assert.match(
-    html,
-    /<strong>Supporting source:<\/strong> service \/ app.py:3/,
-  );
-  assert.match(html, /Enable certificate verification/);
-  assert.match(html, /awaiting reviewer confirmation/);
+  assert.match(html, /service \/ app.py:3/);
+  assert.match(html, /No current individually supported threats/);
+  assert.match(html, /Investigation required/);
+  assert.doesNotMatch(html, /<article id=/, 'A returned hypothesis must not become a finding narrative');
   assert.doesNotMatch(
     html,
     /Record ID:|<td>Analysis Quality<\/td>|<td>Assumptions<\/td>/,
@@ -389,4 +383,24 @@ test('threat print explains code, declared configuration and unverified runtime 
   assert.match(html,/environment-variable reads and defaults/);
   assert.match(html,/Not analyzed\. No target code, requests, exploit attempts or live-system probes/);
   assert.match(html,/model gateway are not evidence of the target deployment/);
+});
+
+test('decision report preserves every ID, separates supported paths and binds usage to the STRIDE action', async t=>{
+  const {threatValidationKey,threatIssue}=await import('../src/threat-validation-state.mjs');
+  const f=await reportFixture();cleanupAfter(t,()=>fs.rm(f.dir,{recursive:true,force:true}));
+  const iface=f.model.interfaces.find(i=>i.kind!=='architecture');
+  const threats=['supported-path','unchecked-path','opposed-path'].map((id,n)=>({id,title:['Supported path','Unassessed claim','Countered path'][n],category:'Tampering',actor:'External caller',startingAccess:'Request access',scenario:'Caller changes data',prerequisites:'Caller controls request',controls:'Control must be inspected',mitigation:'Apply validated control',interfaceIds:[iface.id],evidenceIds:iface.evidence}));
+  f.model.aiReview={status:'partial',basedOnRevision:f.model.modelRevision,runId:'stride-action',threats,connections:[],questions:[],batches:[],coverage:{completedBatches:12,totalBatches:3756,pendingBatches:3744,failedBatches:0}};
+  f.model.threatValidation={contextKey:threatValidationKey(f.model),entries:[threats[0],threats[2]].map((threat,n)=>({sourceId:threat.id,issueHash:sha(JSON.stringify(threatIssue(f.model,threat))),assessment:n?'ruled-out':'static-supported',counterEvidence:'The cited control was evaluated',deploymentAssumptions:['Selected profile permits access'],trace:[],remediation:{codeFix:'Apply the source-specific fix'}}))};
+  f.model.usageLedger={lastRunId:'later-cwe',attempts:[{runId:'stride-action',repositories:['service'],usage:{totalTokens:120}},{runId:'later-cwe',repositories:['service'],usage:{totalTokens:9999}}]};
+  const saved=()=>JSON.stringify([f.model.aiReview,f.model.threatValidation,f.model.usageLedger,f.model.sourceGraph,f.model.modelRevision]);
+  const before=saved();
+  const html=systemPrintReport(f.model),priority=html.split('<h2>Priority threats</h2>')[1].split('<h2>Complete scenario')[0];
+  assert.match(priority,/Supported path/);assert.doesNotMatch(priority,/Unassessed claim|Countered path/);
+  assert.match(html,/Ruled out for the cited path/);assert.match(html,/Unassessed claim/);
+  assert.match(html,/12 \/ 3756 STRIDE packets completed/);
+  assert.match(html,/1 requests; 120 reported tokens/);
+  assert.match(html,/stride-action/);assert.match(html,/Analysis task A-01/);
+  for(const category of ['Spoofing','Tampering','Repudiation','Information Disclosure','Denial of Service','Elevation of Privilege'])assert.ok(html.includes(category));
+  assert.equal(saved(),before,'Export must not mutate paid results or their provenance');
 });

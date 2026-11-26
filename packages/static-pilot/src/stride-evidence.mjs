@@ -104,12 +104,15 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         line,
       });
       if (records.some((r) => r.id === w.id)) continue;
-      records.push(w);
+      // code already contains numbered lines. Sending the identical text again
+      // as structured lines wastes context and can evict applicable controls.
+      const {lines, ...transmitted} = w;
+      records.push(transmitted);
       if (
         Buffer.byteLength(JSON.stringify(packet)) >
         REVIEW_LIMITS.packetBytes - 8000
       ) {
-        records.splice(records.indexOf(w), 1);
+        records.pop();
         throw Error("source-context-byte-limit");
       }
     } catch (error) {

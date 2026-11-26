@@ -41,7 +41,7 @@ test('saved SQLite graph finds named cross-repository controls, preserves STRIDE
  await run(f.model);assert.equal(calls,12);assert.equal(JSON.stringify(f.model.aiReview),before);
  assert.equal(f.model.threatValidation.entries.length,12);assert.ok(f.model.threatValidation.entries.every(e=>e.assessment==='ruled-out'));
  const s=systemModel(f.model);assert.ok(s.threats.filter(t=>t.origin==='analysis').every(t=>t.validation.assessment==='ruled-out' && t.actorIds.length && t.boundaryIds.length));
- assert.ok(s.boundaries.every(b=>b.reviewState!=='accepted'));assert.match(systemPrintReport(f.model),/Counterevidence found/);
+ assert.ok(s.boundaries.every(b=>b.reviewState!=='accepted'));assert.match(systemPrintReport(f.model),/Ruled out for the cited path/);
  const store=await workspaceStore(f.root,path.join(f.dir,'state'));await store.save({model:f.model,manifest:f.manifest});const restored=(await store.load()).model;await store.close();attachGraph(restored.sourceGraph,f.graph);
  await run(restored);assert.equal(calls,12);
  assert.equal(threatAssessment(f.model,'saved-threat-0').assessment,'ruled-out');
@@ -241,4 +241,40 @@ test('named control retrieval prioritizes production implementations before matc
  assert.ok(search.requested);
  const first=f.graph.node(f.model.sourceGraph.generation,search.nodeIds[0]);
  assert.equal(first.repository,'repo11');
+});
+
+test('control lookup follows interface implementation and a registered requirement across the saved graph',async t=>{
+ const {controlContext}=await import('../src/control-context.mjs');
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');
+ const f=await threatFixture(t,[
+   ['repo0/Startup.cs','class Startup { public void ConfigureServices() { options.AddPolicy("CanWrite", p => p.AddRequirements(new OwnershipRequirement())); } }'],
+   ['repo11/SolutionAccessService.cs','class SolutionAccessService { public bool CanWrite() { return principal.IsAdmin; } }'],
+   ['repo10/OwnershipRequirement.cs','class OwnershipRequirement { public bool Check() { return false; } }'],
+ ]);
+ const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const lookup=await controlContext(source,[{repository:'repo0',path:'Api.cs',line:1}],'[Authorize(Policy = "CanWrite")] ISolutionAccessService');
+ assert.ok(lookup.references.some(r=>r.path==='SolutionAccessService.cs'));
+ assert.ok(lookup.references.some(r=>r.path==='OwnershipRequirement.cs'));
+ assert.ok(lookup.searches.some(s=>s.symbol==='OwnershipRequirement' && s.matches));
+ assert.ok(lookup.searches.filter(s=>s.matches===0).every(s=>/do not establish absence/.test(s.interpretation)));
+ assert.ok(lookup.references.length<=12);
+});
+
+test('follow-up rechecks prior cited controls and cannot clear a path after that control changes',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:2,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  if(calls===1){
+   const data=await answer(p).json(),v=JSON.parse(data.content[0].text);
+   v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];
+   v.followUp=[];
+   data.content[0].text=JSON.stringify(v);
+   await fs.writeFile(path.join(f.root,'repo11','PermissionFilter.cs'),'class PermissionFilter { public void Check() {} }');
+   return Response.json(data);
+  }
+  assert.ok(p.gaps.some(g=>g.path==='PermissionFilter.cs'),'A changed previously cited control must be a required evidence gap');
+  return answer(p,'SecondGuard.cs');
+ }});
+ assert.equal(calls,2);
+ assert.equal(f.model.threatValidation.entries[0].assessment,'needs-context',f.model.threatValidation.entries[0].error);
 });
