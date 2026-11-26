@@ -160,8 +160,8 @@ test("partial STRIDE PDFs show results context; stale exports omit findings and 
     "Trust boundaries",
     "Overall system DFD",
     "STRIDE matrix",
-    "latest available review checkpoint",
-    "Exporting does not stop or restart analysis",
+    "Saved review checkpoint",
+    "in-flight requests are not included",
   ])
     assert.ok(html.includes(text), text);
   f.model.aiReview.status = "stale";
