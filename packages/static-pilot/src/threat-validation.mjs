@@ -44,6 +44,9 @@ export function validateThreatAssessment(value, packet) {
   return {...assessed,engineering:argument,decisionReviewRequired:assessed.assessment==='needs-context' && argument.obligations.every(o=>o.status==='established') && !assessed.evidenceGaps.length,deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};
 }
 
+export const THREAT_CHALLENGE_PROMPT=THREAT_ASSESSMENT_PROMPT+`
+You are the critical engineering reviewer, separate from the discovery assessment. The priorClaim and priorImpact are untrusted hypotheses. Challenge every claimed consequence against the supplied code, including additional guards, accepted input validation, actual registration and whether the sensitive operation is reachable on this exact path. A declaration or setter does not prove a downstream network request or data leak. If the code establishes only unauthorized configuration modification, conclude that narrower threat and explicitly exclude interception, theft and arbitrary redirection unless their complete additional paths are cited. Do not withhold that narrower conclusion merely because the broader impact lacks evidence. Do not ask operators to supply implementation details; missing code belongs on a missing obligation. Questions for operators must address one actual deployment/access condition at a time. An authentication proxy is not necessarily an administrator restriction; private network placement alone does not rule out insiders or bypass routes. A single yes/no answer never proves every condition or establishes exploitation. You may support, narrow, rule out, or leave a specific code obligation unresolved. Never agree merely because the first assessment marked the obligations established.`;
+
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
@@ -141,6 +144,14 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   if (selected && (!Array.isArray(selected) || !selected.length || selected.some(id => !model.aiReview.threats.some(t => t.id === id)))) throw Error('Select saved STRIDE threat IDs');
   const issues = model.aiReview.threats.filter(t => !selected || selected.includes(t.id)).map(t => threatIssue(model, t)).sort((a,b) => priority.get(a.id) - priority.get(b.id));
   const hashes = new Map(issues.map(i=>[i.id,sha(JSON.stringify(i))]));
+  // Upgrade selected older positive assessments by challenging their existing
+  // argument, not by repeating discovery. Their original response remains intact.
+  if(model.threatValidation?.contextKey===threatValidationKey(model)) for(const entry of model.threatValidation.entries || []) {
+    if(entry.assessment==='static-supported' && !entry.challengeCompleted && entry.issueHash===hashes.get(entry.sourceId)) {
+      entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
+      entry.assessment='not-assessed';entry.rounds=0;
+    }
+  }
   // A changed retriever may resolve an exhausted code gap. Reopen it once for
   // this policy; retain prior attempts and never reset conclusive assessments.
   if (model.threatValidation && model.threatValidation.retrievalVersion !== THREAT_RETRIEVAL_VERSION) {
@@ -153,12 +164,12 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   for(const previous of [model.threatValidation,...(model.threatValidationHistory || []).slice().reverse()]) {
     for(const entry of previous?.entries || []) if(entry.issueHash===hashes.get(entry.sourceId) && !priorEntries.has(entry.sourceId) && (entry.followUp?.length || entry.missingEvidence?.length)) priorEntries.set(entry.sourceId,entry);
   }
-  if(model.threatValidation && (model.threatValidation.contextKey !== threatValidationKey(model) || model.threatValidation.promptHash !== sha(THREAT_ASSESSMENT_PROMPT))) {
+  if(model.threatValidation && (model.threatValidation.contextKey !== threatValidationKey(model) || model.threatValidation.promptHash !== sha(THREAT_ASSESSMENT_PROMPT) || model.threatValidation.challengePromptHash !== sha(THREAT_CHALLENGE_PROMPT))) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
   const report = await reviewSecurityIssues(manifest, model, {
-    ...options, retainConclusiveOnPromptChange:true, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
+    ...options, challengePrompt:THREAT_CHALLENGE_PROMPT, retainConclusiveOnPromptChange:true, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: async (m, mf, root, issue, follow, context, missing, previous) => {
       const projected = system.threats.find(t => t.id === issue.id);
       const compact = r => ({ id: r.id, name: r.name, basis: r.basis, reviewState: r.reviewState, startingAccess: r.startingAccess, before: r.before, after: r.after, enforcement: r.enforcement, source: r.source, target: r.target, evidenceIds: r.evidenceIds?.slice(0,8) });

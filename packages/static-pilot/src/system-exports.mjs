@@ -559,7 +559,7 @@ export function systemPrintReport(model, options = {}) {
       ? detailed
           .map((t) => {
             const paragraphs = [
-              ['Review basis',t.sourceConclusion ? `Engineering review by ${t.sourceConclusion.reviewer}. Automated assessment remains ${t.validation.assessment}; this decision does not change automated coverage.` : 'Independent static source assessment; no runtime validation.'],
+              ['Review basis',t.sourceConclusion ? `Engineering review by ${t.sourceConclusion.reviewer}. Automated assessment remains ${t.validation.assessment}; this decision does not change automated coverage.` : t.validation?.challengeCompleted ? 'Static engineering review and separate critical check; no runtime validation.' : 'Independent static source assessment; no runtime validation.'],
               ['Who can act and why',t.validation?.engineering ? `${t.validation.actor}. Required access: ${t.validation.initialAccess}` : names(t.actorIds,'Actor not established')],
               ['Condition',t.sourceConclusion?.condition || (t.validation?.deploymentAssumptions || []).join('; ') || t.prerequisites],
               ['Code evidence',t.sourceConclusion

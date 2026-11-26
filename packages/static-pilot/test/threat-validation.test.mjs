@@ -351,3 +351,45 @@ test('STRIDE wire contract has one typed code-completeness decision, separate fr
  const incomplete=validateThreatAssessment(v,p);
  assert.equal(incomplete.assessment,'needs-context');assert.deepEqual(incomplete.missingEvidence,[v.engineering.obligations[2].reason]);
 });
+
+test('positive engineering claims stay unpublished until a metered critical check, and resume without rediscovery',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){
+   v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
+   v.inputEvidence=v.controls[0];v.sinkEvidence=v.controls[0];
+  }else {assert.ok(p.decisionChallenge);assert.match(JSON.parse(request.body).system,/critical engineering reviewer/);}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }};
+ const discovery=JSON.stringify(f.model.aiReview);
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const draft=f.model.threatValidation.entries[0];
+ assert.equal(draft.assessment,'not-assessed');assert.equal(draft.challengePending,true);
+ assert.equal(draft.draftAssessment.assessment,'static-supported');
+ assert.equal(systemModel(f.model).threats.find(t=>t.id==='saved-threat-0').outcome.kind,'investigation');
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.threatValidation.entries[0].challengeCompleted,true);
+ assert.equal(JSON.stringify(f.model.aiReview),discovery);
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
+});
+
+test('a positive result on the last evidence round still receives its bounded critical check',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];}
+  if(calls===2){v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');v.inputEvidence=v.controls[0];v.sinkEvidence=v.controls[0];}
+  if(calls===3)assert.ok(p.decisionChallenge);
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ f.model.threatValidation.entries[0].rounds=2;
+ await reviewThreatScenarios(f.manifest,f.model,{...options,budget:2});
+ assert.equal(calls,3);assert.equal(f.model.threatValidation.entries[0].rounds,4);
+ assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.threatValidation.entries[0].challengeCompleted,true);
+});
