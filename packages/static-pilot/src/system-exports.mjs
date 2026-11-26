@@ -694,7 +694,7 @@ export function systemPrintReport(model, options = {}) {
     ['STRIDE action',review?.runId || 'Run identifier not recorded in this saved review'],
     ['Source revision',review?.basedOnRevision || model.modelRevision || 'Not recorded'],
     ['Graph fingerprint',model.sourceGraph?.fingerprint || 'Not recorded'],
-    ['Primary scope',poc?.repositories?.join(', ') || review?.scope?.repositories?.join(', ') || 'See saved scope and collection inventory below'],
+    ['Primary scope',(poc?.repositories || review?.scope?.repositories || []).map(r=>typeof r === 'string' ? r : r.repository || r.name || 'Unnamed repository').join(', ') || 'See saved scope and collection inventory below'],
     ['Latest STRIDE action usage',attempts.length ? `${attempts.length} requests; ${actionTokens.toLocaleString('en-US')} reported tokens; ${attempts.filter(a=>a.usage?.totalTokens==null).length} requests with unknown usage` : 'Usage cannot be attributed to this STRIDE action from the saved record'],
     ['Interpretation','A completed packet is a returned assessment, not necessarily a conclusive threat decision. Workspace token history below includes earlier actions.'],
   ])}`;
