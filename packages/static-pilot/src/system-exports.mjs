@@ -620,7 +620,7 @@ export function systemPrintReport(model, options = {}) {
               ['Automation still requested',t.sourceConclusion && t.validation.assessment==='needs-context' ? (t.validation.missingEvidence || []).join('; ') : null],
               ['Remediation owner',t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
             ];
-            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.scenario)}</p>${paragraphs
+            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · Reviewer decision: ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.scenario)}</p>${paragraphs
               .filter(([, v]) => v)
               .map(
                 ([label, value]) =>
