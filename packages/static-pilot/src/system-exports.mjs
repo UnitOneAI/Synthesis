@@ -546,7 +546,7 @@ export function systemPrintReport(model, options = {}) {
     ${review?.lastRunFailure ? `<p>Latest attempt failure: ${e(review.lastRunFailure.code)}. ${e(review.lastRunFailure.action)}</p>` : ""}</section>`;
   const stageCoverage = hasResults && review?.reviewOrder?.stages
     ? `<h2>Review order and coverage</h2><p>External interfaces are reviewed first, followed by their internal paths and remaining internal scope. Unknown exposure is not a declaration of internet reachability. Counts are review packets, not approved actors or boundaries.</p>${table(["Stage", "Completed / planned", "Failed", "Pending"], review.reviewOrder.stages.map((stage) => [stage.label, `${stage.completed} / ${stage.total}`, stage.failed, stage.pending]))}` : "";
-  const conclusions = current.filter(t => t.sourceConclusion && matchesAccess(t, filter.scope, filter.includeUnresolved)).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
+  const conclusions = current.filter(t => t.sourceConclusion?.status === 'open' && matchesAccess(t, filter.scope, filter.includeUnresolved)).sort((a,b) => a.reviewPriority.rank - b.reviewPriority.rank);
   const categoryCounts = hasResults ? `<h3>Returned scenarios by STRIDE category</h3>
     ${table(CATEGORIES, [CATEGORIES.map(category => scenarios.filter(t => t.categories.includes(category)).length)])}
     <p>Each count includes current source-referenced scenarios assigned to that category. Scenarios can overlap. A zero means no scenario returned in the reviewed scope.</p>` : "";
@@ -555,7 +555,7 @@ export function systemPrintReport(model, options = {}) {
     return `<article><h3>${e(t.reference)} · ${c.status === "open" ? "Open question" : "Conditional threat"}</h3><p>${e(c.statement)}</p><p><b>Condition or missing link</b> · ${e(c.condition)}</p><p><b>Next action</b> · ${e(c.nextAction)}</p><p>Reviewed by ${e(c.reviewer)} · Automated assessment: ${e(t.validation.assessment)}</p><ul>${c.citations.map(r => `<li>${e(r.repository)} / ${e(r.path)}:${e(r.startLine)}–${e(r.endLine)}</li>`).join("")}</ul></article>`;
   }).join("")}` : "";
   const summary = hasResults
-    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Only current individual source assessments or evidence-linked reviewer conclusions appear here. Category-level conclusions alone do not validate each returned scenario. Deployment conditions remain explicit.</p>${supported.length ? supported.map(t => `<article><h3>${e(t.reference)} · ${e(t.name)}</h3><p><strong>Supported conditional threat</strong></p><p>${e(t.sourceConclusion?.statement || t.validation?.rationale || t.analysis?.impact || t.asset)}</p><p><strong>Actor and required access:</strong> ${e(names(t.actorIds, 'Not established'))}. ${e(t.prerequisites)}</p><p><strong>Control assessment:</strong> ${e(t.validation?.counterEvidence || t.controls || 'See cited assessment')}</p><p><strong>Deployment condition:</strong> ${e(t.sourceConclusion?.condition || t.validation?.deploymentAssumptions?.join('; ') || 'Not recorded; deployment has not been assessed')}</p><p><strong>Action:</strong> ${e(t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation)}</p></article>`).join('') : '<p>No current individually supported threats. The review has produced analysis leads, not an established remediation list.</p>'}${stageCoverage}<h2>Complete scenario disposition register</h2><p>Every returned scenario is retained below. IDs track the original review; they are not vulnerability counts. Investigation tasks are analysis work for Synthesis, not requests for a reviewer to find source code.</p>${table(
+    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Only current individual source assessments or evidence-linked reviewer conclusions appear here. Category-level conclusions alone do not validate each returned scenario. Deployment conditions remain explicit.</p>${supported.length ? table(['Threat','Decision basis','Remediation'],supported.map(t=>[`${t.reference} — ${t.name}`,t.sourceConclusion ? 'Evidence-linked engineering conclusion; automated assessment: '+t.validation.assessment : 'Independent static source assessment',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation])) : '<p>No current individually supported threats. The review has produced analysis leads, not an established remediation list.</p>'}${stageCoverage}<h2>Complete scenario disposition register</h2><p>Every returned scenario is retained below. IDs track the original review; they are not vulnerability counts. Investigation tasks are analysis work for Synthesis, not requests for a reviewer to find source code.</p>${table(
     ['Reference / scenario','Outcome','Evidence and next action'], scenarios.map(t=>[
       `${t.reference} — ${t.name}`,
       `${t.outcome?.label || 'Investigation required'}${t.decision && !t.decision.stale ? '; reviewer decision: '+t.reviewState : ''}`,
@@ -608,6 +608,10 @@ export function systemPrintReport(model, options = {}) {
       ? detailed
           .map((t) => {
             const paragraphs = [
+              ["Engineering reviewer", t.sourceConclusion?.reviewer],
+              ["Engineering condition", t.sourceConclusion?.condition],
+              ["Engineering next action", t.sourceConclusion?.nextAction],
+              ["Engineering source citations", t.sourceConclusion?.citations.map(r=>`${r.repository} / ${r.path}:${r.startLine}–${r.endLine}`).join('; ')],
               ["Category source assessment", t.categoryAssessment ? t.categoryAssessment.status + ': ' + t.categoryAssessment.rationale : null],
               ["Category evidence", t.categoryAssessment?.citations.map(c=>`${c.role}: ${c.repository} / ${c.path}:${c.line}–${c.endLine}`).join('; ')],
               ["Category evidence gaps", t.categoryAssessment?.missingEvidence.join('; ')],
@@ -663,7 +667,7 @@ export function systemPrintReport(model, options = {}) {
                   : "Awaiting reviewer assessment",
               ],
             ];
-            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.scenario)}</p>${paragraphs
+            return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.scenario)}</p>${paragraphs
               .filter(([, v]) => v)
               .map(
                 ([label, value]) =>
