@@ -564,7 +564,7 @@ export function systemPrintReport(model, options = {}) {
               ['Condition',t.sourceConclusion?.condition || (t.validation?.deploymentAssumptions || []).join('; ') || t.prerequisites],
               ['Code evidence',t.sourceConclusion
                 ? t.sourceConclusion.citations.map(r=>`${r.repository} / ${r.path}:${r.startLine}–${r.endLine}`).join('; ')
-                : t.validation?.trace?.map(r=>`${r.role}: ${r.repository} / ${r.path}:${r.line}–${r.endLine} — ${r.reason}`).join('; ')],
+                : t.validation?.engineering ? null : t.validation?.trace?.map(r=>`${r.role}: ${r.repository} / ${r.path}:${r.line}–${r.endLine} — ${r.reason}`).join('; ')],
               ['Why existing controls do not resolve this path',t.validation?.counterEvidence || t.controls],
               ['Direct impact',t.validation?.engineering ? t.validation.impact : null],
               ['Required action',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation],
@@ -578,7 +578,7 @@ export function systemPrintReport(model, options = {}) {
                 ([label, value]) =>
                   `<p><strong>${label}:</strong> ${e(value)}</p>`,
               )
-              .join("")}${t.validation?.engineering ? `<h4>Evidence supporting the decision</h4>${table(['Check','What the code shows','Source'],t.validation.engineering.obligations.map(o=>[({'entry':'Entry point','sensitive-operation':'Sensitive operation','path-binding':'Connected code path','applicable-controls':'Controls on this path'})[o.kind],o.reason,o.citations.map(c=>`${c.repository} / ${c.path}:${c.startLine}–${c.endLine}`).join('; ')]))}${t.validation.engineering.reviewerQuestions.length ? `<h4>Decisions for the deployment reviewer</h4>${t.validation.engineering.reviewerQuestions.map(q=>`<p><strong>${e(q.question)}</strong><br>Yes: ${e(q.ifYes)}<br>No: ${e(q.ifNo)}</p>`).join('')}` : ''}` : ''}</article>`;
+              .join("")}${t.validation?.engineering ? `<h4>Evidence supporting the decision</h4>${table(['Check','What the code shows','Source'],t.validation.engineering.obligations.map(o=>[({'entry':'Entry point','sensitive-operation':'Sensitive operation','path-binding':'Connected code path','applicable-controls':'Controls on this path'})[o.kind],o.reason,o.citations.map(c=>`${c.repository} / ${c.path}:${c.startLine}–${c.endLine}`).join('; ')]))}${t.validation.engineering.reviewerQuestions.length ? `<h4>Decisions for the deployment reviewer</h4><p>Each answer resolves only the condition asked. All conditions for the stated attack must hold together. Record the deployment and rationale with the review decision; answers are reviewer statements, not runtime verification.</p>${t.validation.engineering.reviewerQuestions.map(q=>`<p><strong>${e(q.question)}</strong><br>Yes: ${e(q.ifYes)}<br>No: ${e(q.ifNo)}</p>`).join('')}` : ''}` : ''}</article>`;
           })
           .join("")
       : "<p>No individually supported threat details to publish. Inspect the disposition register and remaining review coverage.</p>"

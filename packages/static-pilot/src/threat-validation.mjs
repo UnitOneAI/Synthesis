@@ -12,16 +12,20 @@ import { threatIssue, threatValidationKey } from './threat-validation-state.mjs'
 export const THREAT_RETRIEVAL_VERSION = 'control-context-7';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
+// CWE's generic missingEvidence bucket mixes deployment questions with code
+// blockers. STRIDE uses the four typed code obligations instead. The wire
+// contract has no second, contradictory completeness checklist.
+const {missingEvidence: _genericMissingEvidence, ...threatProperties}=SECURITY_RESPONSE_SCHEMA.properties;
 export const THREAT_ASSESSMENT_SCHEMA = {
   ...SECURITY_RESPONSE_SCHEMA,
-  properties: {...SECURITY_RESPONSE_SCHEMA.properties, engineering:ENGINEERING_SCHEMA, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
-  required:[...SECURITY_RESPONSE_SCHEMA.required,'engineering','deploymentAssumptions','inputEvidence','sinkEvidence'],
+  properties: {...threatProperties, engineering:ENGINEERING_SCHEMA, inputEvidence:pathEvidence, sinkEvidence:pathEvidence, deploymentAssumptions:{type:'array',items:{type:'string'}}},
+  required:[...SECURITY_RESPONSE_SCHEMA.required.filter(k=>k!=='missingEvidence'),'engineering','deploymentAssumptions','inputEvidence','sinkEvidence'],
 };
 export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + ENGINEERING_PROMPT + `
 Challenge the original claim before extending it. A name/path search miss is not evidence of an absent control. In standard ASP.NET Core, an unresolved named authorization policy throws; do not assert fail-open or fallback-policy bypass without evidence of a custom path and its behavior. Resolve controller/base attributes, global filters, policy registration, requirement handlers and middleware ordering from supplied code. Distinguish custom behavior and framework version from assumptions. Do not invent a tenant isolation requirement: identify the actual role/object ownership rule and its enforcement. Echoing a caller's own headers does not establish theft of another user's credentials; cite the additional trust crossing or rule out that claimed path. For SSRF establish destination provenance, caller control and filtering before asserting access to a chosen internal service. Evaluate intended current behavior, not a hypothetical future code change. A hardening guide is a declared baseline, not proof of effective deployment; infrastructure controls do not automatically repair a product control flaw. A directly cited unauthorized persistent write is itself a sensitive operation; downstream uses are needed only for additional claimed impacts. Do not require an inventory of other affected endpoints or proof that operators commonly choose a configuration to assess the stated conditional path. Keep those broader questions in remediation.validation. Reviewer questions must identify a specific deployment or intended-access decision and how each answer changes this path. Missing code and bindings are retrieval work for this investigation, not generic questions for the reviewer.
 For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
 export function validateThreatAssessment(value, packet) {
-  const {deploymentAssumptions,inputEvidence,sinkEvidence,engineering,...rest}=value || {};
+  const {deploymentAssumptions,inputEvidence,sinkEvidence,engineering,missingEvidence,...rest}=value || {};
   const trace=Array.isArray(rest.trace)?[...rest.trace]:[];
   for(const [ref,role] of [[inputEvidence,'input'],[sinkEvidence,'sink']]) {
     if(ref===null)continue;
@@ -30,8 +34,11 @@ export function validateThreatAssessment(value, packet) {
   }
   rest.trace=trace;
   if(!Array.isArray(deploymentAssumptions) || deploymentAssumptions.length>8 || deploymentAssumptions.some(x=>typeof x!=='string'||!x.trim()||x.length>1600)) throw Error('Security assessment failed schema or evidence validation (deploymentAssumptions must contain at most eight bounded statements)');
-  const assessed=validateSecurityAssessment(rest,packet);
   const argument=validateEngineeringArgument(engineering,packet,rest.assessment);
+  // Old prompt-mode responses remain fail-closed: never discard a legacy gap.
+  // New responses express every required code gap on a specific obligation.
+  rest.missingEvidence=missingEvidence ?? argument.obligations.filter(o=>o.status==='missing').map(o=>o.reason);
+  const assessed=validateSecurityAssessment(rest,packet);
   if(argument.obligations.some(o=>o.status==='missing' || o.citations.some(c=>c.redacted))) assessed.assessment='needs-context';
   assessed.missingEvidence=[...new Set([...assessed.missingEvidence,...argument.obligations.filter(o=>o.status==='missing').map(o=>o.reason)])];
   return {...assessed,engineering:argument,decisionReviewRequired:assessed.assessment==='needs-context' && argument.obligations.every(o=>o.status==='established') && !assessed.evidenceGaps.length,deploymentAssumptions:deploymentAssumptions.map(redact),deploymentStatus:deploymentAssumptions.length?'unverified-assumptions':'not-established'};

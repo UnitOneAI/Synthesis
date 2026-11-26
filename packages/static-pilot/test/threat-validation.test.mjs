@@ -336,3 +336,18 @@ test('inconsistent settled-code assessment receives a bounded engineering decisi
  assert.equal(f.model.threatValidation.entries[0].history[0].assessment,'needs-context');
  assert.equal(f.model.usageLedger.attempts.length,2);
 });
+
+test('STRIDE wire contract has one typed code-completeness decision, separate from deployment questions',async()=>{
+ const {THREAT_ASSESSMENT_SCHEMA,validateThreatAssessment}=await import('../src/threat-validation.mjs');
+ assert.equal(THREAT_ASSESSMENT_SCHEMA.properties.missingEvidence,undefined);
+ assert.ok(!THREAT_ASSESSMENT_SCHEMA.required.includes('missingEvidence'));
+ const r={id:'r',repository:'repo',path:'PermissionFilter.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'request'},{line:2,text:'write'}]};
+ const p={records:[r],availableFiles:[],gaps:[]},raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+ delete v.missingEvidence;v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
+ v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'request'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'write'};
+ v.deploymentAssumptions=['Direct untrusted access without an upstream administrator restriction.'];
+ assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
+ v.engineering.obligations[2]={kind:'path-binding',status:'missing',reason:'The route to handler binding is absent from the supplied source.',citations:[]};
+ const incomplete=validateThreatAssessment(v,p);
+ assert.equal(incomplete.assessment,'needs-context');assert.deepEqual(incomplete.missingEvidence,[v.engineering.obligations[2].reason]);
+});
