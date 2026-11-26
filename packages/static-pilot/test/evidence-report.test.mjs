@@ -400,6 +400,7 @@ test('decision report preserves every ID, separates supported paths and binds us
   assert.match(priority,/Supported path/);assert.doesNotMatch(priority,/Unassessed claim|Countered path/);
   assert.match(html,/Ruled out for the cited path/);assert.match(html,/Unassessed claim/);
   assert.match(html,/12 \/ 3756 STRIDE packets completed/);
+  assert.match(html,/2 of 3 scenarios received a code assessment/);
   assert.doesNotMatch(html,/reported tokens|Graph fingerprint|Source revision|STRIDE action/);
   assert.doesNotMatch(html,/stride-action/);assert.match(html,/Analysis task A-01/);assert.doesNotMatch(html,/\[object Object\]/);
   for(const category of ['Spoofing','Tampering','Repudiation','Information Disclosure','Denial of Service','Elevation of Privilege'])assert.ok(html.includes(category));
