@@ -1,6 +1,6 @@
-# JCI: update and review saved threats (0.11.1)
+# JCI: update and review saved threats (0.11.2)
 
-This update reuses the existing graph and saved STRIDE packets. It changes how results are presented and how individual threats are checked against controls. It does not make an incomplete JCI assessment complete. Older individual assessments require reassessment under the corrected validation rules; their history is retained. Do not restart the entire discovery run just to generate the new report.
+This update reuses the existing graph and saved STRIDE packets. It changes how results are presented and how individual threats are checked against controls. It does not make an incomplete JCI assessment complete. Unresolved assessments use an explicit engineering decision: entry, sensitive operation, path binding and applicable controls. Compatible results and their source references are retained. Positive findings receive a separate critical check before publication; existing positives can enter that check without repeating discovery. Prior attempts remain in history. Do not restart the entire discovery run just to generate the new report.
 
 ## Update
 
@@ -24,7 +24,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application checks failed.' }
 node -p "require('./package.json').version"
 ```
 
-The version should be **0.11.1 or later**. Keep the existing `C:/SynthesisState/JCI-Metasys` workspace and source clones.
+The version should be **0.11.2 or later**. Keep the existing `C:/SynthesisState/JCI-Metasys` workspace and source clones.
 
 ## Start with the JCI gateway
 
@@ -50,11 +50,12 @@ These are the previously supplied JCI gateway/deployment settings. Keep native s
 ## Review the existing results first
 
 1. Open the new local access link printed by the server. In **Sources**, select **Open saved graph**. Enable hash-checked source context for the approved model provider.
-2. Open **STRIDE matrix → Export STRIDE review · PDF**. Export works from partial checkpoints. The execution receipt distinguishes the saved STRIDE action from workspace-wide token history.
+2. Open **STRIDE matrix → Export STRIDE review · PDF**. Export works from partial checkpoints. The report leads with scope, supported threats and required actions. Machine identifiers, hashes and model usage remain in diagnostic exports.
 3. Read **Priority threats** for individually supported conditional threats. The **Complete scenario disposition register** preserves every returned scenario and separates supported, ruled-out and unresolved results. A category assessment does not establish every individual threat.
 4. In the UI expand **Investigations requiring code**, then **Validate saved threats against code and controls**. Enable redacted source sharing. Start with **Top six priorities**, **1 request**, and **Continue across saved scenarios off** to verify gateway access. This is a connectivity check, not a complete assessment.
-5. After a successful response, select **All current source-referenced scenarios**, enable **Continue across saved scenarios**, and choose **Validate saved threats**. This focused assessment follows named controls and candidate implementations using the existing graph. It preserves the STRIDE inventory, has at most three rounds per scenario, and meters model usage. Unresolved bindings remain explicit analysis tasks.
+5. After a successful response, select **All current source-referenced scenarios**, enable **Continue across saved scenarios**, and choose **Validate saved threats**. This focused assessment follows named controls and candidate implementations using the existing graph. It preserves the STRIDE inventory, has at most four requests per scenario, including a separate critical check of positive findings, and meters model usage. A result that claims all code obligations are settled but still requests context gets a bounded decision review; it is never automatically promoted. Genuine unresolved bindings remain explicit analysis tasks.
 6. To finish pending STRIDE discovery, preview the intended saved repository scope, select **4 workers** and **Run until complete**. This is separate from focused threat assessment. **Actor access: External** filters the display; it does not reduce the planned review scope.
-7. Export the PDF again after new results save. Choose **Print / Save as PDF**, turn browser **Headers and footers off**, and save to `C:/SynthesisState/Exports`. Browser downloads do not automatically follow the trace directory.
+7. For each supported threat, read **Evidence supporting the decision** and **Decisions for the deployment reviewer**. The latter asks concrete yes/no questions and states how each answer changes applicability. An answer about exposure does not establish that every other attack condition holds.
+8. Export the PDF again after new results save. Choose **Print / Save as PDF**, turn browser **Headers and footers off**, and save to `C:/SynthesisState/Exports`. Browser downloads do not automatically follow the trace directory.
 
 The report shows resolved named component paths only. If a path is unresolved it is not replaced with a fabricated destination. Review **Connection declarations / Connection coverage** for source locations and missing bindings. Static reachability is not a live network test. The hardening guide documents intended protections; it does not prove their effective deployment.

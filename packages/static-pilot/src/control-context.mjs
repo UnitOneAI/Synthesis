@@ -18,7 +18,7 @@ export async function controlContext(source, seeds, text = '') {
   // Exact controls from the reviewed code precede generic framework candidates.
   // An interface declaration alone cannot establish the implementing control.
   const explicit = controlSymbols(text);
-  const names = [...new Set([...explicit.flatMap(n=>/^I[A-Z]/.test(n)?[n,n.slice(1)]:[n]),...bootstrap, 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,40);
+  const names = [...new Set([...bootstrap,...explicit.flatMap(n=>/^I[A-Z]/.test(n)?[n,n.slice(1)]:[n]), 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,40);
   const references=[], searches=[];
   for (const symbol of names) {
     let result=cache.get(symbol);
@@ -31,8 +31,10 @@ export async function controlContext(source, seeds, text = '') {
     const near = n => seeds.some(s=>{const parent=s.path.split(/\/(?:Controllers|controllers|routes)\//)[0];const directory=parent===s.path?s.path.slice(0,Math.max(0,s.path.lastIndexOf('/'))):parent;return s.repository===n.repository && (!directory || n.path.startsWith(directory+'/'));});
     matches.sort((a,b)=>Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') || Number(near(b))-Number(near(a)) || Number(repositories.has(b.repository))-Number(repositories.has(a.repository)) || Number(a.kind==='file')-Number(b.kind==='file'));
     searches.push({symbol,matches:matches.length,truncated:result.truncated,interpretation:'Indexed name/path matches only; zero matches do not establish absence'});
-    for(const n of matches.slice(0,3)) if(!references.some(r=>r.repository===n.repository && r.path===n.path && Math.abs(r.line-(n.line||1))<20))
-      references.push({repository:n.repository,path:n.path,line:n.line||1,basis:'control-candidate; applicability unproven'});
+    const production=matches.filter(n=>sourceScope(n.path)==='production-candidate');
+    const relevant=seeds.every(s=>sourceScope(s.path)==='production-candidate') && production.length ? production : matches;
+    for(const n of relevant.slice(0,3)) if(!references.some(r=>r.repository===n.repository && r.path===n.path && Math.abs(r.line-(n.line||1))<20))
+      references.push({repository:n.repository,path:n.path,line:n.line||1,basis:bootstrap.includes(symbol)?'application-registration-candidate':'control-candidate; applicability unproven'});
   }
   // Registration methods often name a requirement or handler that is not named
   // at the route. Follow one bounded hop from hash-checked candidate code, using

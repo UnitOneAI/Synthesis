@@ -313,6 +313,8 @@ export async function reviewSecurityIssues(
     systemPrompt = SECURITY_REVIEW_PROMPT,
     responseSchema = SECURITY_RESPONSE_SCHEMA,
     validateResponse = validateSecurityAssessment,
+    retainConclusiveOnPromptChange = false,
+    challengePrompt,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -336,6 +338,7 @@ export async function reviewSecurityIssues(
       config.baseUrl,
       config.structuredOutputs === true,
       sha(JSON.stringify(responseSchema)),
+      ...(challengePrompt ? [sha(challengePrompt)] : []),
     ]),
   );
   const prior = model[reportField]?.key === key ? model[reportField] : null;
@@ -348,6 +351,7 @@ export async function reviewSecurityIssues(
     contextKey,
     basedOnRevision: model.modelRevision,
     promptHash: sha(systemPrompt),
+    ...(challengePrompt ? {challengePromptHash:sha(challengePrompt)} : {}),
     provider: config.provider,
     model: config.model,
     outputContract: config.structuredOutputs
@@ -355,16 +359,18 @@ export async function reviewSecurityIssues(
       : "prompt-json",
     staticOnly: true,
     status: "running",
-    entries: structuredClone(prior?.entries || []),
+    entries: structuredClone(prior?.entries || (retainConclusiveOnPromptChange && model[reportField]?.contextKey === contextKey
+      ? (model[reportField].entries || []).filter(e=>['static-supported','ruled-out'].includes(e.assessment) || e.challengePending) : [])),
     events: structuredClone(prior?.events || []),
     droppedEvents: prior?.droppedEvents || 0,
     callsThisRun: 0,
     budget,
     candidateCount: issues.length,
     startedAt: new Date().toISOString(),
-    limits: INVESTIGATION_LIMITS,
+    limits: challengePrompt ? {...INVESTIGATION_LIMITS,maxRequestsPerScenario:INVESTIGATION_LIMITS.contextRounds+1,criticalCheck:true} : INVESTIGATION_LIMITS,
   };
   model[reportField] = report;
+  const roundLimit=entry=>INVESTIGATION_LIMITS.contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
   beginUsageRun(model);
   const save = async () => {
     const counts={selected:issues.length,assessed:0,sourceSupported:0,ruledOut:0,needsCodeContext:0,failed:0,unassessed:0};
@@ -434,8 +440,8 @@ export async function reviewSecurityIssues(
       }
       if (
         old &&
-        (old.rounds >= INVESTIGATION_LIMITS.contextRounds ||
-          (old.assessment === "needs-context" && !old.followUp?.length && !(followMissingControls && old.missingEvidence?.some(s => controlSymbols(s).length))))
+        (old.rounds >= roundLimit(old) ||
+          (old.assessment === "needs-context" && !old.followUp?.length && !old.decisionReviewRequired && !(followMissingControls && old.missingEvidence?.some(s => controlSymbols(s).length))))
       )
         continue;
       const entry = {
@@ -448,6 +454,7 @@ export async function reviewSecurityIssues(
         followUp: structuredClone(old?.followUp || []),
         missingEvidence: structuredClone(old?.missingEvidence || []),
         assessment: "not-assessed",
+        ...(old?.challengeStarted ? {challengeStarted:true,challengePending:true,draftAssessment:old.draftAssessment} : {}),
         history: [
           ...(old?.history || []),
           ...(old
@@ -480,6 +487,12 @@ export async function reviewSecurityIssues(
         );
         if (old?.error?.startsWith("Security assessment failed"))
           packet.previousValidationFailure = old.error;
+        if(challengePrompt && old?.challengeStarted) packet.decisionChallenge={
+          priorClaim:old.draftAssessment?.engineering?.conclusion || old.engineering?.conclusion,
+          priorImpact:old.draftAssessment?.impact || old.impact,
+          instruction:'Challenge this proposed finding against the freshly supplied source. The earlier assessment is a hypothesis, not evidence. Retain only the directly demonstrated impact; narrow unsupported extensions. Return your own complete assessment and deployment questions.',
+        };
+        if(Buffer.byteLength(JSON.stringify(packet))>INVESTIGATION_LIMITS.packetBytes)throw Error('Security packet metadata exceeds size limit');
         entry.packetHash = sha(JSON.stringify(packet));
         entry.retrieval = packet.retrieval;
         entry.evidenceGaps = packet.gaps;
@@ -524,7 +537,7 @@ export async function reviewSecurityIssues(
         });
         await save();
         const response = await requestReview(config, packet, fetchImpl, {
-          systemPrompt,
+          systemPrompt:old?.challengeStarted && challengePrompt ? challengePrompt : systemPrompt,
           responseSchema,
           validate: validateResponse,
           signal,
@@ -540,6 +553,13 @@ export async function reviewSecurityIssues(
         Object.assign(entry, response.review, {
           responseHash: response.responseHash,
         });
+        if(challengePrompt && response.review.assessment==='static-supported' && !old?.challengeStarted) {
+          entry.draftAssessment=structuredClone(response.review);
+          entry.challengeStarted=true;entry.challengePending=true;
+          entry.assessment='not-assessed';
+        } else if(old?.challengeStarted) {
+          entry.challengePending=false;entry.challengeCompleted=true;
+        }
         // Repeating an identical evidence packet is not progress.
         if (
           old?.packetHash === entry.packetHash &&
@@ -549,7 +569,7 @@ export async function reviewSecurityIssues(
           entry.stopReason = "no-new-evidence";
         }
         if (
-          entry.rounds >= INVESTIGATION_LIMITS.contextRounds &&
+          entry.rounds >= roundLimit(entry) &&
           entry.assessment === "needs-context"
         )
           entry.stopReason = "context-round-limit";
@@ -580,9 +600,9 @@ export async function reviewSecurityIssues(
         break;
       if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
-        entry.assessment === "needs-context" &&
-        (entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))) &&
-        entry.rounds < INVESTIGATION_LIMITS.contextRounds
+        (entry.challengePending || (entry.assessment === "needs-context" &&
+        (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))))) &&
+        entry.rounds < roundLimit(entry)
       )
         queue.push(item);
     }
