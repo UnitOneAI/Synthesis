@@ -590,12 +590,12 @@ export function systemPrintReport(model, options = {}) {
         threatRefs("actorIds", a.id),
         disposition(a),
       ]),
-  )}<h2>Trust boundaries linked to supported threats</h2><p>A boundary describes a change of trust at a flow crossing, not a repository boundary. These links are inferred through shared interfaces; validate their relevance and enforcement for each threat.</p>${table(
+  )}<h2>Trust boundaries linked to supported threats</h2><p>A boundary describes a change of trust at a flow crossing, not a repository boundary. Only resolved crossings linked to supported threats are listed. Shared-interface associations alone do not prove that a boundary enforces this path; confirm relevance and enforcement. Unresolved candidates remain in the workspace.</p>${table(
     ["Boundary / transition", "Flow crossing", "Enforcement / related threats"],
     s.boundaries
       .filter((b) => linkedBoundaries.has(b.id))
       .flatMap((b) =>
-        (b.crossings?.length ? b.crossings : [null]).map((c) => [
+        (b.crossings || []).filter(c=>c.basis !== 'unresolved' && supported.some(t=>t.flowIds?.includes(c.id))).map((c) => [
           `${b.reference}: ${b.name} (${b.dimension}). ${b.before} → ${b.after}`,
           c
             ? `${c.reference}: ${c.from} → ${c.to}`
@@ -608,64 +608,17 @@ export function systemPrintReport(model, options = {}) {
       ? detailed
           .map((t) => {
             const paragraphs = [
-              ["Engineering reviewer", t.sourceConclusion?.reviewer],
-              ["Engineering condition", t.sourceConclusion?.condition],
-              ["Engineering next action", t.sourceConclusion?.nextAction],
-              ["Engineering source citations", t.sourceConclusion?.citations.map(r=>`${r.repository} / ${r.path}:${r.startLine}–${r.endLine}`).join('; ')],
-              ["Category source assessment", t.categoryAssessment ? t.categoryAssessment.status + ': ' + t.categoryAssessment.rationale : null],
-              ["Category evidence", t.categoryAssessment?.citations.map(c=>`${c.role}: ${c.repository} / ${c.path}:${c.line}–${c.endLine}`).join('; ')],
-              ["Category evidence gaps", t.categoryAssessment?.missingEvidence.join('; ')],
-              ["Category deployment conditions", t.categoryAssessment?.deploymentConditions.join('; ')],
-              ["Independent source assessment", t.validation?.assessment !== 'not-assessed' ? t.validation?.assessment : 'Not assessed'],
-              ["Validation counterevidence", t.validation?.counterEvidence],
-              ["Missing code evidence", t.validation?.missingEvidence?.join('; ')],
-              ["Deployment assumptions — not verified", t.validation?.deploymentAssumptions?.join('; ')],
-              ["Recommended code change", t.validation?.remediation?.codeFix],
-              ["Cited source path", t.validation?.trace?.map(r => `${r.role}: ${r.repository} / ${r.path}:${r.line} — ${r.reason}`).join('; ')],
-              ["Why this actor is in scope", t.actorRationale ? `${t.actorRationale.profiles}. Required condition: ${t.actorRationale.whyInScope}` : null],
-              ["Actor entry evidence", t.actorRationale?.entryEvidence],
-              ["Proposed misuse path", t.actorRationale?.proposedPath],
-              ["Actor interpretation", t.actorRationale?.interpretation],
-              ["Validation to perform", t.validation?.remediation?.validation],
-              ["Remediation owner", t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
-              ["Impact", t.analysis?.impact || t.asset],
-              [
-                "Access and prerequisites",
-                `${names(t.actorIds, "Actor not established")}. ${t.prerequisites || "Access prerequisites need confirmation."}`,
-              ],
-              [
-                "Code path",
-                t.flowIds.length ? names(t.flowIds) : t.candidateFlowIds?.length
-                  ? "Candidate path; peer or deployment unresolved: " + names(t.candidateFlowIds)
-                  : "No connected flow established for this scenario",
-              ],
-              [
-                "Trust crossing",
-                names(
-                  t.boundaryIds,
-                  "No trust boundary established for this scenario",
-                ),
-              ],
-              [
-                "Controls and counterevidence",
-                t.controls || "Control effectiveness is not established",
-              ],
-              ["Recommended action", t.mitigation],
-              ["Supporting source", citations(t)],
-              [
-                "Evidence limits",
-                `${t.evidenceStatus}. ${display(t.analysisQuality?.gaps || "")}`,
-              ],
-              [
-                "Unresolved assumptions",
-                display(t.analysis?.assumptions || t.assumptions),
-              ],
-              [
-                "Reviewer decision",
-                t.decision && !t.decision.stale
-                  ? display(t.decision)
-                  : "Awaiting reviewer assessment",
-              ],
+              ['Decision basis',t.sourceConclusion ? `Engineering review by ${t.sourceConclusion.reviewer}. Automated assessment remains ${t.validation.assessment}; this decision does not change automated coverage.` : 'Independent static source assessment; no runtime validation.'],
+              ['Actor and necessary access',names(t.actorIds,'Actor not established')],
+              ['Condition',t.sourceConclusion?.condition || (t.validation?.deploymentAssumptions || []).join('; ') || t.prerequisites],
+              ['Input, operation and controls',t.sourceConclusion
+                ? t.sourceConclusion.citations.map(r=>`${r.repository} / ${r.path}:${r.startLine}–${r.endLine}`).join('; ')
+                : t.validation?.trace?.map(r=>`${r.role}: ${r.repository} / ${r.path}:${r.line}–${r.endLine} — ${r.reason}`).join('; ')],
+              ['Counterevidence considered',t.validation?.counterEvidence || t.controls],
+              ['Required action',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation],
+              ['Validation to perform',t.sourceConclusion ? null : t.validation?.remediation?.validation],
+              ['Automation still requested',t.sourceConclusion && t.validation.assessment==='needs-context' ? (t.validation.missingEvidence || []).join('; ') : null],
+              ['Remediation owner',t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
             ];
             return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.scenario)}</p>${paragraphs
               .filter(([, v]) => v)
