@@ -4,6 +4,14 @@ Graph-first local source review with optional Claude or Gemini analysis and no t
 
 **This is a discovery and review pilot, not the completed Synthesis architecture.** Tree-sitter syntax graphs cover C#, C/C++, JavaScript, TypeScript and Python. Security interface collectors remain bounded lexical recognizers. Neither establishes effective authorization, compiler-resolved call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
 
+## Feature decisions in 0.12.0
+
+Use **STRIDE → Review depth → Security features** to review selected entry points, outbound interactions, stores, workers and controls in small cohorts. The existing graph supplies supporting definitions across loaded repositories. All six STRIDE categories apply; helper definitions are context rather than independent primary subjects in this mode. The preview discloses the distinction; **All subjects** remains available.
+
+The coordinator follows named missing code and performs scenario assessment before expanding discovery. Its request budget covers both stages. Exact implementation definitions outrank repeated call sites. Reviewer deployment answers cannot close code gaps. Partial sharing reports show supported decisions with verified code excerpts; the technical HTML export retains all hypotheses. No runtime analysis is performed.
+
+See the [product spec](../../docs/product/feature-threat-review.md), [design](../../docs/design/feature-threat-review.md), [architecture critique](../../docs/design/feature-threat-review-critique.md) and [Windows update/run instructions](../../docs/runbooks/jci-feature-review-windows.md).
+
 ## Run tonight
 
 Prerequisites: **a current Node.js 24 release**, a modern browser, and readable source folders. Windows, Linux and macOS use the same entry point. No .NET SDK, compiler, database or target application services are needed. Optional local CWE scanning requires Python 3.12 and Semgrep; model CWE review uses the existing configured provider. Provider-free discovery needs no AI key; model review requires the selected provider key.

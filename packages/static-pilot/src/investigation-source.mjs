@@ -1,5 +1,5 @@
 import { graphReader } from "./graph-store.mjs";
-import { sourceWindow } from "./graph-package.mjs";
+import { sourceWindow, verifiedSourceFile } from "./graph-package.mjs";
 import { id } from "./sources.mjs";
 import { sourceScope } from "./architecture.mjs";
 export class InvestigationSource {
@@ -118,7 +118,8 @@ export class InvestigationSource {
     const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
       .sort((a,b)=>Math.abs(a.line-line)-Math.abs(b.line-line));
     const n=candidates[0];
-    if(!n || nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line)))return this.window(ref);
+    if(nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line)))return {...await this.window(ref),functionContext:{complete:false,reason:nodes.length>128?'function-index-page-limit':'ambiguous-function-owner'}};
+    if(!n)return this.window(ref);
     const first=Math.min(line,n.line),last=n.endLine;
     if(last-first+1>200)return {...await this.window(ref),functionContext:{name:n.name,startLine:first,endLine:last,complete:false,reason:'function-exceeds-200-line-window'}};
     const lines=[];let seed;
@@ -128,6 +129,51 @@ export class InvestigationSource {
     }
     if(lines.length!==last-first+1)throw Error('source-function-range-incomplete');
     return {...seed,id:id('function-evidence',seed.repository,seed.path,seed.blobSha256,first,last),startLine:first,endLine:last,lines,code:lines.map(l=>`${l.line}: ${l.text}`).join('\n'),functionContext:{name:n.name,startLine:first,endLine:last,complete:true}};
+  }
+  // Fallback only for exact requested implementations missing from the symbol
+  // index. Searches saved, selected files, never arbitrary model-supplied paths.
+  async findImplementation(symbols, seeds = [], {maxFiles=64,maxBytes=2*1024*1024} = {}) {
+    const names=[...new Set(symbols)].filter(s=>/^[A-Za-z_]\w{2,99}$/.test(s)).slice(0,12);
+    if(!names.length)return {references:[],searchedFiles:0,bytes:0,limited:false,failures:[]};
+    const repositories=[...new Set([...seeds.map(s=>s.repository),...this.selected])].filter(r=>this.selected.has(r));
+    const candidates=[];let limited=false;
+    // Search named paths before the bounded general inventory. Otherwise a
+    // relevant control file beyond the first page would never be considered.
+    for(const symbol of names) {
+      const found=this.search(symbol);limited ||= Boolean(found.next);
+      for(const node of found.items) {
+        const file=node.kind==='file'?node:this.file(node.repository,node.path);
+        if(file)candidates.push(file);
+      }
+    }
+    for(const seed of seeds) {const file=this.file(seed.repository,seed.path);if(file)candidates.push(file);}
+    for(const repository of repositories) {
+      const rows=this.nodes({kind:'file',repository,limit:257});limited ||= rows.length>256;
+      candidates.push(...rows.slice(0,256).filter(n=>/\.(cs|py|[cm]?[jt]sx?|java|go|rb|php|cpp|cc|c|h)$/i.test(n.path)));
+    }
+    const rank=n=>seeds.some(s=>s.repository===n.repository&&s.path===n.path)?0:
+      names.some(s=>n.path.toLowerCase().includes(s.replace(/^I(?=[A-Z])/,'').toLowerCase()))?1:
+      seeds.some(s=>s.repository===n.repository)?2:3;
+    candidates.sort((a,b)=>rank(a)-rank(b)||a.repository.localeCompare(b.repository)||a.path.localeCompare(b.path));
+    const references=[],failures=[];let searchedFiles=0,bytes=0;
+    for(const n of [...new Map(candidates.filter(n=>/\.(cs|py|[cm]?[jt]sx?|java|go|rb|php|cpp|cc|c|h)$/i.test(n.path)).map(n=>[n.repository+'\0'+n.path,n])).values()]) {
+      if(searchedFiles>=maxFiles||bytes>=maxBytes){limited=true;break;}
+      searchedFiles++;
+      try {
+        const file=await verifiedSourceFile(n,this.manifest,this.root);
+        bytes+=file.bytes;if(bytes>maxBytes){limited=true;break;}
+        for(const symbol of names) {
+          // A text match is a candidate, never proof of a call or control binding.
+          const pattern=new RegExp('\\b'+symbol+'\\b');
+          const matches=file.lines.flatMap((text,index)=>pattern.test(text)?[index+1]:[]).slice(0,4);
+          for(const line of matches) if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&Math.abs(r.line-line)<6))
+            references.push({repository:n.repository,path:n.path,line,blobSha256:n.blobSha256,symbol,required:true,basis:'hash-checked indexed text candidate; binding unproven'});
+        }
+      } catch(error) { failures.push({repository:n.repository,path:n.path,reason:error.message}); }
+      if(references.length>=16){limited=true;break;}
+    }
+    return {references:references.slice(0,16),searchedFiles,bytes,limited,failures,
+      interpretation:'Bounded exact text search in indexed source; no match does not establish an absent control.'};
   }
   catalog(records) {
     const map = new Map();

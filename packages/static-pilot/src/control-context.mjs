@@ -20,6 +20,15 @@ export async function controlContext(source, seeds, text = '') {
   const explicit = controlSymbols(text);
   const names = [...new Set([...bootstrap,...explicit.flatMap(n=>/^I[A-Z]/.test(n)?[n,n.slice(1)]:[n]), 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,40);
   const references=[], searches=[];
+  // FastAPI router-level dependencies apply even when handlers have no Depends
+  // parameters. Retrieve the local constructor call, never its import binding.
+  if(seeds.some(s=>/\.py$/i.test(s.path))) {
+    const nodes=[];let after='';
+    for(let page=0;page<4;page++){const result=source.search('APIRouter',after);nodes.push(...result.items);after=result.next;if(!after)break;}
+    const local=nodes.filter(n=>n.kind==='call' && n.name==='APIRouter' && seeds.some(s=>s.repository===n.repository && s.path===n.path));
+    for(const n of local.slice(0,3))references.push({repository:n.repository,path:n.path,line:n.line||1,basis:'application-registration-candidate'});
+    searches.push({symbol:'APIRouter',matches:local.length,truncated:Boolean(after)||local.length>3,basis:'Local router constructor candidate; inspect dependency arguments and binding'});
+  }
   for (const symbol of names) {
     let result=cache.get(symbol);
     if (!result) {
@@ -29,10 +38,12 @@ export async function controlContext(source, seeds, text = '') {
     }
     const matches=result.nodes.filter(n=>n.kind==='file' || n.name===symbol || n.name?.endsWith('.'+symbol) || n.name?.endsWith('::'+symbol));
     const near = n => seeds.some(s=>{const parent=s.path.split(/\/(?:Controllers|controllers|routes)\//)[0];const directory=parent===s.path?s.path.slice(0,Math.max(0,s.path.lastIndexOf('/'))):parent;return s.repository===n.repository && (!directory || n.path.startsWith(directory+'/'));});
-    matches.sort((a,b)=>Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') || Number(near(b))-Number(near(a)) || Number(repositories.has(b.repository))-Number(repositories.has(a.repository)) || Number(a.kind==='file')-Number(b.kind==='file'));
+    const definition=n=>['function','class','method','type'].includes(n.kind);
+    matches.sort((a,b)=>Number(definition(b))-Number(definition(a)) || Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') || Number(near(b))-Number(near(a)) || Number(repositories.has(b.repository))-Number(repositories.has(a.repository)) || Number(a.kind==='file')-Number(b.kind==='file'));
     searches.push({symbol,matches:matches.length,truncated:result.truncated,interpretation:'Indexed name/path matches only; zero matches do not establish absence'});
     const production=matches.filter(n=>sourceScope(n.path)==='production-candidate');
-    const relevant=seeds.every(s=>sourceScope(s.path)==='production-candidate') && production.length ? production : matches;
+    const relevantScope=seeds.every(s=>sourceScope(s.path)==='production-candidate') && production.length ? production : matches;
+    const relevant= relevantScope.some(definition) ? relevantScope.filter(definition) : relevantScope;
     for(const n of relevant.slice(0,3)) if(!references.some(r=>r.repository===n.repository && r.path===n.path && Math.abs(r.line-(n.line||1))<20))
       references.push({repository:n.repository,path:n.path,line:n.line||1,basis:bootstrap.includes(symbol)?'application-registration-candidate':'control-candidate; applicability unproven'});
   }

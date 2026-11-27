@@ -468,6 +468,8 @@ export function systemPrintReport(model, options = {}) {
   const supported = scenarios.filter(t => t.outcome?.kind === 'supported');
   const investigations = [...scenarios, ...contextQuestions].filter(t => t.outcome?.kind === 'investigation');
   const detailed = supported;
+  const technical = options.technical === true;
+  const registerScenarios=technical?scenarios:scenarios.filter(t=>t.outcome?.kind!=='investigation');
   const table = (headers, rows) =>
     rows.length
       ? `<table><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${e(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
@@ -555,6 +557,14 @@ export function systemPrintReport(model, options = {}) {
     const c = t.sourceConclusion;
     return `<article><h3>${e(t.reference)} · ${c.status === "open" ? "Open question" : "Conditional threat"}</h3><p>${e(c.statement)}</p><p><b>Condition or missing link</b> · ${e(c.condition)}</p><p><b>Next action</b> · ${e(c.nextAction)}</p><p>Reviewed by ${e(c.reviewer)} · Automated assessment: ${e(t.validation.assessment)}</p><ul>${c.citations.map(r => `<li>${e(r.repository)} / ${e(r.path)}:${e(r.startLine)}–${e(r.endLine)}</li>`).join("")}</ul></article>`;
   }).join("")}` : "";
+  const featureRows=s.featureReview?.features || [];
+  const reviewedFeatures=featureRows.filter(f=>f.categories.some(c=>c.decided||c.incomplete));
+  const shownFeatures=technical?featureRows:reviewedFeatures.slice(0,20);
+  const scopedMatrix=s.matrix.filter(r=>r.rowKind==='component' && (!review?.scope?.interfaceIds?.length || r.interfaceIds.some(id=>review.scope.interfaceIds.includes(id))) && (filter.scope==='all'||r.cells.some(c=>c.threatIds?.some(id=>currentScenarioIds.has(id)))));
+  const shownMatrix=technical?scopedMatrix:scopedMatrix.filter(r=>r.cells.some(c=>!['not-analyzed','outside-scope'].includes(c.analysisStatus)));
+  const featureSection=hasResults?`<h2>Feature decisions across STRIDE</h2><p>${e(s.featureReview?.interpretation)} ${technical?'All feature groups shown.':`Showing ${shownFeatures.length} groups with recorded assessments; ${featureRows.length-shownFeatures.length} other groups remain in the complete technical export. Omitted groups are not cleared.`}</p>${table(['Feature / source',...CATEGORIES],shownFeatures.map(f=>[`${f.name}: ${f.repository} / ${f.path}`,...f.categories.map(c=>`${c.state}; ${c.decided}/${c.total} decisions`)]))}`:'';
+  const decisionQuestions=(s.deploymentDecisionQuestions || []).filter(q=>currentScenarioIds.has(q.threatId));
+  const questionSection=hasResults?`<h2>Deployment decisions</h2><p>Reviewer declarations change the stated deployment condition only. They do not establish runtime behavior or repair missing code evidence. ${technical?'':`Showing up to 12 of ${decisionQuestions.length} questions; all remain in the technical export.`}</p>${table(['Question / profile','If yes / if no','Recorded answer and basis'],(technical?decisionQuestions:decisionQuestions.slice(0,12)).map(q=>[`${q.question} Profile: ${q.profile}`,`Yes: ${q.ifYes} No: ${q.ifNo}`,q.answer?`${q.answer.answer} — ${q.answer.reviewer}: ${q.answer.rationale}. ${q.consequence}`:'Unanswered; retain the stated condition.']))}`:'';
   const threatDetails = `<h2>Threat details</h2><p>${detailed.length} supported threats shown in detail. Unassessed and unresolved scenarios remain in the disposition register; they are not expanded into speculative finding narratives. This report excludes repeated checklist text and empty property rows.</p>${
     detailed.length
       ? detailed
@@ -579,31 +589,25 @@ export function systemPrintReport(model, options = {}) {
                 ([label, value]) =>
                   `<p><strong>${label}:</strong> ${e(value)}</p>`,
               )
-              .join("")}${t.validation?.engineering ? `<h4>Evidence supporting the decision</h4>${table(['Check','What the code shows','Source'],t.validation.engineering.obligations.map(o=>[({'entry':'Entry point','sensitive-operation':'Sensitive operation','path-binding':'Connected code path','applicable-controls':'Controls on this path'})[o.kind],o.reason,o.citations.map(c=>`${c.repository} / ${c.path}:${c.startLine}–${c.endLine}`).join('; ')]))}${t.validation.engineering.reviewerQuestions.length ? `<h4>Decisions for the deployment reviewer</h4><p>Each answer resolves only the condition asked. All conditions for the stated attack must hold together. Record the deployment and rationale with the review decision; answers are reviewer statements, not runtime verification.</p>${t.validation.engineering.reviewerQuestions.map(q=>`<p><strong>${e(q.question)}</strong><br>Yes: ${e(q.ifYes)}<br>No: ${e(q.ifNo)}</p>`).join('')}` : ''}` : ''}</article>`;
+              .join("")}${(options.snippets?.[t.id] || []).map(w=>w.gap?`<p class="gap">${e(w.gap)}</p>`:`<h4>${e(w.repository)} / ${e(w.path)}:${w.startLine}–${w.endLine}</h4><p>${e(w.basis)}${w.limited?' The cited range is longer than this excerpt; remaining lines are not shown.':''}</p><pre>${w.lines.map(l=>`<span class="code-line ${l.line>=w.startLine&&l.line<=w.endLine?'cited':''}"><span class="line-no">${l.line}</span>${e(l.text)}</span>`).join('')}</pre>`).join('')}${t.validation?.engineering ? `<h4>Evidence supporting the decision</h4>${table(['Check','What the code shows','Source'],t.validation.engineering.obligations.map(o=>[({'entry':'Entry point','sensitive-operation':'Sensitive operation','path-binding':'Connected code path','applicable-controls':'Controls on this path'})[o.kind],o.reason,o.citations.map(c=>`${c.repository} / ${c.path}:${c.startLine}–${c.endLine}`).join('; ')]))}${technical && t.validation.engineering.reviewerQuestions.length ? `<h4>Decisions for the deployment reviewer</h4><p>Each answer resolves only the condition asked. All conditions for the stated attack must hold together. Record the deployment and rationale with the review decision; answers are reviewer statements, not runtime verification.</p>${t.validation.engineering.reviewerQuestions.map(q=>`<p><strong>${e(q.question)}</strong><br>Yes: ${e(q.ifYes)}<br>No: ${e(q.ifNo)}</p>`).join('')}` : ''}` : ''}</article>`;
           })
           .join("")
       : "<p>No individually supported threat details to publish. Inspect the disposition register and remaining review coverage.</p>"
   }`;
   const summary = hasResults
-    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Only current individual source assessments or evidence-linked reviewer conclusions appear here. Category-level conclusions alone do not validate each returned scenario. Deployment conditions remain explicit.</p>${supported.length ? table(['Threat','Decision basis','Remediation'],supported.map(t=>[`${t.reference} — ${t.name}`,t.sourceConclusion ? 'Evidence-linked engineering conclusion; automated assessment: '+t.validation.assessment : 'Independent static source assessment',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation])) : '<p>No current individually supported threats. The review has produced analysis leads, not an established remediation list.</p>'}${threatDetails}${stageCoverage}<h2>Complete scenario disposition register</h2><p>Every returned scenario is retained below. IDs track the original review; they are not vulnerability counts. Investigation tasks are analysis work for Synthesis, not requests for a reviewer to find source code.</p>${table(
-    ['Reference / scenario','Outcome','Evidence and next action'], scenarios.map(t=>[
+    ? `${conclusionSection}${categoryCounts}<h2>Priority threats</h2><p>Only current individual source assessments or evidence-linked reviewer conclusions appear here. Category-level conclusions alone do not validate each returned scenario. Deployment conditions remain explicit.</p>${supported.length ? table(['Threat','Decision basis','Remediation'],supported.map(t=>[`${t.reference} — ${t.name}`,t.sourceConclusion ? 'Evidence-linked engineering conclusion; automated assessment: '+t.validation.assessment : 'Independent static source assessment',t.sourceConclusion?.nextAction || t.validation?.remediation?.codeFix || t.mitigation])) : '<p>No current individually supported threats. The review has produced analysis leads, not an established remediation list.</p>'}${threatDetails}${stageCoverage}<h2>${technical?"Complete scenario disposition register":"Decided paths"}</h2><p>${technical?"Every returned scenario is retained below.":`${scenarios.length-registerScenarios.length} unresolved hypotheses are omitted from this decision report. Export the complete technical review from STRIDE for every hypothesis and analysis task.`} IDs track the original review; they are not vulnerability counts. Investigation tasks are analysis work for Synthesis, not requests for a reviewer to find source code.</p>${table(
+    ['Reference / scenario','Outcome','Evidence and next action'], registerScenarios.map(t=>[
       `${t.reference} — ${t.name}`,
       `${t.outcome?.label || 'Investigation required'}${t.decision && !t.decision.stale ? '; reviewer decision: '+t.reviewState : ''}`,
       `${citations(t)}. ${t.outcome?.kind === 'investigation' ? 'Analysis task '+investigationRefs.get(t.id) : t.validation?.remediation?.codeFix || t.sourceConclusion?.nextAction || t.validation?.counterEvidence || 'See source assessment.'}`,
     ]))}
-  <h2>Focused investigation work</h2><p>Follow missing code, bindings and controls in the saved graph before asking deployment questions. A missing search result is not proof that a control is absent. These tasks do not count as fully analyzed threats. Matching requests are grouped for readability; every path still requires its own assessment. A- references identify tasks in this export only.</p>${table(['Analysis task','Related scenarios','Starting source'], investigationGroups.map(g=>{
-    return [g.reference+': '+g.action,g.scenarios.map(t=>t.reference).join(', '),[...new Set(g.scenarios.map(citations))].join('; ')];
+  <h2>Focused investigation work</h2><p>Follow missing code, bindings and controls in the saved graph before asking deployment questions. A missing search result is not proof that a control is absent. These tasks do not count as fully analyzed threats. Matching requests are grouped for readability; every path still requires its own assessment. A- references identify tasks in this export only. ${technical?"All tasks shown.":`Showing ${Math.min(5,investigationGroups.length)} of ${investigationGroups.length} task groups. The full technical export retains the remainder.`}</p>${table(['Analysis task','Related scenarios','Starting source'], (technical?investigationGroups:investigationGroups.slice(0,5)).map(g=>{
+    return [g.reference+': '+g.action,(technical?g.scenarios:g.scenarios.slice(0,3)).map(t=>t.reference).join(', ')+(g.scenarios.length>3&&!technical?`; ${g.scenarios.length-3} more in technical export`:''),[...new Set((technical?g.scenarios:g.scenarios.slice(0,3)).map(citations))].join('; ')];
   }))}
-  <h2>System context from static extraction</h2><p>Named connections below are static context, not runtime reachability or proof of complete review. Unresolved peers stay in the connection worklist instead of appearing as unknown HTTP boxes.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,scenarios)}
-  <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
+  <h2>System context from static extraction</h2><p>Named connections below are static context, not runtime reachability or proof of complete review. Unresolved peers stay in the connection worklist instead of appearing as unknown HTTP boxes.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,technical?scenarios:supported,technical)}
+  <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. ${scopedMatrix.length-shownMatrix.length} wholly unreviewed component rows are omitted here and retained in the complete technical export; they are not cleared.</p>${table(
     ["Component", ...CATEGORIES],
-    s.matrix
-      .filter(
-        (r) =>
-          r.rowKind === "component" &&
-          (!review?.scope?.interfaceIds?.length || r.interfaceIds.some(id=>review.scope.interfaceIds.includes(id))) &&
-          (filter.scope === 'all' || r.cells.some(c => c.threatIds?.some(id => currentScenarioIds.has(id)))),
-      )
+    shownMatrix
       .map((r) => [
         r.name,
         ...r.cells.map(
@@ -635,7 +639,7 @@ export function systemPrintReport(model, options = {}) {
       ),
   )}
   ${
-    contextQuestions.length
+    contextQuestions.length && technical
       ? `<h2>Questions requiring implementation evidence</h2><p>These returned records cite architecture metadata only. They are not included in the threat scenario count or presented as implementation findings.</p>${table(
           ["Reference / question", "Evidence needed"],
           contextQuestions.map((t) => [
@@ -651,7 +655,7 @@ export function systemPrintReport(model, options = {}) {
   // Opaque provenance and cost ledgers remain in saved/diagnostic exports. The
   // reviewer needs the scope and decision, not machine identifiers in the PDF.
   const receipt = `<h2>Review scope</h2><p>Primary repositories: ${e((poc?.repositories || review?.scope?.repositories || []).map(r=>typeof r === 'string' ? r : r.repository || r.name || 'Unnamed repository').join(', ') || 'See repository inventory below')}.</p><p>Read Priority threats for supported attack paths and required fixes. Each threat states its access conditions and the code supporting the decision. Deployment questions explain how the reviewer’s answer changes the risk. Investigations are unfinished analysis, not established vulnerabilities. Source identity and request history remain in the diagnostic exports.</p>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}.dfd-sheet{break-inside:avoid;margin:16px 0}.dfd-sheet svg{width:100%;height:auto;max-height:850px}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}${receipt}${summary}${repoSummary}${pocSummary}${repoAssessment ? `<details><summary>Category conclusions and specific evidence gaps</summary>${table(['Batch / category','Outcome','Conclusion','Evidence','Missing evidence / conditions'],(review.batches||[]).filter(b=>b.status==='completed').flatMap(b=>(b.review?.categoryReviews||[]).map(c=>[c.category,c.status,c.rationale,c.citations.map(ref=>{const source=b.evidenceContext?.records?.find(r=>r.id===ref.recordId);return source ? source.repository+' / '+source.path+':'+ref.line+'–'+ref.endLine+' ('+ref.role+')' : ref.recordId+':'+ref.line+'–'+ref.endLine;}).join('; '),[...c.missingEvidence,...c.deploymentConditions].join('; ')])))}</details>` : ''}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories ${repoAssessment?'loaded for source and supporting context; primary review scope is listed above':'selected'}. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${e(s.title)} - threat model review</title><style>${PRINT_STYLE}.dfd-sheet{break-inside:avoid;margin:16px 0}.dfd-sheet svg{width:100%;height:auto;max-height:850px}</style></head><body>${PRINT_HEADER}<h1>${e(s.title)}</h1><p>Static threat model review · Draft</p>${snapshot}${receipt}${summary}${featureSection}${questionSection}${repoSummary}${pocSummary}${repoAssessment && technical ? `<details><summary>Category conclusions and specific evidence gaps</summary>${table(['Batch / category','Outcome','Conclusion','Evidence','Missing evidence / conditions'],(review.batches||[]).filter(b=>b.status==='completed').flatMap(b=>(b.review?.categoryReviews||[]).map(c=>[c.category,c.status,c.rationale,c.citations.map(ref=>{const source=b.evidenceContext?.records?.find(r=>r.id===ref.recordId);return source ? source.repository+' / '+source.path+':'+ref.line+'–'+ref.endLine+' ('+ref.role+')' : ref.recordId+':'+ref.line+'–'+ref.endLine;}).join('; '),[...c.missingEvidence,...c.deploymentConditions].join('; ')])))}</details>` : ''}<h2>Scope and coverage</h2><p>${s.coverage.repositories} repositories ${repoAssessment?'loaded for source and supporting context; primary review scope is listed above':'selected'}. No target execution or runtime validation. Repository collection status below is not threat analysis coverage.</p>${table(
     ["Repository", "Collection status"],
     model.sources.map((r) => [r.name, r.status]),
   )}<h2>Evidence basis · what was analyzed</h2>${table(['Area','Basis and limits'],[
@@ -662,11 +666,16 @@ export function systemPrintReport(model, options = {}) {
   ])}${deployment}${PRINT_FOOTER}</body></html>`;
 }
 
-function printDiagrams(model, s, scenarios) {
-  const scope = model.aiReview?.scope?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []);
+function printDiagrams(model, s, scenarios, technical=false) {
+  const scope = technical ? model.aiReview?.scope?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []) : [...new Set(scenarios.flatMap(t=>t.interfaceIds || []))];
   const selected = new Set(scope);
   const flows = s.flows.filter(f => f.basis !== 'unresolved' && !['rejected','stale'].includes(f.reviewState) && f.interfaceIds?.some(id=>selected.has(id)));
   if (!flows.length) return '<p>No resolved component-to-component path is available for this reviewed scope. No overview diagram is published. Use the cited source paths and resolve caller/destination bindings in Connection declarations; this does not imply that the components are disconnected.</p>';
-  const focus = s.components.filter(c=>flows.some(f=>f.source===c.id || f.target===c.id)).slice(0,6);
-  return `<p>${flows.length} resolved static flow records in the selected scope. Up to six component views show at most 24 objects each; omitted relationships remain in the complete graph export. Static connections do not establish deployed reachability.</p>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · connected paths</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:false,limit:24,interfaceIds:scope})}</section>`).join('');
+  const seenViews=new Set();
+  const focus = s.components.filter(c=>{
+    const connected=flows.filter(f=>f.source===c.id || f.target===c.id);if(!connected.length)return false;
+    const key=connected.map(f=>f.id).sort().join('|');
+    if(!technical&&seenViews.has(key))return false;seenViews.add(key);return true;
+  }).slice(0,technical?6:2);
+  return `<p>${flows.length} resolved static flow records ${technical?'in the selected scope':'linked to the supported threat interfaces'}. Up to ${technical?'six':'two'} component views show at most 24 objects each; omitted relationships remain in the complete graph export. Static connections do not establish deployed reachability.</p>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · connected paths</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:false,limit:24,interfaceIds:scope})}</section>`).join('');
 }

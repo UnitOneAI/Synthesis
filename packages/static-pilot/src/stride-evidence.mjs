@@ -115,6 +115,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         records.pop();
         throw Error("source-context-byte-limit");
       }
+      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason});
     } catch (error) {
       gaps.push({
         repository: ref.repository,

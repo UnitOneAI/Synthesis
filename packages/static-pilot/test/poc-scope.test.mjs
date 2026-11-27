@@ -102,6 +102,13 @@ test('Python control context includes application composition and prefers produc
  assert.equal(result.references[0].path,'api/server.py');
 });
 
+test('Python control context retrieves local router dependency declarations before imports or unrelated routers',async()=>{
+ const source={search:(s,after)=>({items:s!=='APIRouter'?[]:after?[{kind:'call',name:s,repository:'app',path:'api/routes.py',line:1136}]:[{kind:'interface',name:'Static import-binding APIRouter',repository:'app',path:'api/routes.py',line:41},{kind:'call',name:s,repository:'other',path:'routes.py',line:12}],next:s==='APIRouter'&&!after?'page2':null})};
+ const result=await controlContext(source,[{repository:'app',path:'api/routes.py',line:1175}]);
+ assert.deepEqual(result.references,[{repository:'app',path:'api/routes.py',line:1136,basis:'application-registration-candidate'}]);
+ assert.equal(result.searches.find(s=>s.symbol==='APIRouter').truncated,false);
+});
+
 import {validateRepositoryReview,REPOSITORY_CATEGORIES,repositoryAssessmentSummary} from '../src/repository-assessment.mjs';
 function categoryResponse(packet){return {summary:'Static category assessment of supplied source.',threats:[],connections:[],questions:[],explorationRequests:[],categoryReviews:REPOSITORY_CATEGORIES.map(category=>({category,status:'no-scenario-identified',interfaceIds:packet.reviewUnit.primaryInterfaceIds,rationale:'The supplied code was reviewed for this category; no scenario was identified in this bounded evidence.',citations:packet.sourceContext.records.map(r=>({recordId:r.id,line:r.startLine,endLine:r.endLine,role:'context'})),threatIndexes:[],missingEvidence:[],deploymentConditions:['Deployed exposure is not verified.'],remediation:''}))};}
 test('repository scope has no operation cutoff, retains internal surfaces and keeps supporting source available',async t=>{
@@ -215,4 +222,117 @@ test('citations spanning supplied windows preserve every line and reject gaps or
   assert.equal(resolveSourceCitation(cite,new Map([['a',a],['b',other]])),null);
  assert.equal(resolveSourceCitation({...cite,recordId:'invented'},new Map([['a',a],['b',b]])),null);
  assert.equal(resolveSourceCitation({...cite,endLine:299},new Map([['a',a],['b',b]])),null);
+});
+
+import {reviewFeatureCohorts} from '../src/feature-review-run.mjs';
+import {featureReviewSummary} from '../src/feature-review.mjs';
+import {recordDeploymentAnswer,deploymentDecisionQuestions} from '../src/reviewer-questions.mjs';
+import {threatValidationKey,threatIssue} from '../src/threat-validation-state.mjs';
+import {sha} from '../src/sources.mjs';
+import {InvestigationSource} from '../src/investigation-source.mjs';
+
+test('security features retain all six categories and supporting definitions without changing all-subject scope',async t=>{
+ const f=await fixture(t),definition={kind:'repositories',title:'Feature review',profile:'Private ingress assumption',repositories:['app']};
+ const all=resolvePocScope(f.model,definition),features=resolvePocScope(f.model,{...definition,reviewDepth:'security-features'});
+ assert.ok(features.interfaceIds.length>0);assert.ok(features.interfaceIds.length<all.interfaceIds.length);
+ assert.notEqual(features.id,all.id);assert.deepEqual(features.supportingRepositories,['support']);assert.ok(features.contextOnlySubjects>0);
+ f.model.pocScope=features;const plan=pocReviewPlan(f.model);
+ assert.deepEqual([...new Set(plan.batches.flatMap(b=>b.packet.reviewUnit.primaryInterfaceIds))].sort(),features.interfaceIds);
+ assert.ok(plan.batches.every(b=>b.packet.reviewFocus.categories.length===6));
+ assert.throws(()=>resolvePocScope(f.model,{...definition,reviewDepth:'invented'}),/depth/);
+});
+
+test('feature cohort budgets include discovery and resume without rebuilding or duplicate paid calls',async t=>{
+ const f=await fixture(t);f.model.pocScope=resolvePocScope(f.model,{kind:'repositories',title:'Features',profile:'Static',repositories:['app'],reviewDepth:'security-features'});
+ const graphBefore=JSON.stringify(f.model.sourceGraph),source=await verifiedStrideSource(f.model,f.manifest,f.root);
+ const config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'});let calls=0;
+ const send=async(_,request)=>{calls++;const packet=JSON.parse(JSON.parse(request.body).messages[0].content);return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(categoryResponse(packet))}],usage:{input_tokens:2,output_tokens:2}});};
+ const options={maxBatches:1,concurrency:1,sourceRoot:f.root,prepareBatch:b=>prepareStrideEvidence(b.packet,source)};
+ await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,options);
+ assert.equal(calls,1);assert.equal(f.model.featureReviewRun.calls,1);assert.equal(f.model.featureReviewRun.stopReason,'request-budget');
+ const partialSystem=systemModel(f.model),partialHtml=systemPrintReport(f.model);
+ const featureSection=partialHtml.split('<h2>Feature decisions across STRIDE</h2>')[1].split('<h2>')[0];
+ const reviewedFeatures=partialSystem.featureReview.features.filter(g=>g.categories.some(c=>c.decided||c.incomplete));
+ assert.equal((featureSection.match(/<tr>/g)||[]).length,1+Math.min(20,reviewedFeatures.length));
+ assert.match(featureSection,/Omitted groups are not cleared/);
+ assert.match(partialHtml,/wholly unreviewed component rows are omitted/);
+ await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{...options,runUntilComplete:true});
+ assert.equal(f.model.aiReview.coverage.pendingBatches,0);assert.equal(f.model.aiReview.coverage.failedBatches,0);
+ const done=calls;await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{...options,runUntilComplete:true});assert.equal(calls,done);
+ assert.equal(JSON.stringify(f.model.sourceGraph),graphBefore);
+ const s=systemModel(f.model);assert.ok(s.featureReview.features.length);assert.ok(s.featureReview.features.every(g=>g.categories.length===6));
+ assert.match(systemPrintReport(f.model),/Feature decisions across STRIDE/);
+});
+
+test('feature coverage cannot clear a category with an unresolved scenario or stale source',async t=>{
+ const f=await fixture(t),iface=f.model.interfaces.find(i=>i.direction==='inbound');
+ f.model.aiReview={status:'partial',basedOnRevision:f.model.modelRevision,scope:{interfaceIds:[iface.id]},batches:[{status:'completed',review:{categoryReviews:REPOSITORY_CATEGORIES.map(category=>({category,status:'no-scenario-identified',interfaceIds:[iface.id]}))}}]};
+ const system={components:[],threats:[{id:'x',origin:'analysis',interfaceIds:[iface.id],categories:['Tampering'],outcome:{kind:'investigation'}}]};
+ let summary=featureReviewSummary(f.model,system);assert.equal(summary.features[0].categories[1].state,'incomplete code');assert.equal(summary.complete,false);
+ assert.equal(summary.features[0].categories[0].state,'decision available');
+ f.model.aiReview.status='stale';summary=featureReviewSummary(f.model,system);assert.ok(summary.features[0].categories.every(c=>c.state==='stale'));assert.equal(summary.complete,false);
+});
+
+test('deployment questions preserve code outcome and invalidate answers when question or profile changes',async t=>{
+ const f=await fixture(t),iface=f.model.interfaces.find(i=>i.direction==='inbound');
+ const threat={id:'t',title:'Conditional write',category:'Tampering',interfaceIds:[iface.id],evidenceIds:iface.evidence};
+ f.model.aiReview={status:'partial',basedOnRevision:f.model.modelRevision,threats:[threat],scope:{poc:{profile:'Profile A'}}};
+ f.model.threatValidation={contextKey:threatValidationKey(f.model),entries:[{sourceId:'t',issueHash:sha(JSON.stringify(threatIssue(f.model,threat))),assessment:'static-supported',engineering:{conclusion:'Ordinary caller can write under the stated conditions',reviewerQuestions:[{question:'Can an ordinary user reach this route?',ifYes:'This access prerequisite applies.',ifNo:'This actor lacks the stated access.'}]}}]};
+ const before=JSON.stringify(f.model.threatValidation),q=deploymentDecisionQuestions(f.model)[0];
+ let m=recordDeploymentAnswer(f.model,{modelRevision:f.model.modelRevision,questionId:q.id,answer:'no',reviewer:'Owner',rationale:'Ingress permits administrators only'});
+ assert.equal(JSON.stringify(m.threatValidation),before);assert.equal(deploymentDecisionQuestions(m)[0].answer.answer,'no');
+ m.aiReview.scope.poc.profile='Profile B';assert.equal(deploymentDecisionQuestions(m)[0].answer,null);
+ assert.throws(()=>recordDeploymentAnswer(m,{modelRevision:m.modelRevision,questionId:q.id,answer:'yes',reviewer:'x',rationale:'y'}),/no longer current/);
+ m.threatValidation.entries[0].assessment='needs-context';assert.equal(deploymentDecisionQuestions(m).length,0);
+});
+
+test('missing indexed symbols use verified text fallback and changed source never supplies evidence',async t=>{
+ const f=await fixture(t),source=new InvestigationSource(f.model,f.manifest,f.root);
+ const result=await source.findImplementation(['IsAdmin'],[{repository:'app',path:'Controllers/EmailController.cs'}]);
+ assert.ok(result.references.some(r=>r.repository==='support'&&r.path==='RootController.cs'));
+ assert.match(result.interpretation,/no match does not establish/);
+ await fs.appendFile(path.join(f.root,'support','RootController.cs'),'\n// modified');
+ const changed=await source.findImplementation(['IsAdmin'],[]);
+ assert.equal(changed.references.length,0);assert.ok(changed.failures.some(f=>f.reason==='source-hash-mismatch'));
+ const bounded=await source.findImplementation(['MissingControl'],[],{maxFiles:1,maxBytes:2000000});assert.equal(bounded.searchedFiles,1);assert.equal(bounded.limited,true);
+});
+
+test('feature cohorts retrieve a named category control before expanding discovery and count the follow-up',async t=>{
+ const f=await fixture(t);await fs.writeFile(path.join(f.root,'support','Other.cs'),'class ExtraGuard { public void Verify() { throw new UnauthorizedAccessException(); } }');
+ f.model=await analyze(f.manifest,{sourceRoot:f.root});
+ f.model.pocScope=resolvePocScope(f.model,{kind:'repositories',title:'Features',profile:'Static',repositories:['app'],reviewDepth:'security-features'});
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root),config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'});let calls=0;
+ const send=async(_,request)=>{calls++;const packet=JSON.parse(JSON.parse(request.body).messages[0].content),response=categoryResponse(packet);
+  if(calls===1){response.categoryReviews[1].status='evidence-gap';response.categoryReviews[1].missingEvidence=['Inspect ExtraGuard implementation before deciding this path.'];}
+  else {assert.ok(packet.sourceContext.records.some(r=>r.path==='Other.cs'));assert.match(JSON.stringify(packet.sourceContext.priorReview),/ExtraGuard/);}
+  return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(response)}],usage:{input_tokens:2,output_tokens:2}});
+ };
+ await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root,verifiedSource:source,maxBatches:2,concurrency:1,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
+ assert.equal(calls,2);assert.equal(f.model.featureReviewRun.calls,2);assert.equal(f.model.featureReviewRun.engineeringCalls,1);assert.equal(f.model.featureReviewRun.reportedTokens,8);
+ assert.equal(f.model.featureEvidenceHistory.length,1);assert.equal(f.model.featureEvidenceHistory[0].previous.review.categoryReviews[1].status,'evidence-gap');
+ assert.ok(f.model.aiReview.coverage.pendingBatches>0);assert.equal(f.model.featureReviewRun.stopReason,'request-budget');
+});
+
+test('failed category follow-up preserves the prior paid result and stops provider dispatch',async t=>{
+ const f=await fixture(t);await fs.writeFile(path.join(f.root,'support','ExtraGuard.cs'),'class ExtraGuard { public void Verify() { throw new UnauthorizedAccessException(); } }');
+ f.model=await analyze(f.manifest,{sourceRoot:f.root});f.model.pocScope=resolvePocScope(f.model,{kind:'repositories',title:'Features',profile:'Static',repositories:['app'],reviewDepth:'security-features'});
+ const source=await verifiedStrideSource(f.model,f.manifest,f.root),config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'});let calls=0;
+ const send=async(_,request)=>{calls++;if(calls>1)return Response.json({error:{message:'not authorized'}},{status:403});
+  const packet=JSON.parse(JSON.parse(request.body).messages[0].content),response=categoryResponse(packet);response.categoryReviews[1].status='evidence-gap';response.categoryReviews[1].missingEvidence=['Inspect ExtraGuard implementation.'];
+  return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(response)}],usage:{input_tokens:2,output_tokens:2}});
+ };
+ await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root,verifiedSource:source,maxBatches:4,concurrency:1,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
+ assert.equal(calls,2);assert.equal(f.model.featureReviewRun.calls,2);assert.equal(f.model.featureReviewRun.stopReason,'provider-failure');
+ assert.equal(f.model.aiReview.coverage.completedBatches,1);assert.ok(f.model.featureEvidenceHistory[0].failure);
+ assert.equal(f.model.aiReview.batches.find(b=>b.status==='completed').review.categoryReviews[1].status,'evidence-gap');
+});
+
+test('feature coordinator requires source consent and cancellation makes no model calls',async t=>{
+ const f=await fixture(t);f.model.pocScope=resolvePocScope(f.model,{kind:'repositories',title:'Features',profile:'Static',repositories:['app'],reviewDepth:'security-features'});
+ const config=modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'synthetic'}),source=await verifiedStrideSource(f.model,f.manifest,f.root);
+ const send=()=>{throw Error('Must not call provider');};
+ await assert.rejects(reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root}),/explicit source sharing/);
+ const controller=new AbortController();controller.abort();
+ await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root,verifiedSource:source,signal:controller.signal,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
+ assert.equal(f.model.featureReviewRun.calls,0);assert.equal(f.model.featureReviewRun.stopReason,'cancelled');
 });

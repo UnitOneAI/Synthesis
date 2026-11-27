@@ -320,10 +320,13 @@ test("partial STRIDE PDF exports saved scenarios, actors, boundaries and incompl
     await expect(content).toContainText("Partial STRIDE review");
     await expect(content).toContainText("No current individually supported threats");
     await expect(content).toContainText("Named connections below are static context");
-    await expect(content).toContainText("Conditional caller identity bypass");
+    await expect(content).not.toContainText("Conditional caller identity bypass");
+    await expect(content).toContainText("unresolved hypotheses are omitted");
     await expect(content).toContainText(threatReference);
     await expect(report.locator("article")).toHaveCount(0);
-    await expect(content).toContainText("accepted");
+    const technical=await page.request.get(app.url.split('/#')[0]+'/api/export?format=threat-technical-html',{headers:{'X-Synthesis-Token':app.token}});
+    expect(technical.ok()).toBeTruthy();
+    expect(await technical.text()).toContain('Conditional caller identity bypass');
     const pdf = await report.pdf({
       path: testInfo.outputPath("partial-stride-review.pdf"),
       printBackground: true,
@@ -368,10 +371,10 @@ test("access filter carries from registers and matrix into partial PDF with mixe
     await page.getByRole('button',{name:'Export STRIDE review · PDF',exact:true}).click();
     const popup=await popupPromise;
     await expect(popup.locator('#report-status')).toContainText('Report ready');
-    await expect(popup.locator('#report-content')).toContainText('External result');
-    await expect(popup.locator('#report-content')).toContainText('Mixed result');
-    await expect(popup.locator('#report-content')).not.toContainText('Internal result');
-    await expect(popup.locator('#report-content')).not.toContainText('Unresolved result');
+    await expect(popup.locator('#report-content')).toContainText('T-FILTER-0');
+    await expect(popup.locator('#report-content')).toContainText('T-FILTER-2');
+    await expect(popup.locator('#report-content')).not.toContainText('T-FILTER-1');
+    await expect(popup.locator('#report-content')).not.toContainText('T-FILTER-3');
     await expect(popup.locator('#report-content')).toContainText('1 / 4 STRIDE packets');
     await expect(popup.locator('#report-content')).not.toContainText('Scenarios identified; 0 scenarios');
     await expect(popup.locator('#report-content')).toContainText('Reviewed scope');
