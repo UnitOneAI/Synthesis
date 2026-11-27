@@ -1,12 +1,12 @@
 import { sha } from './sources.mjs';
 import { redact } from './model-review.mjs';
-import { threatAssessment, threatValidationKey } from './threat-validation-state.mjs';
+import { threatAssessment, threatAssessmentLookup, threatValidationKey } from './threat-validation-state.mjs';
 
 export function deploymentDecisionQuestions(model) {
   const profile=model.aiReview?.scope?.poc?.profile || model.deploymentContext?.profile || 'Unspecified deployment profile';
-  const questions=[];
+  const questions=[],assessmentLookup=threatAssessmentLookup(model);
   for(const threat of model.aiReview?.threats || []) {
-    const assessment=threatAssessment(model,threat.id);
+    const assessment=threatAssessment(model,threat.id,assessmentLookup);
     if(!['static-supported','ruled-out'].includes(assessment.assessment))continue;
     for(const q of assessment.engineering?.reviewerQuestions || []) {
       const id=sha(JSON.stringify([threat.id,threatValidationKey(model),assessment.responseHash,assessment.issueHash,assessment.assessment,q,profile])).slice(0,24);

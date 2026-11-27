@@ -32,6 +32,10 @@ test('feature scope preview and deployment answers preserve graph and paid revie
   await form.getByRole('button',{name:'Save deployment answer'}).click();
   await page.getByText(/Deployment decisions for the reviewer/).click();
   await expect(page.locator('[data-deployment-question]')).toContainText('Recorded no by JCI reviewer');
+  const downloadPromise=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Export complete technical review · HTML',exact:true}).click();
+  const download=await downloadPromise;expect(download.suggestedFilename()).toBe('threat-model-technical-review.html');
+  expect(await fs.readFile(await download.path(),'utf8')).toContain('Deployment decisions');
   const read=()=>page.request.get(new URL(app.url).origin+'/api/model',{headers:{'X-Synthesis-Token':app.token}}).then(r=>r.json());
   const saved=await read();expect(saved.sourceGraph.fingerprint).toBe(fingerprint);delete saved.aiReview.staleReason;expect(JSON.stringify(saved.aiReview)).toBe(original);
   const unauthorized=await page.request.post(new URL(app.url).origin+'/api/threats/deployment-answer',{data:{}});expect(unauthorized.status()).toBe(401);

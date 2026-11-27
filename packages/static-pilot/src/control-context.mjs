@@ -20,6 +20,15 @@ export async function controlContext(source, seeds, text = '') {
   const explicit = controlSymbols(text);
   const names = [...new Set([...bootstrap,...explicit.flatMap(n=>/^I[A-Z]/.test(n)?[n,n.slice(1)]:[n]), 'Authorize','AuthorizeAttribute','AllowAnonymous','Startup','Program','RootController','ConfigureServices','AddAuthorization','UseAuthentication','UseAuthorization'])].slice(0,40);
   const references=[], searches=[];
+  // FastAPI router-level dependencies apply even when handlers have no Depends
+  // parameters. Retrieve the local constructor call, never its import binding.
+  if(seeds.some(s=>/\.py$/i.test(s.path))) {
+    const nodes=[];let after='';
+    for(let page=0;page<4;page++){const result=source.search('APIRouter',after);nodes.push(...result.items);after=result.next;if(!after)break;}
+    const local=nodes.filter(n=>n.kind==='call' && n.name==='APIRouter' && seeds.some(s=>s.repository===n.repository && s.path===n.path));
+    for(const n of local.slice(0,3))references.push({repository:n.repository,path:n.path,line:n.line||1,basis:'application-registration-candidate'});
+    searches.push({symbol:'APIRouter',matches:local.length,truncated:Boolean(after)||local.length>3,basis:'Local router constructor candidate; inspect dependency arguments and binding'});
+  }
   for (const symbol of names) {
     let result=cache.get(symbol);
     if (!result) {

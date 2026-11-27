@@ -9,7 +9,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-9';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-11';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 // CWE's generic missingEvidence bucket mixes deployment questions with code
@@ -70,7 +70,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     if(found.some(definition))found=found.filter(definition);
     searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
-    for (const n of found) if (refs.length < 16 && !refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
+    for (const n of found.slice(0,requiredSymbols.has(symbol)?1:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
       refs.push({ repository: n.repository, path: n.path, line: n.line || 1, definition:definition(n), required:requiredSymbols.has(symbol) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
@@ -80,7 +80,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
   const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
-  const references = [...refs.filter(r=>r.required&&r.definition).map(r=>({...r,basis:'requested-definition'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required&&!r.definition).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,basis:'requested-local-declaration'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -185,6 +185,11 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
       // never treat a previous model conclusion as fresh source evidence.
       const prior=previous || priorEntries.get(issue.id);
       const anchors=[];
+      // Carry established entry, operation, binding and control citations across
+      // rounds. A new missing declaration must not erase an already-read helper.
+      for(const obligation of prior?.engineering?.obligations || [])for(const ref of (obligation.citations || []).slice(0,1)) {
+        if(!anchors.some(a=>a.repository===ref.repository&&a.path===ref.path&&a.line===ref.startLine))anchors.push({...ref,line:ref.startLine});
+      }
       for(const role of ['control','input','sink']) for(const ref of (prior?.trace || []).filter(r=>r.role===role).slice(0,2)) {
         if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.line)) anchors.push({...ref,line:ref.line || ref.startLine});
       }

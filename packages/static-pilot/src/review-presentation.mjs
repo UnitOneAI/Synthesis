@@ -2,11 +2,12 @@ import {citationCoversEvidence} from './source-citation.mjs';
 import {threatOutcome, investigationAction} from './threat-outcome.mjs';
 import {repositoryAssessmentSummary} from './repository-assessment-summary.mjs';
 import {actorAccess, threatAccess} from './threat-access.mjs';
-import { threatAssessment } from './threat-validation-state.mjs';
+import { threatAssessment, threatAssessmentLookup } from './threat-validation-state.mjs';
 import { sourceScope } from "./architecture.mjs";
 
 // Display references never replace saved IDs or enter review fingerprints.
 export function addReviewPresentation(s, model) {
+  const assessmentLookup=threatAssessmentLookup(model);
   for (const [kind, prefix] of [
     ["threats", "T"],
     ["boundaries", "TB"],
@@ -117,7 +118,7 @@ export function addReviewPresentation(s, model) {
       : refs.some(r=>/(?:package-lock|yarn.lock|packages.lock|package.json)/i.test(r.path)) && /known.vulnerab|outdated|supply.chain|dependency/i.test(t.name) && !/CVE-\d{4}-\d+/i.test(argument)
         ? 'Dependency / build review obligation' : null;
     if (t.followUpKind && !severity) {rank=4;label=t.followUpKind;reasons.push('Preserved follow-up; not a demonstrated current exploitable path.');}
-    t.validation = threatAssessment(model, t.id);
+    t.validation = threatAssessment(model, t.id, assessmentLookup);
     const sourceThreat=sourceThreats.get(t.id);
     const sourceBatch=sourceBatches.get(sourceThreat?.batchId);
     const categoryAssessment=sourceBatch?.review?.categoryReviews?.find(c=>t.categories.includes(c.category));

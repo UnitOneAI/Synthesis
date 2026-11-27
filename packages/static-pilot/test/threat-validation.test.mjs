@@ -416,3 +416,33 @@ test('requested implementation outranks repeated call sites and generic control 
  assert.ok(packet.records.some(r=>r.startLine===500&&r.endLine===520));
  assert.ok(packet.records.length<4,'Repeated callers must not crowd out the implementation');
 });
+
+test('bulk assessment lookup preserves stale and current decisions without a cross-revision cache',async t=>{
+ const {threatAssessmentLookup}=await import('../src/threat-validation-state.mjs');
+ const f=await threatFixture(t);
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:1,fetchImpl:async(_,r)=>answer(JSON.parse(JSON.parse(r.body).messages[0].content))});
+ let lookup=threatAssessmentLookup(f.model);
+ for(const threat of f.model.aiReview.threats)assert.deepEqual(threatAssessment(f.model,threat.id,lookup),threatAssessment(f.model,threat.id));
+ f.model.modelRevision='changed';lookup=threatAssessmentLookup(f.model);assert.equal(threatAssessment(f.model,'saved-threat-0',lookup).assessment,'stale');
+});
+
+test('new named definitions and router declarations survive a full queue of old follow-up windows',async()=>{
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const source={search:s=>({items:s==='_resolve_gap'?[{id:'helper',kind:'function',name:s,repository:'service',path:'routes.py',line:500,endLine:520}]:s==='APIRouter'?[{id:'router',kind:'call',name:s,repository:'service',path:'routes.py',line:400,endLine:400}]:[],next:null}),nodes:()=>[],edges:()=>({items:[]}),file:()=>({}),functionWindow:async ref=>({id:ref.path+ref.line,repository:ref.repository,path:ref.path,blobSha256:'hash',startLine:ref.line,endLine:ref.line+20,lines:Array.from({length:21},(_,n)=>({line:ref.line+n,text:'verified fixture line'}))})};
+ const issue={locations:[{repository:'service',path:'routes.py',line:1}],controls:'',explanation:''};
+ const prior=Array.from({length:16},(_,n)=>({repository:'service',path:'prior'+n+'.py',line:1}));
+ const packet=await threatInvestigationPacket({interfaces:[],evidence:[]},{},'',issue,prior,{},['Read _resolve_gap and APIRouter implementations.'],source);
+ assert.ok(packet.records.some(r=>r.path==='routes.py'&&r.startLine===500));
+ assert.ok(packet.records.some(r=>r.path==='routes.py'&&r.startLine===400));
+ assert.ok(packet.gaps.some(g=>g.reason==='required-source-window-limit'));
+});
+
+test('composed control evidence accepts up to eight citations and validates every added citation',async t=>{
+ const f=await threatFixture(t);const {threatInvestigationPacket,validateThreatAssessment}=await import('../src/threat-validation.mjs');
+ const {threatIssue}=await import('../src/threat-validation-state.mjs');
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,threatIssue(f.model,f.model.aiReview.threats[0]),[],{});
+ const response=await answer(packet).json(),value=JSON.parse(response.content[0].text),control=value.engineering.obligations[3];
+ control.citations=Array.from({length:8},()=>({...control.citations[0]}));assert.equal(validateThreatAssessment(value,packet).assessment,'ruled-out');
+ control.citations[7].recordId='not-submitted';assert.throws(()=>validateThreatAssessment(value,packet),/citation outside submitted source/);
+ control.citations=Array.from({length:9},()=>({...value.controls[0]}));assert.throws(()=>validateThreatAssessment(value,packet),/at most eight citations/);
+});

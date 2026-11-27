@@ -3,7 +3,7 @@ import { reviewThreatScenarios, THREAT_RETRIEVAL_VERSION } from './threat-valida
 import { pocReviewPlan } from './poc-scope.mjs';
 import { controlContext, controlSymbols } from './control-context.mjs';
 import { prepareStrideEvidence, verifiedStrideSource } from './stride-evidence.mjs';
-import { threatAssessment } from './threat-validation-state.mjs';
+import { threatAssessment, threatAssessmentLookup } from './threat-validation-state.mjs';
 import { sha } from './sources.mjs';
 
 // Single coordinator owns the mutable workspace. Discovery uses the existing
@@ -15,10 +15,18 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
   const plan=options.plan || pocReviewPlan(model,excerpts);
   if(plan.scope?.poc?.reviewDepth!=='security-features')throw Error('Save a security-feature scope before running feature cohorts');
   const continuous=options.runUntilComplete===true;
+  const batchesById=new Map(plan.batches.map(b=>[b.id,b]));
+  const historyCounts=new Map();for(const h of model.featureEvidenceHistory || [])historyCounts.set(h.key,(historyCounts.get(h.key)||0)+1);
   const source=options.verifiedSource || await verifiedStrideSource(model,manifest,options.sourceRoot,options.progress);
   const run={version:1,scopeId:plan.scope.poc.id,status:'running',phase:'planning',calls:0,discoveryCalls:0,engineeringCalls:0,cohorts:0,startedAt:new Date().toISOString(),budget:continuous?null:budget};
   model.featureReviewRun=run;
-  const save=()=>options.checkpoint?.(model.aiReview,model.usageLedger);
+  const initialAttempts=new Set((model.usageLedger?.attempts || []).map(a=>a.id));
+  const save=()=>{
+    const attempts=(model.usageLedger?.attempts || []).filter(a=>!initialAttempts.has(a.id));
+    run.reportedTokens=attempts.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);
+    run.unknownUsageRequests=attempts.filter(a=>!a.usage).length;
+    return options.checkpoint?.(model.aiReview,model.usageLedger);
+  };
   const remaining=()=>continuous?100:Math.max(0,budget-run.calls);
   const followCategoryEvidence=async()=>{
     const current=[...(model.aiReview?.batches || [])];
@@ -27,10 +35,9 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
       const missing=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').flatMap(c=>c.modelMissingEvidence || c.missingEvidence || []);
       const symbols=controlSymbols(missing.join(' '));
       if(previous.status!=='completed'||!symbols.length)continue;
-      const batch=plan.batches.find(b=>b.id===previous.id);if(!batch)continue;
+      const batch=batchesById.get(previous.id);if(!batch)continue;
       const key=sha(JSON.stringify([model.modelRevision,plan.scope.poc.id,batch.id]));
-      const history=(model.featureEvidenceHistory || []).filter(h=>h.key===key);
-      if(history.length>=2)continue;
+      if((historyCounts.get(key)||0)>=2)continue;
       const seeds=batch.packet.records.flatMap(r=>r.evidence);
       const controls=await controlContext(source,seeds,missing.join(' '));
       const fallback=await source.findImplementation(symbols,seeds);
@@ -38,6 +45,7 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
       if(prepared.context.fingerprint===previous.evidenceContext?.fingerprint)continue;
       // Retain the paid prior result before a forced evidence reassessment.
       model.featureEvidenceHistory=[...(model.featureEvidenceHistory || []),{key,batchId:batch.id,previous,at:new Date().toISOString()}];
+      historyCounts.set(key,(historyCounts.get(key)||0)+1);
       run.phase='category evidence';options.progress?.('Following exact missing category controls before expanding discovery');await save();
       await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,maxBatches:1,concurrency:1,
         batchIds:[batch.id],forceBatchIds:[batch.id],prepareBatch:async()=>prepared,checkpoint:save});
@@ -54,8 +62,9 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
   };
   const settle=async()=>{
     if(!remaining()||!model.aiReview?.coverage?.completedBatches||!model.aiReview.threats?.length)return;
+    const assessmentLookup=threatAssessmentLookup(model);
     const threatIds=model.aiReview.threats.filter(t=>{
-      const a=threatAssessment(model,t.id);
+      const a=threatAssessment(model,t.id,assessmentLookup);
       if(a.assessment==='static-supported'&&!a.challengeCompleted)return true;
       return !['static-supported','ruled-out'].includes(a.assessment) && !(model.threatValidation?.retrievalVersion===THREAT_RETRIEVAL_VERSION && a.assessment==='needs-context' && (a.rounds>=3 || a.stopReason==='no-new-evidence'));
     }).map(t=>t.id);

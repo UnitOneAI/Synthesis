@@ -102,6 +102,13 @@ test('Python control context includes application composition and prefers produc
  assert.equal(result.references[0].path,'api/server.py');
 });
 
+test('Python control context retrieves local router dependency declarations before imports or unrelated routers',async()=>{
+ const source={search:(s,after)=>({items:s!=='APIRouter'?[]:after?[{kind:'call',name:s,repository:'app',path:'api/routes.py',line:1136}]:[{kind:'interface',name:'Static import-binding APIRouter',repository:'app',path:'api/routes.py',line:41},{kind:'call',name:s,repository:'other',path:'routes.py',line:12}],next:s==='APIRouter'&&!after?'page2':null})};
+ const result=await controlContext(source,[{repository:'app',path:'api/routes.py',line:1175}]);
+ assert.deepEqual(result.references,[{repository:'app',path:'api/routes.py',line:1136,basis:'application-registration-candidate'}]);
+ assert.equal(result.searches.find(s=>s.symbol==='APIRouter').truncated,false);
+});
+
 import {validateRepositoryReview,REPOSITORY_CATEGORIES,repositoryAssessmentSummary} from '../src/repository-assessment.mjs';
 function categoryResponse(packet){return {summary:'Static category assessment of supplied source.',threats:[],connections:[],questions:[],explorationRequests:[],categoryReviews:REPOSITORY_CATEGORIES.map(category=>({category,status:'no-scenario-identified',interfaceIds:packet.reviewUnit.primaryInterfaceIds,rationale:'The supplied code was reviewed for this category; no scenario was identified in this bounded evidence.',citations:packet.sourceContext.records.map(r=>({recordId:r.id,line:r.startLine,endLine:r.endLine,role:'context'})),threatIndexes:[],missingEvidence:[],deploymentConditions:['Deployed exposure is not verified.'],remediation:''}))};}
 test('repository scope has no operation cutoff, retains internal surfaces and keeps supporting source available',async t=>{
@@ -295,7 +302,7 @@ test('feature cohorts retrieve a named category control before expanding discove
   return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(response)}],usage:{input_tokens:2,output_tokens:2}});
  };
  await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root,verifiedSource:source,maxBatches:2,concurrency:1,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
- assert.equal(calls,2);assert.equal(f.model.featureReviewRun.calls,2);assert.equal(f.model.featureReviewRun.engineeringCalls,1);
+ assert.equal(calls,2);assert.equal(f.model.featureReviewRun.calls,2);assert.equal(f.model.featureReviewRun.engineeringCalls,1);assert.equal(f.model.featureReviewRun.reportedTokens,8);
  assert.equal(f.model.featureEvidenceHistory.length,1);assert.equal(f.model.featureEvidenceHistory[0].previous.review.categoryReviews[1].status,'evidence-gap');
  assert.ok(f.model.aiReview.coverage.pendingBatches>0);assert.equal(f.model.featureReviewRun.stopReason,'request-budget');
 });

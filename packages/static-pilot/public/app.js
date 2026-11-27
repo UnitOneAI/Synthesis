@@ -889,6 +889,7 @@ async function download(format, preview = false, options = {}) {
     components: "component-register.csv",
     assets: "asset-register.csv",
     html: "threat-model.html",
+    "threat-technical-html": "threat-model-technical-review.html",
     svg: "dfd.svg",
     manifest: "reviewed-manifest.json",
     mermaid: "dfd.mmd",
