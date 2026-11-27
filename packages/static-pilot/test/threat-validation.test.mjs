@@ -431,9 +431,11 @@ test('new named definitions and router declarations survive a full queue of old 
  const source={search:s=>({items:s==='_resolve_gap'?[{id:'helper',kind:'function',name:s,repository:'service',path:'routes.py',line:500,endLine:520}]:s==='APIRouter'?[{id:'router',kind:'call',name:s,repository:'service',path:'routes.py',line:400,endLine:400}]:[],next:null}),nodes:()=>[],edges:()=>({items:[]}),file:()=>({}),functionWindow:async ref=>({id:ref.path+ref.line,repository:ref.repository,path:ref.path,blobSha256:'hash',startLine:ref.line,endLine:ref.line+20,lines:Array.from({length:21},(_,n)=>({line:ref.line+n,text:'verified fixture line'}))})};
  const issue={locations:[{repository:'service',path:'routes.py',line:1}],controls:'',explanation:''};
  const prior=Array.from({length:16},(_,n)=>({repository:'service',path:'prior'+n+'.py',line:1}));
+ source.findImplementation=async symbols=>{assert.ok(!symbols.includes('APIRouter'),'Local constructor must not trigger a portfolio-wide router text search');return {references:[]};};
  const packet=await threatInvestigationPacket({interfaces:[],evidence:[]},{},'',issue,prior,{},['Read _resolve_gap and APIRouter implementations.'],source);
  assert.ok(packet.records.some(r=>r.path==='routes.py'&&r.startLine===500));
  assert.ok(packet.records.some(r=>r.path==='routes.py'&&r.startLine===400));
+ assert.equal(packet.retrieval.controlSearches.find(s=>s.symbol==='APIRouter').declarationMatches,1);
  assert.ok(packet.gaps.some(g=>g.reason==='required-source-window-limit'));
 });
 
@@ -445,4 +447,15 @@ test('composed control evidence accepts up to eight citations and validates ever
  control.citations=Array.from({length:8},()=>({...control.citations[0]}));assert.equal(validateThreatAssessment(value,packet).assessment,'ruled-out');
  control.citations[7].recordId='not-submitted';assert.throws(()=>validateThreatAssessment(value,packet),/citation outside submitted source/);
  control.citations=Array.from({length:9},()=>({...value.controls[0]}));assert.throws(()=>validateThreatAssessment(value,packet),/at most eight citations/);
+});
+
+test('unbound text-search candidates cannot turn unrelated files into required code dependencies',async()=>{
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const source={search:()=>({items:[],next:null}),nodes:()=>[],edges:()=>({items:[]}),file:()=>({}),findImplementation:async()=>({references:Array.from({length:16},(_,n)=>({repository:'service',path:'unrelated'+n+'.py',line:1,required:true})),limited:true}),functionWindow:async ref=>({id:ref.path,repository:ref.repository,path:ref.path,blobSha256:'hash',startLine:1,endLine:20,lines:Array.from({length:20},(_,n)=>({line:n+1,text:'candidate code'}))})};
+ const issue={locations:[{repository:'service',path:'routes.py',line:1}],controls:'',explanation:''};
+ const packet=await threatInvestigationPacket({interfaces:[],evidence:[]},{},'',issue,[],{},['Inspect REQUIRE_AUTH.'],source);
+ assert.ok(packet.retrieval.candidateWindowsOmitted>0);
+ assert.equal(packet.gaps.length,0);
+ assert.ok(packet.records.some(r=>r.path==='routes.py'));
+ assert.equal(packet.retrieval.indexedSourceSearch.limited,true);
 });

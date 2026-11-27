@@ -9,7 +9,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-11';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-12';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 // CWE's generic missingEvidence bucket mixes deployment questions with code
@@ -68,19 +68,23 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') ||
       Number(sameRepository(b))-Number(sameRepository(a)) || Number(a.kind === 'file')-Number(b.kind === 'file')).slice(0,4);
     if(found.some(definition))found=found.filter(definition);
-    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
+    const declarationMatches=symbol==='APIRouter'?found.filter(n=>n.kind==='call'&&sameFile(n)).length:0;
+    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
     for (const n of found.slice(0,requiredSymbols.has(symbol)?1:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
       refs.push({ repository: n.repository, path: n.path, line: n.line || 1, definition:definition(n), required:requiredSymbols.has(symbol) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
-  const unresolvedSymbols=searches.filter(s=>s.requested&&!s.definitionMatches).map(s=>s.symbol);
+  const unresolvedSymbols=searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol);
   const fallback = source.findImplementation && unresolvedSymbols.length
     ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
   const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
-  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,basis:'requested-local-declaration'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  // Text hits are unbound candidates. Explicit requested locations stay required;
+  // unrelated hits must not become mandatory dependencies merely by matching a
+  // framework/constant name. Omitted candidates remain visible in retrieval.
+  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:false,basis:'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
