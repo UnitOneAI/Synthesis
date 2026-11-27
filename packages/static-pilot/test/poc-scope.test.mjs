@@ -250,6 +250,12 @@ test('feature cohort budgets include discovery and resume without rebuilding or 
  const options={maxBatches:1,concurrency:1,sourceRoot:f.root,prepareBatch:b=>prepareStrideEvidence(b.packet,source)};
  await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,options);
  assert.equal(calls,1);assert.equal(f.model.featureReviewRun.calls,1);assert.equal(f.model.featureReviewRun.stopReason,'request-budget');
+ const partialSystem=systemModel(f.model),partialHtml=systemPrintReport(f.model);
+ const featureSection=partialHtml.split('<h2>Feature decisions across STRIDE</h2>')[1].split('<h2>')[0];
+ const reviewedFeatures=partialSystem.featureReview.features.filter(g=>g.categories.some(c=>c.decided||c.incomplete));
+ assert.equal((featureSection.match(/<tr>/g)||[]).length,1+Math.min(20,reviewedFeatures.length));
+ assert.match(featureSection,/Omitted groups are not cleared/);
+ assert.match(partialHtml,/wholly unreviewed component rows are omitted/);
  await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{...options,runUntilComplete:true});
  assert.equal(f.model.aiReview.coverage.pendingBatches,0);assert.equal(f.model.aiReview.coverage.failedBatches,0);
  const done=calls;await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{...options,runUntilComplete:true});assert.equal(calls,done);

@@ -558,7 +558,11 @@ export function systemPrintReport(model, options = {}) {
     return `<article><h3>${e(t.reference)} · ${c.status === "open" ? "Open question" : "Conditional threat"}</h3><p>${e(c.statement)}</p><p><b>Condition or missing link</b> · ${e(c.condition)}</p><p><b>Next action</b> · ${e(c.nextAction)}</p><p>Reviewed by ${e(c.reviewer)} · Automated assessment: ${e(t.validation.assessment)}</p><ul>${c.citations.map(r => `<li>${e(r.repository)} / ${e(r.path)}:${e(r.startLine)}–${e(r.endLine)}</li>`).join("")}</ul></article>`;
   }).join("")}` : "";
   const featureRows=s.featureReview?.features || [];
-  const featureSection=hasResults?`<h2>Feature decisions across STRIDE</h2><p>${e(s.featureReview?.interpretation)} ${technical?'All feature groups shown.':`Showing ${Math.min(20,featureRows.length)} of ${featureRows.length} feature groups; complete coverage is in the technical export.`}</p>${table(['Feature / source',...CATEGORIES],(technical?featureRows:featureRows.slice(0,20)).map(f=>[`${f.name}: ${f.repository} / ${f.path}`,...f.categories.map(c=>`${c.state}; ${c.decided}/${c.total} decisions`)]))}`:'';
+  const reviewedFeatures=featureRows.filter(f=>f.categories.some(c=>c.decided||c.incomplete));
+  const shownFeatures=technical?featureRows:reviewedFeatures.slice(0,20);
+  const scopedMatrix=s.matrix.filter(r=>r.rowKind==='component' && (!review?.scope?.interfaceIds?.length || r.interfaceIds.some(id=>review.scope.interfaceIds.includes(id))) && (filter.scope==='all'||r.cells.some(c=>c.threatIds?.some(id=>currentScenarioIds.has(id)))));
+  const shownMatrix=technical?scopedMatrix:scopedMatrix.filter(r=>r.cells.some(c=>!['not-analyzed','outside-scope'].includes(c.analysisStatus)));
+  const featureSection=hasResults?`<h2>Feature decisions across STRIDE</h2><p>${e(s.featureReview?.interpretation)} ${technical?'All feature groups shown.':`Showing ${shownFeatures.length} groups with recorded assessments; ${featureRows.length-shownFeatures.length} other groups remain in the complete technical export. Omitted groups are not cleared.`}</p>${table(['Feature / source',...CATEGORIES],shownFeatures.map(f=>[`${f.name}: ${f.repository} / ${f.path}`,...f.categories.map(c=>`${c.state}; ${c.decided}/${c.total} decisions`)]))}`:'';
   const decisionQuestions=(s.deploymentDecisionQuestions || []).filter(q=>currentScenarioIds.has(q.threatId));
   const questionSection=hasResults?`<h2>Deployment decisions</h2><p>Reviewer declarations change the stated deployment condition only. They do not establish runtime behavior or repair missing code evidence. ${technical?'':`Showing up to 12 of ${decisionQuestions.length} questions; all remain in the technical export.`}</p>${table(['Question / profile','If yes / if no','Recorded answer and basis'],(technical?decisionQuestions:decisionQuestions.slice(0,12)).map(q=>[`${q.question} Profile: ${q.profile}`,`Yes: ${q.ifYes} No: ${q.ifNo}`,q.answer?`${q.answer.answer} — ${q.answer.reviewer}: ${q.answer.rationale}. ${q.consequence}`:'Unanswered; retain the stated condition.']))}`:'';
   const threatDetails = `<h2>Threat details</h2><p>${detailed.length} supported threats shown in detail. Unassessed and unresolved scenarios remain in the disposition register; they are not expanded into speculative finding narratives. This report excludes repeated checklist text and empty property rows.</p>${
@@ -600,16 +604,10 @@ export function systemPrintReport(model, options = {}) {
   <h2>Focused investigation work</h2><p>Follow missing code, bindings and controls in the saved graph before asking deployment questions. A missing search result is not proof that a control is absent. These tasks do not count as fully analyzed threats. Matching requests are grouped for readability; every path still requires its own assessment. A- references identify tasks in this export only. ${technical?"All tasks shown.":`Showing ${Math.min(5,investigationGroups.length)} of ${investigationGroups.length} task groups. The full technical export retains the remainder.`}</p>${table(['Analysis task','Related scenarios','Starting source'], (technical?investigationGroups:investigationGroups.slice(0,5)).map(g=>{
     return [g.reference+': '+g.action,(technical?g.scenarios:g.scenarios.slice(0,3)).map(t=>t.reference).join(', ')+(g.scenarios.length>3&&!technical?`; ${g.scenarios.length-3} more in technical export`:''),[...new Set((technical?g.scenarios:g.scenarios.slice(0,3)).map(citations))].join('; ')];
   }))}
-  <h2>System context from static extraction</h2><p>Named connections below are static context, not runtime reachability or proof of complete review. Unresolved peers stay in the connection worklist instead of appearing as unknown HTTP boxes.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,scenarios)}
-  <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. The complete HTML/JSON export retains all scope rows.</p>${table(
+  <h2>System context from static extraction</h2><p>Named connections below are static context, not runtime reachability or proof of complete review. Unresolved peers stay in the connection worklist instead of appearing as unknown HTTP boxes.</p><h3>Overall system DFD</h3>${printDiagrams(model,s,technical?scenarios:supported,technical)}
+  <h2>STRIDE matrix</h2><p>Partially analyzed means some interfaces in the row have been reviewed. Not analyzed means none have. Source conclusions do not advance STRIDE packet coverage. Counts cover returned scenarios. Unreviewed or failed cells are not a clean assessment. ${scopedMatrix.length-shownMatrix.length} wholly unreviewed component rows are omitted here and retained in the complete technical export; they are not cleared.</p>${table(
     ["Component", ...CATEGORIES],
-    s.matrix
-      .filter(
-        (r) =>
-          r.rowKind === "component" &&
-          (!review?.scope?.interfaceIds?.length || r.interfaceIds.some(id=>review.scope.interfaceIds.includes(id))) &&
-          (filter.scope === 'all' || r.cells.some(c => c.threatIds?.some(id => currentScenarioIds.has(id)))),
-      )
+    shownMatrix
       .map((r) => [
         r.name,
         ...r.cells.map(
@@ -668,11 +666,16 @@ export function systemPrintReport(model, options = {}) {
   ])}${deployment}${PRINT_FOOTER}</body></html>`;
 }
 
-function printDiagrams(model, s, scenarios) {
-  const scope = model.aiReview?.scope?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []);
+function printDiagrams(model, s, scenarios, technical=false) {
+  const scope = technical ? model.aiReview?.scope?.interfaceIds || scenarios.flatMap(t=>t.interfaceIds || []) : [...new Set(scenarios.flatMap(t=>t.interfaceIds || []))];
   const selected = new Set(scope);
   const flows = s.flows.filter(f => f.basis !== 'unresolved' && !['rejected','stale'].includes(f.reviewState) && f.interfaceIds?.some(id=>selected.has(id)));
   if (!flows.length) return '<p>No resolved component-to-component path is available for this reviewed scope. No overview diagram is published. Use the cited source paths and resolve caller/destination bindings in Connection declarations; this does not imply that the components are disconnected.</p>';
-  const focus = s.components.filter(c=>flows.some(f=>f.source===c.id || f.target===c.id)).slice(0,6);
-  return `<p>${flows.length} resolved static flow records in the selected scope. Up to six component views show at most 24 objects each; omitted relationships remain in the complete graph export. Static connections do not establish deployed reachability.</p>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · connected paths</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:false,limit:24,interfaceIds:scope})}</section>`).join('');
+  const seenViews=new Set();
+  const focus = s.components.filter(c=>{
+    const connected=flows.filter(f=>f.source===c.id || f.target===c.id);if(!connected.length)return false;
+    const key=connected.map(f=>f.id).sort().join('|');
+    if(!technical&&seenViews.has(key))return false;seenViews.add(key);return true;
+  }).slice(0,technical?6:2);
+  return `<p>${flows.length} resolved static flow records ${technical?'in the selected scope':'linked to the supported threat interfaces'}. Up to ${technical?'six':'two'} component views show at most 24 objects each; omitted relationships remain in the complete graph export. Static connections do not establish deployed reachability.</p>` + focus.map(c=>`<section class="dfd-sheet"><h3>${e(c.name)} · connected paths</h3>${systemSvg(model,{level:'focus',focus:c.id,showUnresolved:false,limit:24,interfaceIds:scope})}</section>`).join('');
 }
