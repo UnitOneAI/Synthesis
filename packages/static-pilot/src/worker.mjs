@@ -1,4 +1,5 @@
 import {assessCompletedPoc} from './threat-validation.mjs';
+import {reviewFeatureCohorts} from './feature-review-run.mjs';
 import {
   verifiedStrideSource,
   prepareStrideEvidence,
@@ -36,7 +37,7 @@ try {
           : resolve();
       };
       parentPort.on("message", ack);
-      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes, threatValidation: workerData.model?.threatValidation });
+      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes, threatValidation: workerData.model?.threatValidation,featureReviewRun:workerData.model?.featureReviewRun,featureEvidenceHistory:workerData.model?.featureEvidenceHistory });
     });
   const trace = (event, data) =>
     new Promise((resolve, reject) => {
@@ -83,7 +84,9 @@ try {
       : null;
   const model =
     workerData.mode === "review"
-      ? await enrichGraphModel(
+      ? await (workerData.options.reviewScope==='poc' && workerData.model.pocScope?.reviewDepth==='security-features'
+          ? (model,config,excerpts,fetchImpl,options)=>reviewFeatureCohorts(model,workerData.manifest,config,excerpts,fetchImpl,{...options,sourceRoot:workerData.options.sourceRoot,verifiedSource:source})
+          : enrichGraphModel)(
           workerData.model,
           workerData.options.modelConfig,
           excerpts,

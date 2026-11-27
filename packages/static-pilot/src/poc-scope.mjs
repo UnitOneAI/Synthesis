@@ -36,7 +36,9 @@ export function pocReviewPlan(model, excerpts = new Map()) {
   if (poc.interfaceIds.some(id=>!covered.has(id))) throw Error('POC has an operation that cannot fit a review packet; narrow the scope before running');
   plan.scope.poc = poc;
   plan.scope.version += poc.kind==='repositories' ? ':repositories-1' : ':poc-2';
-  if(poc.kind==='repositories'){plan.scope.repositoryInventory=repositoryInventory(model,poc);plan.semantics='All identified security surfaces in selected primary repositories, including internal, configuration and supporting/test surfaces. Cross-repository evidence remains available. File and category gaps prevent a claim of complete repository assessment.';return plan;}
+  if(poc.kind==='repositories'){plan.scope.repositoryInventory=repositoryInventory(model,poc);plan.semantics=poc.reviewDepth==='security-features'
+    ? 'Security features: identified entry, outbound, worker, data and control/configuration surfaces in the primary repositories. Helper definitions remain traversable context, not independently reviewed subjects. All six categories apply to each selected subject. This is not whole-repository clearance.'
+    : 'All identified security surfaces in selected primary repositories, including internal, configuration and supporting/test surfaces. Cross-repository evidence remains available. File and category gaps prevent a claim of complete repository assessment.';return plan;}
   plan.semantics = 'Selected inbound operations and directly supplied controls only. Other repositories remain available for evidence retrieval, not full review.';
   return plan;
 }

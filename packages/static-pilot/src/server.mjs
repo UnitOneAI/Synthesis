@@ -1,6 +1,8 @@
 import {REPOSITORY_PROMPT} from './repository-assessment.mjs';
 import {resolvePocScope,pocReviewPlan} from './poc-scope.mjs';
 import { reviewThreatScenarios } from './threat-validation.mjs';
+import { recordDeploymentAnswer } from './reviewer-questions.mjs';
+import { threatDecisionReport } from './threat-report.mjs';
 import { deploymentContext, updateDeploymentContext } from './deployment-context.mjs';
 import { systemReviewPlan } from './system-review-units.mjs';
 import { STRIDE_INVESTIGATION_PROMPT } from "./stride-evidence.mjs";
@@ -563,6 +565,8 @@ export async function serve({
           model.usageLedger = m.usageLedger;
           if (m.savedStrideScopes) model.savedStrideScopes = m.savedStrideScopes;
           if (m.threatValidation) model.threatValidation = m.threatValidation;
+          if (m.featureReviewRun) model.featureReviewRun = m.featureReviewRun;
+          if (m.featureEvidenceHistory) model.featureEvidenceHistory = m.featureEvidenceHistory;
           await checkpoint();
           if (worker === active)
             active.postMessage({
@@ -597,6 +601,7 @@ export async function serve({
           job = {
             status: "ready",
             message:
+              model.featureReviewRun?.scopeId===model.aiReview?.scope?.poc?.id && model.featureReviewRun ? `Feature workflow saved: ${model.featureReviewRun.discoveryCalls} discovery requests and ${model.featureReviewRun.engineeringCalls} engineering requests this action. Stop: ${model.featureReviewRun.stopReason}. Inspect feature decisions and remaining scope below.` :
               model.aiReview?.scope?.poc && model.threatValidation ? `POC packets: ${model.aiReview.coverage.completedBatches}/${model.aiReview.coverage.totalBatches}. Code assessment: ${model.threatValidation.assessmentCounts?.sourceSupported || 0} supported, ${model.threatValidation.assessmentCounts?.ruledOut || 0} ruled out, ${model.threatValidation.assessmentCounts?.needsCodeContext || 0} need context, ${model.threatValidation.assessmentCounts?.failed || 0} failed. Inspect unassessed scenarios and deployment assumptions.` :
               model.aiReview?.status === "failed"
                 ? "Graph retained; model review FAILED. See review details."
@@ -1263,6 +1268,12 @@ export async function serve({
           });
         return send(202, job);
       }
+      if (req.method === 'POST' && url.pathname === '/api/threats/deployment-answer') {
+        if(!model || ['running','cancelling'].includes(job.status))return send(409,{error:'Open the saved graph and stop the current review before recording a deployment answer'});
+        model=recordDeploymentAnswer(model,await body(req));
+        await checkpoint();if(persistenceError)throw Error('Deployment answer could not be saved');
+        return send(200,outputModel());
+      }
       if (req.method === 'POST' && url.pathname === '/api/threats/validate') {
         const input = await body(req);
         if (!model || ['running', 'cancelling'].includes(job.status)) return send(409, { error: 'Open the saved graph and wait for the current operation' });
@@ -1623,6 +1634,7 @@ export async function serve({
           "cwe-sarif": "cwe-findings.sarif",
           html: "threat-model.html",
           "threat-print-html": "threat-model-review.html",
+          "threat-technical-html": "threat-model-technical-review.html",
           securityControls: "control-register.csv",
           actors: "actor-register.csv",
           boundaries: "boundary-register.csv",
@@ -1704,10 +1716,11 @@ export async function serve({
             usageCsv(model.usageLedger),
             "text/csv; charset=utf-8",
           );
-        if (format === "threat-print-html")
+        if (["threat-print-html","threat-technical-html"].includes(format))
           return send(
             200,
-            systemPrintReport(model, {
+            await threatDecisionReport(model, manifest, root, {
+              technical:format==='threat-technical-html',
               accessScope: url.searchParams.get('accessScope') || 'all',
               includeUnresolved: url.searchParams.get('includeUnresolved') !== 'false',
             }),

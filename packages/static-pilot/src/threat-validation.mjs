@@ -9,7 +9,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-7';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-9';
 
 const pathEvidence = {anyOf:[{type:'null'},{type:'object',additionalProperties:false,properties:{recordId:{type:'string'},startLine:{type:'integer'},endLine:{type:'integer'},reason:{type:'string'}},required:['recordId','startLine','endLine','reason']}]};
 // CWE's generic missingEvidence bucket mixes deployment questions with code
@@ -23,7 +23,7 @@ export const THREAT_ASSESSMENT_SCHEMA = {
 };
 export const THREAT_ASSESSMENT_PROMPT = SECURITY_REVIEW_PROMPT + ENGINEERING_PROMPT + `
 Challenge the original claim before extending it. A name/path search miss is not evidence of an absent control. In standard ASP.NET Core, an unresolved named authorization policy throws; do not assert fail-open or fallback-policy bypass without evidence of a custom path and its behavior. Resolve controller/base attributes, global filters, policy registration, requirement handlers and middleware ordering from supplied code. Distinguish custom behavior and framework version from assumptions. Do not invent a tenant isolation requirement: identify the actual role/object ownership rule and its enforcement. Echoing a caller's own headers does not establish theft of another user's credentials; cite the additional trust crossing or rule out that claimed path. For SSRF establish destination provenance, caller control and filtering before asserting access to a chosen internal service. Evaluate intended current behavior, not a hypothetical future code change. A hardening guide is a declared baseline, not proof of effective deployment; infrastructure controls do not automatically repair a product control flaw. A directly cited unauthorized persistent write is itself a sensitive operation; downstream uses are needed only for additional claimed impacts. Do not require an inventory of other affected endpoints or proof that operators commonly choose a configuration to assess the stated conditional path. Keep those broader questions in remediation.validation. Reviewer questions must identify a specific deployment or intended-access decision and how each answer changes this path. Missing code and bindings are retrieval work for this investigation, not generic questions for the reviewer.
-For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Reserve missingEvidence for missing CODE, callers, binding, control implementations or declared configuration needed to establish that argument. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must stay in missingEvidence; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
+For saved STRIDE assessment add deploymentAssumptions: an array of at most eight unverified deployment conditions. assessment describes the CODE argument under those explicit conditions, not deployed exploitability. Record missing CODE, callers, binding, control implementations or declared configuration in the affected engineering.obligations entry with status missing and a precise reason. Missing runtime network exposure, actual environment-variable values, effective runtime identity and selected deployed profile belong in deploymentAssumptions. A missing authorization filter, caller, ownership check or source-to-sink link must remain a missing engineering obligation; never move a code gap into deploymentAssumptions to obtain a favorable status. Conditional source-supported code concerns still require input and sink citations and consideration of opposing controls. Use needs-context if the code argument itself remains incomplete. No deployment assumption is verified or approved by this assessment. Assess the stated path, not the complete application blast radius. A complete list of other endpoints, unrelated startup warnings or every deployment template is not required to establish a cited conditional path; put broader follow-up work in remediation.validation. Also return inputEvidence and sinkEvidence, each either null or {recordId,startLine,endLine,reason}. inputEvidence cites the request/entry point; sinkEvidence cites the sensitive operation. Use null if that step is missing, never invent it. These explicit citations supplement trace and have the same exact-window rules. For static-supported, provide both entry and operation evidence; for needs-context, identify the missing link. Keep trace to at most 14 steps when adding these two citations.`;
 export function validateThreatAssessment(value, packet) {
   const {deploymentAssumptions,inputEvidence,sinkEvidence,engineering,missingEvidence,...rest}=value || {};
   const trace=Array.isArray(rest.trace)?[...rest.trace]:[];
@@ -50,8 +50,9 @@ You are the critical engineering reviewer, separate from the discovery assessmen
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
-  const symbols = controlSymbols([...missing, issue.controls, issue.explanation, JSON.stringify(issue.analysis || {})].join(' '));
   const requiredSymbols = new Set(controlSymbols(missing.join(' ')));
+  const symbols = [...new Set([...requiredSymbols,...controlSymbols([issue.controls, issue.explanation].join(' '))])];
+  const definition = n => ['function','class','method','type'].includes(n.kind);
   const refs = [], searches = [], gaps = [];
   for (const symbol of symbols) {
     const matches = []; let after = '';
@@ -63,19 +64,23 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }
     const sameFile = n => issue.locations.some(r=>r.repository===n.repository && r.path===n.path);
     const sameRepository = n => issue.locations.some(r=>r.repository===n.repository);
-    const found = matches.sort((a,b) => Number(sameFile(b))-Number(sameFile(a)) ||
+    let found = matches.sort((a,b) => Number(definition(b))-Number(definition(a)) || Number(sameFile(b))-Number(sameFile(a)) ||
       Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') ||
       Number(sameRepository(b))-Number(sameRepository(a)) || Number(a.kind === 'file')-Number(b.kind === 'file')).slice(0,4);
-    searches.push({ symbol, matches: found.length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
+    if(found.some(definition))found=found.filter(definition);
+    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
     for (const n of found) if (refs.length < 16 && !refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, required:requiredSymbols.has(symbol) });
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, definition:definition(n), required:requiredSymbols.has(symbol) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
+  const unresolvedSymbols=searches.filter(s=>s.requested&&!s.definitionMatches).map(s=>s.symbol);
+  const fallback = source.findImplementation && unresolvedSymbols.length
+    ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
   const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
-  const references = [...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...refs.filter(r=>r.required&&r.definition).map(r=>({...r,basis:'requested-definition'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...refs.filter(r=>r.required&&!r.definition).map(r=>({...r,basis:'requested-symbol'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -127,12 +132,13 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const reason=next.length>12 ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
+      if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,detail:'Only a partial function window was supplied; do not infer full control coverage.'});
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
   for(let i=gaps.length-1;i>=0;i--) if(gaps[i].startLine && records.some(r=>r.repository===gaps[i].repository && r.path===gaps[i].path && r.startLine<=gaps[i].startLine && r.endLine>=gaps[i].endLine)) gaps.splice(i,1);
   const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
-    citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; report any required unresolved code path in missingEvidence. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Describe missing named functions in missingEvidence for a bounded follow-up search.',
-    retrieval:{coalescedWindows,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; record any required unresolved code path in a missing engineering obligation. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Name missing functions in the affected engineering obligation reason for bounded follow-up retrieval.',
+    retrieval:{coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }

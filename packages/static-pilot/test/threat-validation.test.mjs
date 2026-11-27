@@ -235,7 +235,7 @@ test('named control retrieval prioritizes production implementations before matc
  const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
  const {threatIssue}=await import('../src/threat-validation-state.mjs');
  const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,threatIssue(f.model,f.model.aiReview.threats[0]),[],{},['Inspect PermissionFilter']);
- const refs=packet.records.filter(r=>r.basis==='requested-symbol' || r.basis==='combined hash-matched source windows');
+ const refs=packet.records.filter(r=>r.basis==='requested-definition' || r.basis==='requested-symbol' || r.basis==='combined hash-matched source windows');
  assert.ok(refs.some(r=>r.repository==='repo11' && r.path==='PermissionFilter.cs'));
  const search=packet.retrieval.controlSearches.find(r=>r.symbol==='PermissionFilter');
  assert.ok(search.requested);
@@ -392,4 +392,27 @@ test('a positive result on the last evidence round still receives its bounded cr
  assert.equal(calls,3);assert.equal(f.model.threatValidation.entries[0].rounds,4);
  assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
  assert.equal(f.model.threatValidation.entries[0].challengeCompleted,true);
+});
+
+test('feature engineering completes a missing-control round before opening the next case',async t=>{
+ const f=await threatFixture(t),order=[];let first=true;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:3,finishCaseFirst:true,threatIds:['saved-threat-0','saved-threat-1'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);order.push(p.candidate.id);const data=await answer(p).json();
+  if(first){first=false;const v=JSON.parse(data.content[0].text);v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];data.content[0].text=JSON.stringify(v);}
+  return Response.json(data);
+ }});
+ assert.deepEqual(order,['saved-threat-0','saved-threat-0','saved-threat-1']);assert.equal(f.model.threatValidation.callsThisRun,3);
+});
+
+test('requested implementation outranks repeated call sites and generic control candidates',async()=>{
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const functionNode={id:'z-definition',kind:'function',name:'_resolve_gap',repository:'service',path:'routes.py',line:500,endLine:520};
+ const calls=Array.from({length:12},(_,n)=>({...functionNode,id:'a-call-'+n,kind:'call',line:n*25+1,endLine:n*25+1}));
+ const source={search:s=>({items:s==='_resolve_gap'?[...calls,functionNode]:[],next:null}),nodes:()=>[],edges:()=>({items:[]}),file:()=>({}),functionWindow:async ref=>({id:String(ref.line),repository:ref.repository,path:ref.path,blobSha256:'hash',startLine:ref.line,endLine:ref.line+20,lines:Array.from({length:21},(_,n)=>({line:ref.line+n,text:ref.line===500?'def _resolve_gap(): pass':'caller()'}))})};
+ const issue={locations:[{repository:'service',path:'routes.py',line:1}],controls:'',explanation:''};
+ const packet=await threatInvestigationPacket({interfaces:[],evidence:[]},{},'',issue,[],{},['Read _resolve_gap implementation.'],source);
+ const search=packet.retrieval.controlSearches.find(s=>s.symbol==='_resolve_gap');
+ assert.equal(search.definitionMatches,1);assert.deepEqual(search.nodeIds,['z-definition']);
+ assert.ok(packet.records.some(r=>r.startLine===500&&r.endLine===520));
+ assert.ok(packet.records.length<4,'Repeated callers must not crowd out the implementation');
 });

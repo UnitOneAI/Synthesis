@@ -75,7 +75,8 @@ test('system STRIDE produces scenarios and matrix before deep coverage, then sel
   assert.ok(f.model.aiReview.scope.deferredInterfaces > 0);
   const html = systemPrintReport(f.model);
   assert.match(html, /Deployment assumptions and review scope/);
-  assert.match(html, /Conditional operation authorization gap/);
+  assert.match(systemPrintReport(f.model,{technical:true}), /Conditional operation authorization gap/);
+  assert.match(html, /unresolved hypotheses are omitted/);
   assert.match(html, /deferred to deep code review/);
   const prior = f.model.aiReview.batches.filter(b => !b.deploymentQuestionIds.includes('exposure')).map(b => b.id);
   assert.ok(prior.length, 'Fixture must exercise unaffected units');

@@ -315,6 +315,7 @@ export async function reviewSecurityIssues(
     validateResponse = validateSecurityAssessment,
     retainConclusiveOnPromptChange = false,
     challengePrompt,
+    finishCaseFirst = false,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -411,7 +412,8 @@ export async function reviewSecurityIssues(
       return rounds(a) - rounds(b) || scopePriority(a) - scopePriority(b);
     });
   try {
-    for (const item of queue) {
+    for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
+      const item=queue[queueIndex];
       if (signal?.aborted) throw Error("Security review cancelled");
       if (!runUntilComplete && report.callsThisRun >= budget) break;
       const old = report.entries.find(
@@ -604,7 +606,7 @@ export async function reviewSecurityIssues(
         (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))))) &&
         entry.rounds < roundLimit(entry)
       )
-        queue.push(item);
+        finishCaseFirst ? queue.splice(queueIndex+1,0,item) : queue.push(item);
     }
     report.pending = issues.filter(
       (i) =>

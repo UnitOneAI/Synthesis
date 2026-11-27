@@ -1,4 +1,6 @@
 import { deploymentContext } from './deployment-context.mjs';
+import { featureReviewSummary } from './feature-review.mjs';
+import { deploymentDecisionQuestions } from './reviewer-questions.mjs';
 import { addReviewPresentation } from "./review-presentation.mjs";
 import { internalTopology } from "./internal-topology.mjs";
 import { architectureComponents, sourceScope } from "./architecture.mjs";
@@ -530,7 +532,10 @@ export function systemModel(model, { matrix = true } = {}) {
   ]);
   result.deploymentContext = deploymentContext(model, result);
   result.matrix = matrix ? systemMatrix(result, model, w) : [];
-  return addReviewPresentation(result, model);
+  const presented=addReviewPresentation(result, model);
+  presented.featureReview=featureReviewSummary(model,presented);
+  presented.deploymentDecisionQuestions=deploymentDecisionQuestions(model);
+  return presented;
 }
 
 export function systemMatrix(s, model, w = model.architecture || empty()) {

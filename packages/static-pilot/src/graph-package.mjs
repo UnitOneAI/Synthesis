@@ -97,7 +97,9 @@ function scrub(value, secrets, roots) {
 }
 
 // Read only the explicitly selected local file, never recollect or parse repositories.
-export async function sourceWindow(ref, manifest, root) {
+// Shared containment/hash/redaction gate for snippets and bounded indexed search.
+// Never expose unverified raw file contents to a model or a search caller.
+export async function verifiedSourceFile(ref, manifest, root) {
   const source = manifest.repositories.find(
     (s) => s.name === ref.repository && s.selected !== false,
   );
@@ -167,6 +169,11 @@ export async function sourceWindow(ref, manifest, root) {
       if (/-----END [^-]*PRIVATE KEY-----/.test(line)) privateKey = false;
       return sensitive ? "[private key omitted]" : redact(line);
     });
+  return { repository:ref.repository, path:ref.path, blobSha256:ref.blobSha256, lines, bytes:bytes.length };
+}
+
+export async function sourceWindow(ref, manifest, root) {
+  const {lines}=await verifiedSourceFile(ref,manifest,root);
   const startLine = Math.max(1, (ref.line || 1) - 20);
   if (startLine > lines.length) throw Error("source-line-out-of-range");
   const endLine = Math.min(

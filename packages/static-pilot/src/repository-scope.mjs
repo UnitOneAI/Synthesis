@@ -7,6 +7,11 @@ import { sourceScope } from "./architecture.mjs";
 export const navigationOnly = (i) =>
   i.kind === "architecture" &&
   ["symbol-call", "import-binding"].includes(i.connection?.role);
+export const securityFeatureSubject = i => !navigationOnly(i) && (
+  ['inbound','outbound','resource'].includes(i.direction) ||
+  ['control','connection-config'].includes(i.kind) ||
+  ['worker','store-use','external-use','execution-identity','entrypoint','process','host-binding','proxy-target'].includes(i.connection?.role)
+);
 export function resolveRepositoryScope(model, input) {
   const text = (v, n) => {
     if (typeof v !== "string" || !v.trim() || v.length > 240)
@@ -28,15 +33,19 @@ export function resolveRepositoryScope(model, input) {
   for (const name of repositories)
     if (!model.sources.some((s) => s.name === name))
       throw Error("Repository not in saved graph: " + name);
+  const reviewDepth=input.reviewDepth ?? 'all-subjects';
+  if(!['all-subjects','security-features'].includes(reviewDepth))throw Error('Invalid repository review depth');
   const definition = {
     kind: "repositories",
     title: text(input.title, "title"),
     profile: text(input.profile, "profile"),
     repositories,
+    ...(reviewDepth==='security-features'?{reviewDepth}:{}),
   };
   const selected = new Set(repositories),
     records = model.interfaces.filter((i) => selected.has(i.repository));
-  const interfaces = records.filter((i) => !navigationOnly(i));
+  const interfaces = records.filter((i) => reviewDepth==='security-features' ? securityFeatureSubject(i) : !navigationOnly(i));
+  if(!interfaces.length)throw Error('No primary review subjects in this saved scope');
   // No endpoint, production-only, file-name or 12-packet cutoff in repository scope.
   return {
     ...definition,
@@ -48,6 +57,7 @@ export function resolveRepositoryScope(model, input) {
       .filter((s) => !selected.has(s.name))
       .map((s) => s.name),
     navigationRecords: records.length - interfaces.length,
+    contextOnlySubjects:records.filter(i=>!navigationOnly(i)).length-interfaces.length,
   };
 }
 export function repositoryInventory(model, scope) {

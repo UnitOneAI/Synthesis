@@ -299,12 +299,12 @@ test("shareable STRIDE report gates findings on current results and explains sou
   });
   const html = systemPrintReport(f.model);
   assert.match(html, /1 current returned threat scenarios/);
-  assert.match(html, /Complete scenario disposition register/);
+  assert.match(html, /Decided paths/);
   assert.match(html, /Review order and coverage/);
   assert.match(html, /Potential external entry points/);
   assert.match(html, /service \/ app.py:3/);
   assert.match(html, /No current individually supported threats/);
-  assert.match(html, /Investigation required/);
+  assert.match(html, /unresolved hypotheses are omitted/);
   assert.doesNotMatch(html, /<article id=/, 'A returned hypothesis must not become a finding narrative');
   assert.doesNotMatch(
     html,
@@ -370,8 +370,8 @@ test("architecture-only STRIDE responses become context questions, not detailed 
     /0 current returned threat scenarios; 1 architecture-only questions/,
   );
   assert.doesNotMatch(html, /Scenarios identified; 0 scenarios/);
-  assert.match(html, /Questions requiring implementation evidence/);
-  assert.match(html, /Unverified architecture concern/);
+  assert.doesNotMatch(html, /Questions requiring implementation evidence/);
+  assert.match(systemPrintReport(f.model,{technical:true}), /Unverified architecture concern/);
   assert.doesNotMatch(html, /<article id=/);
 });
 
@@ -396,17 +396,34 @@ test('decision report preserves every ID, separates supported paths and binds us
   f.model.threatValidation.entries[0].engineering={conclusion:'A caller with request access can change the reviewed record.',obligations:[{kind:'path-binding',reason:'The handler calls the write operation.',citations:[{repository:'service',path:'api.py',startLine:1,endLine:2}]}],reviewerQuestions:[{question:'Can an ordinary caller reach this route?',ifYes:'Apply the administrator check before writing.',ifNo:'This caller does not have the required access in this deployment.'}]};
   const saved=()=>JSON.stringify([f.model.aiReview,f.model.threatValidation,f.model.usageLedger,f.model.sourceGraph,f.model.modelRevision]);
   const before=saved();
-  const html=systemPrintReport(f.model),priority=html.split('<h2>Priority threats</h2>')[1].split('<h2>Complete scenario')[0];
+  const html=systemPrintReport(f.model),priority=html.split('<h2>Priority threats</h2>')[1].split('<h2>Decided paths')[0];
   assert.match(priority,/Supported path/);assert.doesNotMatch(priority,/Unassessed claim|Countered path/);
-  assert.match(html,/Ruled out for the cited path/);assert.match(html,/Unassessed claim/);
+  assert.match(html,/Ruled out for the cited path/);assert.match(systemPrintReport(f.model,{technical:true}),/Unassessed claim/);assert.match(html,/unresolved hypotheses are omitted/);
   assert.match(html,/12 \/ 3756 STRIDE packets completed/);
   assert.match(html,/2 of 3 scenarios received a code assessment/);
   assert.doesNotMatch(html,/reported tokens|Graph fingerprint|Source revision|STRIDE action/);
-  assert.doesNotMatch(html,/stride-action/);assert.match(html,/Analysis task A-01/);assert.doesNotMatch(html,/\[object Object\]/);
+  assert.doesNotMatch(html,/stride-action/);assert.match(html,/A-01/);assert.doesNotMatch(html,/\[object Object\]/);
   for(const category of ['Spoofing','Tampering','Repudiation','Information Disclosure','Denial of Service','Elevation of Privilege'])assert.ok(html.includes(category));
   assert.match(html,/A caller with request access can change the reviewed record/);
   assert.match(html,/Can an ordinary caller reach this route/);
   assert.match(html,/Yes: Apply the administrator check/);
-  assert.ok(html.indexOf('Decisions for the deployment reviewer')<html.indexOf('Complete scenario disposition register'));
+  assert.ok(html.indexOf('Threat details')<html.indexOf('Deployment decisions'));
+  assert.match(systemPrintReport(f.model,{technical:true}),/Decisions for the deployment reviewer/);
   assert.equal(saved(),before,'Export must not mutate paid results or their provenance');
+});
+
+test('threat decision export supplies escaped hash-checked code without changing saved assessments',async t=>{
+ const {threatDecisionReport}=await import('../src/threat-report.mjs');
+ const {threatValidationKey,threatIssue}=await import('../src/threat-validation-state.mjs');
+ const f=await reportFixture();cleanupAfter(t,()=>fs.rm(f.dir,{recursive:true,force:true}));
+ const iface=f.model.interfaces.find(i=>i.direction==='outbound');
+ const threat={id:'tls-code',title:'Conditional interception',category:'Information Disclosure',actor:'Intermediary',startingAccess:'Network path',scenario:'Disabled verification permits upstream impersonation',prerequisites:'Interception',controls:'TLS verification disabled',mitigation:'Enable TLS verification',interfaceIds:[iface.id],evidenceIds:iface.evidence};
+ f.model.aiReview={status:'partial',basedOnRevision:f.model.modelRevision,threats:[threat],connections:[],questions:[],batches:[],coverage:{completedBatches:1,totalBatches:2,pendingBatches:1}};
+ f.model.threatValidation={contextKey:threatValidationKey(f.model),entries:[{sourceId:threat.id,issueHash:sha(JSON.stringify(threatIssue(f.model,threat))),assessment:'static-supported',challengeCompleted:true,engineering:{conclusion:'An intermediary can impersonate upstream under the stated condition',obligations:[{kind:'sensitive-operation',reason:'TLS verification is explicitly disabled',citations:[{...f.ref,startLine:3,endLine:3}]}],reviewerQuestions:[]}}]};
+ const saved=()=>JSON.stringify([f.model.aiReview,f.model.threatValidation,f.model.sourceGraph,f.model.modelRevision]);
+ const before=saved(),html=await threatDecisionReport(f.model,f.manifest,f.root);
+ assert.match(html,/verify=False/);assert.match(html,/Hash matches the saved source file/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);assert.equal(saved(),before);
+ await fs.writeFile(path.join(f.root,'service','app.py'),'changed source');
+ const changed=await threatDecisionReport(f.model,f.manifest,f.root);assert.match(changed,/Revalidate before relying on current-source applicability/);assert.doesNotMatch(changed,/verify=False/);
+ assert.equal(saved(),before);
 });
