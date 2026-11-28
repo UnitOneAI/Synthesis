@@ -6,6 +6,7 @@ import {sha,within} from './sources.mjs';
 export const LOCAL_REVIEW_CACHE_VERSION='validated-section-response-1';
 export function stableJson(v){return JSON.stringify(v,(_,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);}
 export function cacheableReview(review) {
+  if(review?.batchVersion==='section-threat-batch-2')return Array.isArray(review.results)&&review.results.length>0&&review.results.every(r=>!r.error&&cacheableReview(r.review));
   if(review?.assessment)return ['static-supported','ruled-out'].includes(review.assessment)&&!review.decisionReviewRequired&&!review.evidenceGaps?.length&&!review.missingEvidence?.length&&!review.engineering?.obligations?.some(o=>o.status==='missing');
   return review?.categoryReviews?.length===6&&review.categoryReviews.every(c=>['supported-conditional','ruled-out','no-scenario-identified'].includes(c.status)&&!c.missingEvidence?.length);
 }

@@ -1,4 +1,4 @@
-# JCI automatic section threat modeling — 0.13.1
+# JCI automatic section threat modeling — 0.14.0
 
 This runs on the existing graph. It automatically chooses small sections and finishes their code investigations before advancing. There is no operation-selection confirmation. Reports are available as sections finish. A real missing implementation can block a section; it is never exported as complete. Other independent sections continue. Gateway access failures stop the run and preserve saved progress.
 
@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application checks failed.' }
 node -p "require('./package.json').version"
 ```
 
-Expect **0.13.1 or later**. Keep the JCI clones unchanged.
+Expect **0.14.0 or later**. Keep the JCI clones unchanged.
 
 ## 2. Start with the gateway
 
@@ -74,3 +74,11 @@ The section panel separates **provider requests**, **reported tokens**, **local 
 Keep the workspace when updating or restarting. Compatible completed sections already skip work; this cache additionally recovers exact validated responses when a review projection must be replayed. New code, assumptions, prompts or model settings require compatible fresh review. It does not reuse a conclusion for a different route simply because a helper matches. Existing 0.13.0 completed sections remain saved; the new cache starts empty and fills as new eligible requests finish.
 
 If the cache is unavailable, the UI reports that review is proceeding without it. Do not delete `snapshot.json` or `graph.sqlite` to clear a cache. If troubleshooting requires clearing only the cache, stop Synthesis first and remove only `review-cache.sqlite`. Cached response prose is confidential workspace data, and is excluded from diagnostic/graph exports.
+
+## Faster first runs and readable reports
+
+The same **Plan and run sections automatically** button now batches up to three related threats within each section by default. Common source and control analysis are shared, but each threat retains its own cited path, conditions and independent challenge. Nothing additional needs enabling. Keep using the existing graph; completed compatible sections stay saved.
+
+The section panel shows provider requests, case assessments/challenges and the requests that batched related threats. These are different counts: a shared request is billed once. All six categories still apply to every operation. A batch or section with missing evidence cannot claim completion.
+
+Reports place the decision, impact, conditions and developer action first. The full supporting argument and category evidence follow in an appendix, including in PDF. Save the complete report; no need to expand hidden evidence before printing. This is static analysis of source and collected configuration, not a live reachability test.

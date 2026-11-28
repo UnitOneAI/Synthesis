@@ -1,3 +1,4 @@
+import {reviewSectionThreats} from './section-batch-review.mjs';
 import { guidanceForRepositories } from './deployment-guidance.mjs';
 import { ENGINEERING_SCHEMA, ENGINEERING_PROMPT, validateEngineeringArgument } from './threat-engineering.mjs';
 import {sourceScope} from './architecture.mjs';
@@ -69,9 +70,11 @@ You are the critical engineering reviewer, separate from the discovery assessmen
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
+  let primaryOperationLocations;
   if(model.aiReview?.scope?.poc?.kind==='section') {
     const evidence=new Map(model.evidence.map(e=>[e.id,e]));
     const owned=model.interfaces.filter(i=>(issue.interfaceIds || []).includes(i.id)).flatMap(i=>i.evidence.map(id=>evidence.get(id))).filter(Boolean).map(e=>({repository:e.repository,path:e.path,line:e.line,blobSha256:e.blobSha256}));
+    primaryOperationLocations=owned;
     issue={...issue,locations:[...new Map([...issue.locations,...owned].map(r=>[r.repository+'\0'+r.path+'\0'+r.line,r])).values()]};
   }
 
@@ -186,6 +189,8 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; record any required unresolved code path in a missing engineering obligation. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Name missing functions in the affected engineering obligation reason for bounded follow-up retrieval.',
     retrieval:{sourceByteLimit,coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
+  // Internal batching ownership, not extra model context or a serial cache-key change.
+  if(primaryOperationLocations)Object.defineProperty(packet,'primaryOperationLocations',{value:primaryOperationLocations});
   return packet;
 }
 export async function reviewThreatScenarios(manifest, model, options = {}) {
@@ -231,7 +236,8 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
-  const report = await reviewSecurityIssues(manifest, model, {
+  const reviewer=options.config?.batchThreats===true && model.aiReview?.scope?.poc?.kind==='section' ? reviewSectionThreats : reviewSecurityIssues;
+  const report = await reviewer(manifest, model, {
     ...options, challengePrompt:THREAT_CHALLENGE_PROMPT, retainConclusiveOnPromptChange:true, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: async (m, mf, root, issue, follow, context, missing, previous) => {
       const projected = system.threats.find(t => t.id === issue.id);
