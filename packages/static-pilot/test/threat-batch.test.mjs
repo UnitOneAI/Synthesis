@@ -100,3 +100,8 @@ test('batch size uses transmitted source bytes, retaining every line and case un
  await reviewSectionThreats(f.manifest,f.model,{...f.options,packetBuilder:build,fetchImpl:async(_,req)=>{calls++;const wire=JSON.parse(JSON.parse(req.body).messages[0].content),p=expandEvidence(wire);assert.equal(p.cases.length,4);assert.equal(p.records.filter(r=>r.path==='shared-route.py').length,4);assert.ok(p.records.filter(r=>r.path==='shared-route.py').every(r=>r.lines.length===200&&r.lines[199].text==='x'.repeat(240)));return response(answer(p));}});
  assert.equal(calls,2);assert.equal(f.model.threatValidation.pending,0);assert.ok(f.model.threatValidation.entries.every(e=>e.challengeCompleted));
 });
+test('a shared pair cannot pull an unrelated third case into its batch',async t=>{
+ const f=await fixture(t);const groups=[];
+ await reviewSectionThreats(f.manifest,f.model,{...f.options,packetBuilder:async(m,mf,root,issue)=>{const n=Number(issue.id.slice(4)),p=packet(n);if(n>2)p.records[1]={...rec('other-control','control.py'),blobSha256:'different-source-hash',basis:'Other application'};return p;},fetchImpl:async(_,req)=>{const p=expandEvidence(JSON.parse(JSON.parse(req.body).messages[0].content));groups.push(p.cases.map(c=>c.caseId));return response(answer(p));}});
+ assert.deepEqual(groups,[['case1','case2'],['case1','case2'],['case3','case4'],['case3','case4']]);assert.equal(f.model.threatValidation.pending,0);
+});
