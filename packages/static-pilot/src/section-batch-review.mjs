@@ -12,7 +12,7 @@ import {threatBatch,batchSchema,validateThreatBatch,THREAT_BATCH_PROMPT,THREAT_B
 export async function reviewSectionThreats(manifest,model,options) {
  const {sourceRoot,config,budget=4,contextRounds=5,candidateIssues,contextKeyOverride:contextKey,systemPrompt,challengePrompt,responseSchema,validateResponse,packetBuilder,checkpoint,trace,progress,signal,fetchImpl=fetch}=options;
  if(!Number.isInteger(budget)||budget<1||budget>100||!Number.isInteger(contextRounds)||contextRounds<1||contextRounds>5)throw Error('Invalid section batch budget');
- const maxCases=options.batchSize ?? 4;if(!Number.isInteger(maxCases)||maxCases<1||maxCases>4)throw Error('Section batches allow 1–4 cases');
+ const maxCases=options.batchSize ?? 3;if(!Number.isInteger(maxCases)||maxCases<1||maxCases>4)throw Error('Section batches allow 1–4 cases');
  const key=sha(JSON.stringify([contextKey,systemPrompt,challengePrompt,config.provider,config.model,config.baseUrl,THREAT_BATCH_VERSION]));
  const previous=model.threatValidation?.contextKey===contextKey?model.threatValidation:null;
  const report={version:1,key,contextKey,basedOnRevision:model.modelRevision,promptHash:sha(systemPrompt),challengePromptHash:sha(challengePrompt),provider:config.provider,model:config.model,outputContract:config.structuredOutputs?'native-json-schema':'prompt-json',staticOnly:true,status:'running',entries:structuredClone(previous?.entries || []),events:[],callsThisRun:0,budget,candidateCount:candidateIssues.length,startedAt:new Date().toISOString(),batching:{version:THREAT_BATCH_VERSION,maxCases,requests:0,caseAssessments:0,sharedControlApplications:0,sharedSourceRecords:0,unbatchedInputBytes:0,batchedInputBytes:0},limits:{contextRounds,maxRequestsPerScenario:contextRounds+2,criticalCheck:true}};

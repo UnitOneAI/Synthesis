@@ -77,7 +77,7 @@ If the cache is unavailable, the UI reports that review is proceeding without it
 
 ## Faster first runs and readable reports
 
-The same **Plan and run sections automatically** button now batches related threats within each section. Common source and control analysis are shared, but each threat retains its own cited path, conditions and independent challenge. Nothing additional needs enabling. Keep using the existing graph; completed compatible sections stay saved.
+The same **Plan and run sections automatically** button now batches up to three related threats within each section by default. Common source and control analysis are shared, but each threat retains its own cited path, conditions and independent challenge. Nothing additional needs enabling. Keep using the existing graph; completed compatible sections stay saved.
 
 The section panel shows provider requests, case assessments/challenges and the requests that batched related threats. These are different counts: a shared request is billed once. All six categories still apply to every operation. A batch or section with missing evidence cannot claim completion.
 

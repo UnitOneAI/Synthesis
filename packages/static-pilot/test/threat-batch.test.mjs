@@ -26,7 +26,7 @@ test('uncertain controls and cross-case assumptions cannot settle another path',
  v.cases[0].controlApplications[0].effect='enforces';v.sharedControls[0].citations[0].recordId=batch.packet.cases[0].recordIds[0];const r=validateThreatBatch(v,batch,validateThreatAssessment);assert.match(r.results[0].error,/control obligation/);assert.match(r.results[1].error,/control obligation/);
  const unknown=answer(batch.packet);unknown.cases[0].caseId='invented';assert.throws(()=>validateThreatBatch(unknown,batch,validateThreatAssessment),/unknown case/);
 });
-async function fixture(t){const f=await reportFixture();t.after(()=>fs.rm(f.dir,{recursive:true,force:true}));const options={sourceRoot:f.root,config:{provider:'anthropic',model:'fixture',apiKey:'fixture-key',compactEvidence:true},candidateIssues:[1,2,3,4].map(n=>({id:'case'+n,sourceId:'case'+n,origin:'analysis',locations:[]})),contextKeyOverride:'fixture-context',systemPrompt:THREAT_ASSESSMENT_PROMPT,challengePrompt:THREAT_CHALLENGE_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment,packetBuilder:async(m,mf,root,issue)=>packet(Number(issue.id.slice(4))),budget:20};return {...f,options};}
+async function fixture(t){const f=await reportFixture();t.after(()=>fs.rm(f.dir,{recursive:true,force:true}));const options={sourceRoot:f.root,config:{provider:'anthropic',model:'fixture',apiKey:'fixture-key',compactEvidence:true},candidateIssues:[1,2,3,4].map(n=>({id:'case'+n,sourceId:'case'+n,origin:'analysis',locations:[]})),batchSize:4,contextKeyOverride:'fixture-context',systemPrompt:THREAT_ASSESSMENT_PROMPT,challengePrompt:THREAT_CHALLENGE_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment,packetBuilder:async(m,mf,root,issue)=>packet(Number(issue.id.slice(4))),budget:20};return {...f,options};}
 test('four cold cases use two actual calls including independent challenges, with one usage charge per batch',async t=>{
  const f=await fixture(t);let calls=0;await reviewSectionThreats(f.manifest,f.model,{...f.options,fetchImpl:async(_,req)=>{calls++;const body=JSON.parse(req.body);assert.equal(body.max_tokens,16384);return response(answer(expandEvidence(JSON.parse(body.messages[0].content))));}});
  assert.equal(calls,2);assert.equal(f.model.threatValidation.pending,0);assert.ok(f.model.threatValidation.entries.every(e=>e.challengeCompleted&&e.draftAssessment.assessment==='static-supported'));
@@ -104,4 +104,10 @@ test('a shared pair cannot pull an unrelated third case into its batch',async t=
  const f=await fixture(t);const groups=[];
  await reviewSectionThreats(f.manifest,f.model,{...f.options,packetBuilder:async(m,mf,root,issue)=>{const n=Number(issue.id.slice(4)),p=packet(n);if(n>2)p.records[1]={...rec('other-control','control.py'),blobSha256:'different-source-hash',basis:'Other application'};return p;},fetchImpl:async(_,req)=>{const p=expandEvidence(JSON.parse(JSON.parse(req.body).messages[0].content));groups.push(p.cases.map(c=>c.caseId));return response(answer(p));}});
  assert.deepEqual(groups,[['case1','case2'],['case1','case2'],['case3','case4'],['case3','case4']]);assert.equal(f.model.threatValidation.pending,0);
+});
+
+test('default batches three related cases and still challenges every remaining case',async t=>{
+ const f=await fixture(t),groups=[];delete f.options.batchSize;
+ await reviewSectionThreats(f.manifest,f.model,{...f.options,fetchImpl:async(_,req)=>{const p=expandEvidence(JSON.parse(JSON.parse(req.body).messages[0].content));groups.push(p.cases.map(c=>c.caseId));return response(answer(p));}});
+ assert.deepEqual(groups,[['case1','case2','case3'],['case1','case2','case3'],['case4'],['case4']]);assert.equal(f.model.threatValidation.pending,0);assert.ok(f.model.threatValidation.entries.every(e=>e.challengeCompleted));
 });
