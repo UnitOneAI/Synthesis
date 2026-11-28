@@ -29,7 +29,7 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
    try {cache=new LocalReviewCache(options.reviewCacheFile,{sourceRoot:options.sourceRoot});}
    catch {run.cacheNotice='Local assessment cache unavailable; validated review will proceed without reuse.';}
   }
-  const reviewConfig={...config,compactEvidence:true,localReviewCache:cache,localReviewContext:plan.contextKey,reviewEfficiency:efficiency};
+  const reviewConfig={...config,compactEvidence:true,batchThreats:options.batchThreats!==false,localReviewCache:cache,localReviewContext:plan.contextKey,reviewEfficiency:efficiency};
   const staticSystem=systemModel({...model,aiReview:undefined},{matrix:false});
   const staticContext={system:staticSystem,deployment:deploymentContext(model,staticSystem),priorities:interfacePriorities(model,staticSystem)};
   for(const section of plan.sections) {
@@ -59,6 +59,8 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
     const attempts=ledger.filter(a=>!beforeAttempts.has(a.id));
     result.attemptIds=[...new Set([...(result.attemptIds || []),...attempts.map(a=>a.id)])];
     const owned=new Set(result.attemptIds),total=ledger.filter(a=>owned.has(a.id));
+    result.batchedRequests=total.filter(a=>a.caseIds?.length>1).length;
+    result.caseAssessments=total.reduce((n,a)=>n+(a.caseIds?.length || 0),0);
     result.calls=total.length;result.reportedTokens=total.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);result.unknownUsageRequests=total.filter(a=>!a.usage).length;
     result.actionCalls=attempts.length;result.actionTokens=attempts.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);result.actionUnknown=attempts.filter(a=>!a.usage).length;
     result.localCacheHits=priorHits+(cache?.stats.hits || 0)-beforeHits;

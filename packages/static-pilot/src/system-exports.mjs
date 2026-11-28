@@ -23,6 +23,21 @@ export function decisionPathHtml(path) {
   if(!path)return '';
   return `<section class="decision-path"><h4>Actor-to-operation evidence</h4><p><strong>${e(path.actor)}</strong> · Required access: ${e(path.access)}</p><p>${e(path.pathStatus)}. ${e(path.interpretation)}</p><ol>${path.stages.map(stage=>`<li><strong>${e(stage.label)} · ${e(stage.status)}</strong><p>${e(stage.explanation)}</p>${stage.citations.map(c=>`<small>${e(c.repository)} / ${e(c.path)}:${e(c.startLine)}–${e(c.endLine)}</small>`).join('<br>')}</li>`).join('')}</ol><p><strong>Exposure:</strong> ${e(path.declaredExposure)}<br><strong>Runtime:</strong> ${e(path.runtime)}</p><p><strong>Decision consistency:</strong> ${e(path.consistency.status)} — ${e(path.consistency.reason)}</p><p><strong>Linked boundaries:</strong> ${e(path.boundaries.map(b=>`${b.reference}: ${b.name} (${b.state})`).join('; ') || 'No case-specific boundary established.')} These links do not approve enforcement.</p><p>Evidence repositories: ${e(path.repositories.join(', ') || 'None recorded')}. Multiple repositories alone do not demonstrate a security benefit; the cited control or binding must change the decision.</p></section>`;
 }
+// Present saved conclusions without another model call or lossy sentence trimming.
+// Conditions stay visible; the full engineering argument remains expandable.
+export function threatBriefHtml(t,{includeDetails=true}={}) {
+ const a=t.validation || {},eng=a.engineering,path=t.decisionPath;
+ const row=(label,value)=>value?`<p class="${label==='Developer action'?'required-action':''}"><strong>${e(label)}:</strong> ${e(value)}</p>`:'';
+ const conditions=eng?.conditions || [];
+ const refs=[...new Map((eng?.obligations || []).flatMap(o=>o.citations || []).map(c=>[JSON.stringify([c.repository,c.path,c.startLine,c.endLine]),c])).values()];
+ const controls=eng?.obligations?.find(o=>o.kind==='applicable-controls');
+ const ruled=t.outcome?.kind==='ruled-out'||a.assessment==='ruled-out';
+ return `<div class="threat-brief"><p class="conclusion"><strong>Decision:</strong> ${e(t.sourceConclusion?.statement || eng?.conclusion || t.scenario || t.name)}</p>${row('Impact',a.impact)}${row('Actor and required access',[path?.actor || a.actor,path?.access || a.initialAccess].filter(Boolean).join(' — '))}${row(ruled?'Why this path is blocked':'Controls on this path',controls?.reason || a.counterEvidence || t.controls)}${t.sourceConclusion?.condition?row('Condition',t.sourceConclusion.condition):conditions.length?`<p><strong>Applies only when all conditions hold:</strong></p><ul class="conditions">${conditions.map(c=>`<li>${e(c.statement)} <strong>Required: ${e(c.requiredAnswer)}.</strong></li>`).join('')}</ul>`:row('Condition',(a.deploymentAssumptions || []).join('; ') || t.prerequisites)}${row(ruled?'Preserve this protection':'Developer action',t.sourceConclusion?.nextAction || a.remediation?.codeFix || t.mitigation)}${row('Verify the change',a.remediation?.validation)}${row('Owner',t.decision?.stale?'Unassigned':t.decision?.owner || 'Unassigned')}${refs.length?`<p class="evidence-references"><strong>Code evidence:</strong> ${refs.map(c=>`${e(c.repository)} / ${e(c.path)}:${e(c.startLine)}–${e(c.endLine)}`).join('; ')}</p>`:''}${includeDetails?`<details class="supporting-detail"><summary>Full path, opposing evidence and review rationale</summary>${threatSupportingHtml(t)}</details>`:''}</div>`;
+}
+export function threatSupportingHtml(t) {
+ const a=t.validation || {},row=(label,value)=>value?`<p><strong>${e(label)}:</strong> ${e(value)}</p>`:'';
+ return `${decisionPathHtml(t.decisionPath)}${row('Opposing evidence considered',a.counterEvidence)}${(a.sharedControlApplications || []).map(c=>row('Shared control — '+c.effect,c.conclusion+' '+c.reason)).join('')}${row('Interim control',a.remediation?.interimControl)}${row('Residual risk',a.remediation?.residualRisk)}${row('Recovery',a.remediation?.recovery)}${row('Approval',a.remediation?.approval)}${row('Rollback',a.remediation?.rollback)}`;
+}
 export function selectedPath(s, actorId) {
   return actorPath(s, actorId).flowIds;
 }
@@ -588,6 +603,7 @@ export function systemPrintReport(model, options = {}) {
               ['Automation still requested',t.sourceConclusion && t.validation.assessment==='needs-context' ? (t.validation.missingEvidence || []).join('; ') : null],
               ['Remediation owner',t.decision?.stale ? 'Unassigned' : t.decision?.owner || 'Unassigned; security champion to assign'],
             ];
+            if(!technical)return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.outcome?.label || "Conditional threat")}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)}</p>${threatBriefHtml(t,{includeDetails:false})}${(options.snippets?.[t.id] || []).map(w=>w.gap?`<p class="gap">${e(w.gap)}</p>`:`<h4>${e(w.repository)} / ${e(w.path)}:${w.startLine}–${w.endLine}</h4><p class="meta">${e(w.basis)}</p><pre>${w.lines.map(l=>`${l.line} ${e(l.text)}`).join("\n")}</pre>${w.limited?"<p>Excerpt shortened; the full cited range remains in source.</p>":""}`).join("")}</article>`;
             return `<article id="${e(t.reference)}"><h3>${e(t.reference)} · ${e(t.name)}</h3><p class="meta">${e(t.categories.join(", "))} · ${e(t.reviewPriority.label)} · Reviewer decision: ${e(t.reviewState)}</p><p>${e(t.sourceConclusion?.statement || t.validation?.engineering?.conclusion || t.scenario)}</p>${paragraphs
               .filter(([, v]) => v)
               .map(
@@ -672,7 +688,7 @@ export function systemPrintReport(model, options = {}) {
     ['Declared configuration','Repository configuration, environment-variable reads and defaults, installer or deployment definitions may support a conclusion when collected and cited. A setting in source is intended configuration, not proof of its effective value. Uncited configuration remains unverified.'],
     ['Deployment profile','The selected profile is an explicit assumption. Actual ingress, network reachability, service identities, permissions and overrides have not been verified.'],
     ['Runtime','Not analyzed. No target code, requests, exploit attempts or live-system probes are executed. The scanner host environment and model gateway are not evidence of the target deployment.'],
-  ])}${deployment}${PRINT_FOOTER}</body></html>`;
+  ])}${deployment}${!technical&&detailed.length?`<section class="supporting-appendix"><h2>Appendix · full threat evidence and rationale</h2><p>Supporting detail for the decisions above. No prerequisites or evidence have been removed from this report.</p>${detailed.map(t=>`<article><h3>${e(t.reference)} · supporting evidence</h3>${threatSupportingHtml(t)}</article>`).join('')}</section>`:''}${PRINT_FOOTER}</body></html>`;
 }
 
 function printDiagrams(model, s, scenarios, technical=false) {

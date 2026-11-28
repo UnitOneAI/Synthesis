@@ -1,3 +1,4 @@
+import {reviewSectionThreats} from './section-batch-review.mjs';
 import { guidanceForRepositories } from './deployment-guidance.mjs';
 import { ENGINEERING_SCHEMA, ENGINEERING_PROMPT, validateEngineeringArgument } from './threat-engineering.mjs';
 import {sourceScope} from './architecture.mjs';
@@ -231,7 +232,8 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
     model.threatValidationHistory=[...(model.threatValidationHistory || []),model.threatValidation].slice(-3);
   }
   const sharedSource = new InvestigationSource(model,manifest,options.sourceRoot);
-  const report = await reviewSecurityIssues(manifest, model, {
+  const reviewer=options.config?.batchThreats===true && model.aiReview?.scope?.poc?.kind==='section' ? reviewSectionThreats : reviewSecurityIssues;
+  const report = await reviewer(manifest, model, {
     ...options, challengePrompt:THREAT_CHALLENGE_PROMPT, retainConclusiveOnPromptChange:true, checkpoint:async r=>{r.retrievalVersion=THREAT_RETRIEVAL_VERSION;await options.checkpoint?.(r);}, systemPrompt:THREAT_ASSESSMENT_PROMPT,responseSchema:THREAT_ASSESSMENT_SCHEMA,validateResponse:validateThreatAssessment, followMissingControls: true, retryInvalidAssessment: true, candidateIssues: issues, reportField: 'threatValidation', contextKeyOverride: threatValidationKey(model),
     packetBuilder: async (m, mf, root, issue, follow, context, missing, previous) => {
       const projected = system.threats.find(t => t.id === issue.id);

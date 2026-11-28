@@ -60,7 +60,8 @@ test('source, scope, model, prompt, contract and validator changes never silentl
  await requestReview(cfg(f.cache),packet,send,{...options,systemPrompt:'Independent challenge'});
  await requestReview(cfg(f.cache),packet,send,{...options,responseSchema:{type:'object'}});
  await requestReview(cfg(f.cache),packet,send,{...options,validate:v=>({...v,newRule:'current'})});
- assert.equal(calls,8);assert.ok(f.cache.stats.invalid>0);
+ await requestReview(cfg(f.cache),packet,send,{...options,outputTokens:16384});
+ assert.equal(calls,9);assert.ok(f.cache.stats.invalid>0);
 });
 test('unresolved, invalid and secret-bearing responses do not become reusable clearance',async t=>{
  const f=await fixture(t),p={records:[record('a')]},options={validate:v=>v};let calls=0;

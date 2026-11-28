@@ -668,6 +668,8 @@ export async function requestReview(
   // Never follow redirects with credentials.
   const provider = PROVIDERS[config.provider];
   if (!provider) throw new Error("Unsupported provider");
+  const outputTokens=options.outputTokens ?? REVIEW_LIMITS.outputTokens;
+  if(!Number.isSafeInteger(outputTokens)||outputTokens<1||outputTokens>16384)throw Error('Invalid review output budget');
   const user = JSON.stringify(transport?.packet || packet);
   const gateway =
     config.provider === "anthropic-gateway"
@@ -681,7 +683,7 @@ export async function requestReview(
   const cache=config.localReviewCache;
   // Exact evidence and instructions only. Neither the credential nor the source
   // packet is stored. Deployment/scope changes invalidate the workspace context.
-  const cacheKey=cache ? sha(stableJson({version:LOCAL_REVIEW_CACHE_VERSION,transport:EVIDENCE_TRANSPORT_VERSION,context:config.localReviewContext,provider:config.provider,model:config.model,baseUrl:config.baseUrl,apiVersion:config.apiVersion,structuredOutputs:!!config.structuredOutputs,prompt:requestPrompt,schema:responseSchema,packet})) : null;
+  const cacheKey=cache ? sha(stableJson({version:LOCAL_REVIEW_CACHE_VERSION,transport:EVIDENCE_TRANSPORT_VERSION,context:config.localReviewContext,provider:config.provider,model:config.model,baseUrl:config.baseUrl,apiVersion:config.apiVersion,structuredOutputs:!!config.structuredOutputs,prompt:requestPrompt,schema:responseSchema,...(options.outputTokens===undefined?{}:{outputTokens}),packet})) : null;
   if(cache)try {
     const saved=cache.get(cacheKey);
     if(saved) {
@@ -703,7 +705,7 @@ export async function requestReview(
   const body = anthropic
     ? {
         model: config.model,
-        max_tokens: REVIEW_LIMITS.outputTokens,
+        max_tokens: outputTokens,
         ...(config.structuredOutputs && responseSchema
           ? {
               output_config: {
@@ -721,7 +723,7 @@ export async function requestReview(
         systemInstruction: { parts: [{ text: requestPrompt }] },
         contents: [{ role: "user", parts: [{ text: user }] }],
         generationConfig: {
-          maxOutputTokens: REVIEW_LIMITS.outputTokens,
+          maxOutputTokens: outputTokens,
           responseMimeType: "application/json",
         },
       };
