@@ -563,10 +563,10 @@ export async function reviewSecurityIssues(
         Object.assign(entry, response.review, {
           responseHash: response.responseHash,
         });
-        if(challengePrompt && response.review.assessment==='static-supported' && !old?.challengeStarted) {
+        if(challengePrompt && (response.review.assessment==='static-supported'||response.review.decisionReviewRequired) && !old?.challengeStarted) {
           entry.draftAssessment=structuredClone(response.review);
           entry.challengeStarted=true;entry.challengePending=true;
-          entry.assessment='not-assessed';
+          if(response.review.assessment==='static-supported')entry.assessment='not-assessed';
         } else if(old?.challengeStarted) {
           entry.challengePending=false;entry.challengeCompleted=true;
         }

@@ -330,7 +330,7 @@ test('inconsistent settled-code assessment receives a bounded engineering decisi
   const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
   const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
   if(calls===1){v.assessment='needs-context';v.engineering.obligations.forEach(o=>o.status='established');v.missingEvidence=['Which network is used in production?'];v.followUp=[];}
-  else {assert.match(p.decisionReview.task,/Independently check/);assert.deepEqual(p.decisionReview.questionsToResolve,['Which network is used in production?']);}
+  else {assert.ok(p.decisionChallenge,'A settled-code inconsistency must reach the independent critical reviewer');assert.match(p.decisionReview.task,/Independently check/);assert.deepEqual(p.decisionReview.questionsToResolve,['Which network is used in production?']);}
   raw.content[0].text=JSON.stringify(v);return Response.json(raw);
  }});
  assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
