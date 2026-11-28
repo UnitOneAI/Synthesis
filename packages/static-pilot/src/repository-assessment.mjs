@@ -236,6 +236,7 @@ function validateRepositoryResponse(value, packet) {
         "Source retrieval is incomplete: " +
           [...new Set(sourceGaps.map((g) => g.reason))].join(", "),
       );
+    if(c.status==="evidence-gap"&&!missing.length&&packet.sourceContext.retrievalPolicy==="section-candidates-1")throw Error("Model response failed schema or evidence validation: "+c.category+" declares an evidence gap but identifies no missing code, binding or citation. Give the cited disposition or name the exact missing implementation; do not invent a gap or promote a conclusion merely to pass validation.");
     if (c.status === "evidence-gap" && !missing.length)
       missing.push(
         "The assessment did not specify the missing implementation or binding; clarification is required.",

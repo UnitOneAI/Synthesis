@@ -133,3 +133,13 @@ test('category closure keeps primary types before broad optional search candidat
  assert.ok(p.packet.sourceContext.records.some(r=>r.path==='request-type.py'));
  assert.ok(p.context.gaps.some(g=>g.path?.startsWith('candidate-')&&g.required===false));
 });
+
+test('automatic categories require a specific gap instead of persisting an unexplained pending disposition',async t=>{
+ const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0],packet=sectionReviewPlan(f.model,section).batches[0].packet;
+ const prepared=await prepareStrideEvidence(packet,source,{sectionEvidence:true});const value=response(prepared.packet);
+ const {validateRepositoryReview}=await import('../src/repository-assessment.mjs');
+ value.categoryReviews[0].status='evidence-gap';value.categoryReviews[0].missingEvidence=[];
+ assert.throws(()=>validateRepositoryReview(value,prepared.packet),/identifies no missing code/);
+ value.categoryReviews[0].missingEvidence=['The invoked policy handler implementation is not supplied.'];
+ assert.equal(validateRepositoryReview(value,prepared.packet).categoryReviews[0].status,'evidence-gap');
+});
