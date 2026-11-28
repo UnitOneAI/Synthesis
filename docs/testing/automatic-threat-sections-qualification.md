@@ -41,3 +41,11 @@ Tests cover exact scope partitioning, all-six-category closure, no false complet
 JCI's Windows machine and gateway were not available to this local live run. Cross-platform tests are not a claim that the JCI gateway has been live-tested. A 403 or unsupported provider option must stop dispatch; it cannot be repaired by spending more model calls. The existing workspace checkpoint size limit still applies. Genuine missing implementations or unresolved bindings remain blocked and cannot be labeled complete. Other independent sections continue without a confirmation step.
 
 The known failure modes from the previous workflow are recorded in the design acceptance criteria and regression tests. No claim is made that feedback was submitted to OpenAI's internal product team.
+
+## Second qualification result
+
+A separate run from the original saved graph also completed the same automatically selected section after resuming with the final corrections. It produced **eight independently challenged supported conditional scenario records, all six categories complete, zero blockers**, and an unchanged graph. Its 27-page final report includes an additional per-operation audit scenario and PATCH payload/resource-exhaustion scenario; overlapping consequences are explicitly not deduplicated vulnerabilities. Repudiation was reopened and assessed rather than suppressed because it shared an authentication root cause.
+
+This run used **29 attempts, 921,524 reported tokens and one request with unknown usage** across its initial attempt and continuation. The first request began at 11:35:04 UTC; the last ended at 12:13:42 UTC (38 minutes 38 seconds including the development interruption). The final continuation used 10 calls, 333,963 tokens and 803 seconds. These figures are separate from the first qualification's development cost. This was also a resumed qualification, not an uninterrupted benchmark or a JCI throughput estimate.
+
+All ten GitHub release checks passed for implementation head `83c3e6f`: Node 22/24 on Windows/macOS/Ubuntu, browser tests on Windows/Ubuntu, and real Semgrep checks on Windows/Ubuntu. The final documentation commit is additionally subject to the same CI gate before merge.
