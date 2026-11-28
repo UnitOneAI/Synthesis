@@ -600,3 +600,15 @@ test('section search history does not become a required dependency but current r
  const requested=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[{...old,required:true}],{},[]);
  assert.ok(requested.gaps.some(g=>g.path===old.path));
 });
+
+test('section engineering fits a bounded multi-file proof without the smaller generic source cutoff',async t=>{
+ const files=Array.from({length:5},(_,n)=>['repo0/part'+n+'.py',Array.from({length:55},(_,l)=>`value_${l} = '${'x'.repeat(155)}'`).join('\n')]);
+ const f=await threatFixture(t,files);f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const locations=files.map(([p])=>({repository:'repo0',path:p.slice(6),line:1}));
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'section',locations,controls:'',explanation:'Review the stated path'},[],{},[]);
+ assert.equal(packet.gaps.length,0);assert.equal(packet.records.length,5);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet.records))>42000);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet.records))<=66000);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet))<=94000);
+});

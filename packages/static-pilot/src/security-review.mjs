@@ -370,7 +370,7 @@ export async function reviewSecurityIssues(
     budget,
     candidateCount: issues.length,
     startedAt: new Date().toISOString(),
-    limits: {...INVESTIGATION_LIMITS,contextRounds,...(challengePrompt?{maxRequestsPerScenario:contextRounds+1,criticalCheck:true}:{})},
+    limits: {...INVESTIGATION_LIMITS,...(reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'?{records:24,sourceBytes:66000}:{}),contextRounds,...(challengePrompt?{maxRequestsPerScenario:contextRounds+1,criticalCheck:true}:{})},
   };
   model[reportField] = report;
   const roundLimit=entry=>contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
