@@ -1004,6 +1004,7 @@ export async function serve({
             modelConfig,
             reviewBatches: input.maxBatches,
             reviewScope: input.reviewScope || 'deep',
+            reviewCacheFile: input.reviewScope==='sections' && store ? path.join(store.dir,'review-cache.sqlite') : undefined,
             sourceRoot: root,
             includeSourceExcerpts: input.includeSourceExcerpts,
             concurrency,

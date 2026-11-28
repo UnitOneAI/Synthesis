@@ -1,4 +1,4 @@
-# JCI automatic section threat modeling — 0.13.0
+# JCI automatic section threat modeling — 0.13.1
 
 This runs on the existing graph. It automatically chooses small sections and finishes their code investigations before advancing. There is no operation-selection confirmation. Reports are available as sections finish. A real missing implementation can block a section; it is never exported as complete. Other independent sections continue. Gateway access failures stop the run and preserve saved progress.
 
@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application checks failed.' }
 node -p "require('./package.json').version"
 ```
 
-Expect **0.13.0 or later**. Keep the JCI clones unchanged.
+Expect **0.13.1 or later**. Keep the JCI clones unchanged.
 
 ## 2. Start with the gateway
 
@@ -64,3 +64,13 @@ The **complete** state requires every named operation to have a cited decision i
 **Stop review** preserves checkpoints. After restart, click the same automatic-run button: compatible completed sections are skipped, interrupted work resumes, and remaining sections continue. Unchanged blocked investigations are not repeatedly billed. Inspect **Why not complete** for the exact missing code or binding. Provider failures stop globally; correct gateway access and resume. Partial diagnostic exports remain available but cannot carry a complete-section label.
 
 Browser PDF downloads are not automatically placed in the trace directory. Traces are written automatically to `C:/SynthesisState/Exports/Traces`. Existing CWE scanning and manual STRIDE modes remain available.
+
+## Local caching — no gateway change
+
+Automatic sections now create `C:/SynthesisState/JCI-Metasys/review-cache.sqlite` automatically. The gateway settings above stay the same. No provider prompt caching is requested.
+
+The section panel separates **provider requests**, **reported tokens**, **local assessments reused**, and **duplicate input avoided**. Reused assessments make no model call. New assessments receive compact source evidence with the same lines and citations. Byte savings are not a token estimate.
+
+Keep the workspace when updating or restarting. Compatible completed sections already skip work; this cache additionally recovers exact validated responses when a review projection must be replayed. New code, assumptions, prompts or model settings require compatible fresh review. It does not reuse a conclusion for a different route simply because a helper matches. Existing 0.13.0 completed sections remain saved; the new cache starts empty and fills as new eligible requests finish.
+
+If the cache is unavailable, the UI reports that review is proceeding without it. Do not delete `snapshot.json` or `graph.sqlite` to clear a cache. If troubleshooting requires clearing only the cache, stop Synthesis first and remove only `review-cache.sqlite`. Cached response prose is confidential workspace data, and is excluded from diagnostic/graph exports.

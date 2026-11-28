@@ -529,6 +529,8 @@ export async function reviewSecurityIssues(
           await save();
           continue;
         }
+        const dispatch=async(url,requestOptions)=>{
+        signal?.throwIfAborted();
         attempt = beginAttempt(model, config, packet, {
           batchId: item.issue.id,
           phase: "security-validation",
@@ -546,7 +548,9 @@ export async function reviewSecurityIssues(
           retrieval: packet.retrieval,
         });
         await save();
-        const response = await requestReview(config, packet, fetchImpl, {
+        return fetchImpl(url,requestOptions);
+        };
+        const response = await requestReview(config, packet, dispatch, {
           systemPrompt:old?.challengeStarted && challengePrompt ? challengePrompt : systemPrompt,
           responseSchema,
           validate: validateResponse,
@@ -559,9 +563,10 @@ export async function reviewSecurityIssues(
           onResponse: (data) =>
             event("response-received", { issueId: item.issue.id, ...data }),
         });
-        finishAttempt(attempt, "succeeded");
+        if(attempt)finishAttempt(attempt, "succeeded");
         Object.assign(entry, response.review, {
           responseHash: response.responseHash,
+          ...(response.localReuse ? {localReuse:response.localReuse} : {}),
         });
         const refreshPositive=reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'&&response.review.assessment==='static-supported'&&old?.challengeStarted&&old.draftAssessment?.assessment!=='static-supported';
         if(challengePrompt && (response.review.assessment==='static-supported'||response.review.decisionReviewRequired) && (!old?.challengeStarted||refreshPositive)) {
@@ -589,7 +594,8 @@ export async function reviewSecurityIssues(
         await event("assessed", {
           issueId: item.issue.id,
           assessment: entry.assessment,
-          attemptId: attempt.id,
+          attemptId: attempt?.id,
+          localReuse: Boolean(response.localReuse),
           followUps: entry.followUp.length,
           stopReason: entry.stopReason,
         });

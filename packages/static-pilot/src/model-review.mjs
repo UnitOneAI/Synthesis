@@ -11,6 +11,8 @@ import {
   finishAttempt,
 } from "./token-usage.mjs";
 import { sha, id } from "./sources.mjs";
+import {compactEvidence,EVIDENCE_TRANSPORT_PROMPT,EVIDENCE_TRANSPORT_VERSION} from './evidence-transport.mjs';
+import {LOCAL_REVIEW_CACHE_VERSION,stableJson,cacheableReview} from './local-review-cache.mjs';
 
 export const REVIEW_VERSION = "static-review-3";
 export const REVIEW_LIMITS = Object.freeze({
@@ -655,16 +657,18 @@ export async function requestReview(
   fetchImpl = fetch,
   options = {},
 ) {
+  options.signal?.throwIfAborted();
+  const transport=config.compactEvidence ? compactEvidence(packet) : null;
   const requestPrompt =
     (options.systemPrompt || SYSTEM_PROMPT) +
     (options.validationRetry === true
       ? VALIDATION_RETRY_PROMPT + retryReferenceInstructions(packet)
-      : "");
+      : "") + (transport?.metrics.records ? EVIDENCE_TRANSPORT_PROMPT : '');
   // Direct endpoints are fixed; gateway destination comes only from server configuration.
   // Never follow redirects with credentials.
   const provider = PROVIDERS[config.provider];
   if (!provider) throw new Error("Unsupported provider");
-  const user = JSON.stringify(packet);
+  const user = JSON.stringify(transport?.packet || packet);
   const gateway =
     config.provider === "anthropic-gateway"
       ? gatewayOptions(config.baseUrl, config.apiVersion)
@@ -673,6 +677,22 @@ export async function requestReview(
   const responseSchema =
     options.responseSchema ||
     (!options.validate ? STRIDE_RESPONSE_SCHEMA : undefined);
+  const validate=options.validate || validateReview;
+  const cache=config.localReviewCache;
+  // Exact evidence and instructions only. Neither the credential nor the source
+  // packet is stored. Deployment/scope changes invalidate the workspace context.
+  const cacheKey=cache ? sha(stableJson({version:LOCAL_REVIEW_CACHE_VERSION,transport:EVIDENCE_TRANSPORT_VERSION,context:config.localReviewContext,provider:config.provider,model:config.model,baseUrl:config.baseUrl,apiVersion:config.apiVersion,structuredOutputs:!!config.structuredOutputs,prompt:requestPrompt,schema:responseSchema,packet})) : null;
+  if(cache)try {
+    const saved=cache.get(cacheKey);
+    if(saved) {
+      const reviewed=validate(structuredClone(saved.parsed),packet);
+      if(!cacheableReview(reviewed)||sha(stableJson(reviewed))!==saved.reviewDigest)cache.reject(cacheKey);
+      else {
+        cache.accept(cacheKey);
+        return {review:reviewed,responseHash:saved.responseHash,requestPromptHash:sha(requestPrompt),localReuse:{key:cacheKey,origin:'workspace-cache',savedAt:saved.savedAt},usage:null};
+      }
+    }
+  }catch{cache.stats.errors++;try{cache.reject(cacheKey);}catch{}}
   const url = gateway
     ? gateway.baseUrl + "/v1/messages"
     : anthropic
@@ -706,6 +726,10 @@ export async function requestReview(
         },
       };
   let data;
+  if(transport?.metrics.records && config.reviewEfficiency) {
+    config.reviewEfficiency.requestsCompacted++;
+    config.reviewEfficiency.inputBytesRemoved+=transport.metrics.removedBytes-Buffer.byteLength(EVIDENCE_TRANSPORT_PROMPT);
+  }
   try {
     const response = await fetchImpl(url, {
       method: "POST",
@@ -833,9 +857,18 @@ export async function requestReview(
             : "prose-or-other",
   });
   const parsed = parseReviewText(text);
+  const review=validate(parsed,packet);
+  if(cache && cacheableReview(review))try {
+    // Redact individual strings so redaction cannot damage JSON structure. If it
+    // changes the validated decision, skip reuse rather than weakening validation.
+    const clean=v=>typeof v==='string' ? redact(config.apiKey ? v.split(config.apiKey).join('[REDACTED]') : v) : Array.isArray(v)?v.map(clean):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clean(x)])):v;
+    const safe=clean(parsed),reviewDigest=sha(stableJson(review));
+    if(sha(stableJson(validate(structuredClone(safe),packet)))===reviewDigest)
+      cache.put(cacheKey,{parsed:safe,reviewDigest,responseHash:sha(text),savedAt:new Date().toISOString()});
+  }catch{cache.stats.errors++;}
   return {
     usage,
-    review: (options.validate || validateReview)(parsed, packet),
+    review,
     responseHash: sha(text),
     requestPromptHash: sha(requestPrompt),
   };
