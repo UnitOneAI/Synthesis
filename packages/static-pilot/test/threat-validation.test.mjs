@@ -469,6 +469,8 @@ test('structured conditions reject unbound settings and inconsistent conclusions
  const v=JSON.parse((await answer(p,'routes.py').json()).content[0].text);
  v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
  v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'entry'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'read'};
+ v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',binding:'deployment-only'}];
+ assert.throws(()=>validateThreatAssessment(v,p),/configuration condition requires a cited code binding/);
  v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',basis:'code-dependent',citations:[]}];
  v.engineering.reviewerQuestions=[{conditionId:'setting',question:'Is authentication disabled?'}];
  assert.throws(()=>validateThreatAssessment(v,p),/code-dependent condition requires binding citations/);
