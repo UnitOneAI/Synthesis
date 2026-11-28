@@ -316,6 +316,7 @@ export async function reviewSecurityIssues(
     retainConclusiveOnPromptChange = false,
     challengePrompt,
     finishCaseFirst = false,
+    contextRounds = INVESTIGATION_LIMITS.contextRounds,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -328,6 +329,7 @@ export async function reviewSecurityIssues(
     throw Error("Configure an approved provider before security assessment");
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("Security request budget must be 1–100");
+  if(!Number.isInteger(contextRounds)||contextRounds<1||contextRounds>5)throw Error('Choose 1–5 evidence rounds');
   const context = securityContext(model),
     contextKey = contextKeyOverride || securityContextKey(model);
   const key = sha(
@@ -368,10 +370,10 @@ export async function reviewSecurityIssues(
     budget,
     candidateCount: issues.length,
     startedAt: new Date().toISOString(),
-    limits: challengePrompt ? {...INVESTIGATION_LIMITS,maxRequestsPerScenario:INVESTIGATION_LIMITS.contextRounds+1,criticalCheck:true} : INVESTIGATION_LIMITS,
+    limits: {...INVESTIGATION_LIMITS,contextRounds,...(challengePrompt?{maxRequestsPerScenario:contextRounds+1,criticalCheck:true}:{})},
   };
   model[reportField] = report;
-  const roundLimit=entry=>INVESTIGATION_LIMITS.contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
+  const roundLimit=entry=>contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
   beginUsageRun(model);
   const save = async () => {
     const counts={selected:issues.length,assessed:0,sourceSupported:0,ruledOut:0,needsCodeContext:0,failed:0,unassessed:0};
@@ -605,7 +607,7 @@ export async function reviewSecurityIssues(
         )
       )
         break;
-      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
+      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         (entry.challengePending || (entry.assessment === "needs-context" &&
         (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))))) &&

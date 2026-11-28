@@ -113,6 +113,7 @@ export class InvestigationSource {
     };
   }
   async functionWindow(ref) {
+    if(['class','type'].includes(ref.kind))return this.window(ref);
     const line=ref.line || 1;
     const nodes=this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
     const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
@@ -133,7 +134,7 @@ export class InvestigationSource {
   // Fallback only for exact requested implementations missing from the symbol
   // index. Searches saved, selected files, never arbitrary model-supplied paths.
   async findImplementation(symbols, seeds = [], {maxFiles=64,maxBytes=2*1024*1024} = {}) {
-    const names=[...new Set(symbols)].filter(s=>/^[A-Za-z_]\w{2,99}$/.test(s)).slice(0,12);
+    const names=[...new Set(symbols)].filter(s=>/^[A-Za-z_]\w{2,99}(?:\.[A-Za-z_]\w{0,99}){0,2}$/.test(s)).slice(0,12);
     if(!names.length)return {references:[],searchedFiles:0,bytes:0,limited:false,failures:[]};
     const repositories=[...new Set([...seeds.map(s=>s.repository),...this.selected])].filter(r=>this.selected.has(r));
     const candidates=[];let limited=false;
@@ -164,9 +165,11 @@ export class InvestigationSource {
         bytes+=file.bytes;if(bytes>maxBytes){limited=true;break;}
         for(const symbol of names) {
           // A text match is a candidate, never proof of a call or control binding.
-          const pattern=new RegExp('\\b'+symbol+'\\b');
+          const escaped=symbol.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+          const localMember=symbol.includes('.')&&seeds.some(s=>s.repository===n.repository&&s.path===n.path);
+          const pattern=new RegExp('\\b'+(localMember?'[A-Za-z_]\\w*\\.'+symbol.split('.').at(-1):escaped)+'\\b');
           const matches=file.lines.flatMap((text,index)=>pattern.test(text)?[index+1]:[]).slice(0,4);
-          for(const line of matches) if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&Math.abs(r.line-line)<6))
+          for(const line of matches) if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&r.line===line))
             references.push({repository:n.repository,path:n.path,line,blobSha256:n.blobSha256,symbol,required:true,basis:'hash-checked indexed text candidate; binding unproven'});
         }
       } catch(error) { failures.push({repository:n.repository,path:n.path,reason:error.message}); }

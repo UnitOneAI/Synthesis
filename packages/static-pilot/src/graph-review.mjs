@@ -1,4 +1,4 @@
-import {REPOSITORY_PROMPT,REPOSITORY_SCHEMA,validateRepositoryReview} from './repository-assessment.mjs';
+import {REPOSITORY_PROMPT,REPOSITORY_SCHEMA,validateRepositoryReview,CATEGORY_FOLLOWUP_PROMPT,validateCategoryFollowUp} from './repository-assessment.mjs';
 import {pocReviewPlan} from './poc-scope.mjs';
 import { setTimeout as recoveryWait } from 'node:timers/promises';
 import { systemReviewPlan } from './system-review-units.mjs';
@@ -511,7 +511,7 @@ export async function enrichGraphModel(
     }));
   if(['repositories','section'].includes(plan.scope?.poc?.kind)){
     if(!options.prepareBatch)throw Error('Repository STRIDE requires source evidence; enable source excerpts before review');
-    options={...options,systemPrompt:REPOSITORY_PROMPT,responseSchema:REPOSITORY_SCHEMA,validate:validateRepositoryReview};
+    options={...options,systemPrompt:REPOSITORY_PROMPT,responseSchema:REPOSITORY_SCHEMA,validate:validateRepositoryReview,CATEGORY_FOLLOWUP_PROMPT,validateCategoryFollowUp};
   }
   const planningMs = Math.round(performance.now() - planningStarted);
   if (!options.plan)
@@ -1002,6 +1002,8 @@ export async function enrichGraphModel(
             },
           );
         };
+        const categoryClosure=plan.scope?.poc?.kind==='section'&&Array.isArray(batch.packet.sourceContext?.priorReview?.retainedThreats);
+        entry.categoryClosure=categoryClosure;
         const requestOnce = () => requestReview(config, batch.packet, dispatch, {
           validationRetry: entry.validationRetry,
           ...(options.systemPrompt
@@ -1011,6 +1013,7 @@ export async function enrichGraphModel(
             ? { responseSchema: options.responseSchema }
             : {}),
           ...(options.validate ? { validate: options.validate } : {}),
+          ...(categoryClosure?{systemPrompt:CATEGORY_FOLLOWUP_PROMPT,validate:validateCategoryFollowUp}:{}),
           signal: options.signal,
           onResponseShape: (shape) => {
             entry.responseShape = shape;

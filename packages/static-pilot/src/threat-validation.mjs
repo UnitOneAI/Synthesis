@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-12';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-14';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -89,12 +89,13 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     const declarationMatches=symbol==='APIRouter'?found.filter(n=>n.kind==='call'&&sameFile(n)).length:0;
     searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
-    for (const n of found.slice(0,requiredSymbols.has(symbol)?1:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, definition:definition(n), required:requiredSymbols.has(symbol) });
+    for (const n of found.slice(0,requiredSymbols.has(symbol)?3:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
-  const unresolvedSymbols=searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol);
+  const members=[...new Set(missing.join(' ').match(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){1,2}\b/g) || [])].slice(0,6);
+  const unresolvedSymbols=[...members,...searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol)];
   const fallback = source.findImplementation && unresolvedSymbols.length
     ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
   const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
@@ -102,7 +103,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // Text hits are unbound candidates. Explicit requested locations stay required;
   // unrelated hits must not become mandatory dependencies merely by matching a
   // framework/constant name. Omitted candidates remain visible in retrieval.
-  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:false,basis:'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:Boolean(r.symbol?.includes('.')),basis:r.symbol?.includes('.')?'requested-member-use candidate':'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -151,7 +152,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const merge=overlap.length && mergedLines.length<=200 && mergedLines.at(-1).line-mergedLines[0].line+1===mergedLines.length;
       const merged=merge ? {...record,id:sha(JSON.stringify([record.repository,record.path,record.blobSha256,mergedLines[0].line,mergedLines.at(-1).line])).slice(0,20),startLine:mergedLines[0].line,endLine:mergedLines.at(-1).line,lines:mergedLines,basis:'combined hash-matched source windows'} : record;
       const next=[...records.filter(r=>!merge || !overlap.includes(r)),merged];
-      const reason=next.length>12 ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
+      const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?INVESTIGATION_LIMITS.records:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
       if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,detail:'Only a partial function window was supplied; do not infer full control coverage.'});

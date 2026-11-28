@@ -70,6 +70,8 @@ export async function prepareStrideEvidence(original, source, options = {}) {
     graphDetails:
       "Retrieved on demand from the saved graph; per-interface neighborhoods omitted",
   };
+  const primaryEvidence=new Set(packet.records.filter(r=>(packet.reviewUnit?.primaryInterfaceIds || []).includes(r.id)).flatMap(r=>r.evidence).map(r=>`${r.repository}\0${r.path}\0${r.line}`));
+  if(options.sectionEvidence)packet.sourceContext.retrievalPolicy='section-candidates-1';
   const seedText=[];
   if (original.reviewFocus?.selectedProfile) for (const ref of packet.records.flatMap(r=>r.evidence).slice(0,8)) {
     try {seedText.push((await source.functionWindow(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
@@ -98,7 +100,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         )
       )
         continue;
-      if (records.length >= 16) throw Error("source-context-window-limit");
+      if (records.length >= (options.sectionEvidence?24:16)) throw Error("source-context-window-limit");
       const w = await (original.reviewFocus?.selectedProfile ? source.functionWindow.bind(source) : source.window.bind(source))({
         ...ref,
         line,
@@ -115,12 +117,13 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         records.pop();
         throw Error("source-context-byte-limit");
       }
-      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason});
+      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason,...(options.sectionEvidence?{required:ref.required===true||primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`)}:{})});
     } catch (error) {
       gaps.push({
         repository: ref.repository,
         path: ref.path,
         line: ref.line,
+        ...(options.sectionEvidence?{required:ref.required===true||primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`),basis:'Unread retrieval candidate; only applicable missing bindings prevent a section conclusion.'}:{}),
         reason: /^source-/.test(error.message)
           ? error.message
           : "source-unavailable",

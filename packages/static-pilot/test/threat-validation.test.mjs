@@ -517,3 +517,14 @@ test('compact native response retains exact entry, operation and condition-bindi
  wire.engineering.conditions[0].binding='imaginary';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
  wire.engineering.conditions[0].binding='entry';wire.engineering.obligations[0].status='missing';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
 });
+test('requested member uses retrieve local storage and serialization candidates from the saved graph',async t=>{
+ const f=await threatFixture(t,[['repo0/Store.py','class Store:\n    def update(self, session, config):\n        session.config = config\n\n    def serialize(self, item):\n        return item.config\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');
+ const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const found=await source.findImplementation(['session.config'],[{repository:'repo0',path:'Store.py',line:2}]);
+ assert.ok(found.references.some(r=>r.path==='Store.py'&&r.line===3));assert.ok(found.references.some(r=>r.path==='Store.py'&&r.line===6));
+ assert.ok(found.references.every(r=>r.basis.includes('binding unproven')));
+ await fs.appendFile(path.join(f.root,'repo0','Store.py'),'# changed\n');
+ const changed=await source.findImplementation(['session.config'],[{repository:'repo0',path:'Store.py',line:2}]);
+ assert.equal(changed.references.filter(r=>r.path==='Store.py').length,0);assert.ok(changed.failures.length);
+});

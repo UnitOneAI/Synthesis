@@ -225,6 +225,7 @@ function validateRepositoryResponse(value, packet) {
     }
     const sourceGaps = (packet.sourceContext.gaps || []).filter(
       (g) =>
+        !(packet.sourceContext.retrievalPolicy==='section-candidates-1'&&g.required===false)&&
         ![
           "source-graph-catalog-limited",
           "source-graph-context-byte-limit",
@@ -253,4 +254,19 @@ function validateRepositoryResponse(value, packet) {
     };
   });
   return { ...review, categoryReviews: categories };
+}
+
+// Category closure must not rewrite settled hypotheses and invalidate their paid
+// engineering decisions. New, distinct scenarios are still validated and added.
+export function repositoryThreatWire(threat) {
+ const fields=['title','category','actor','startingAccess','asset','scenario','prerequisites','controls','mitigation','interfaceIds','evidenceIds'];
+ const value=Object.fromEntries(fields.map(k=>[k,threat[k]]));
+ if(threat.analysis)value.analysis={...threat.analysis,mappings:threat.analysis.mappings.map(({framework,id,rationale})=>({framework,id,rationale}))};
+ return value;
+}
+export const CATEGORY_FOLLOWUP_PROMPT=REPOSITORY_PROMPT+`\nCATEGORY CLOSURE OVERRIDE: sourceContext.priorReview.retainedThreats contains immutable prior candidate scenarios. They are hypotheses, not evidence. Their supplied engineering conclusions are also hypotheses to check against fresh source. Do not repeat, rename or rewrite retained scenarios in the threats array. Return ONLY genuinely additional scenarios in threats, or [] if none. The application retains the prior scenarios unchanged and appends the new ones. categoryReviews.threatIndexes refers to that combined list (retained scenarios first, new scenarios second). Reassess all six categories for every primary operation using the fresh cited code and counterevidence. Keep a specific evidence-gap when implementation is missing. Unread supporting search candidates do not automatically block this section; inspect their relevance and name any specific unresolved applicable binding. Required source omissions remain incomplete. Effective deployment conditions remain separate. Preserve each operation's source citations even where a category has no additional scenario. A changed conclusion about a retained scenario must be explicitly described in missingEvidence as a reassessment requirement, not silently hidden by a no-scenario result.`;
+export function validateCategoryFollowUp(value,packet) {
+ const retained=packet.sourceContext?.priorReview?.retainedThreats;
+ if(!Array.isArray(retained)||!Array.isArray(value?.threats))throw Error('Model response failed schema or evidence validation: category follow-up requires retained and new scenario lists');
+ return validateRepositoryReview({...value,threats:[...retained,...value.threats]},packet);
 }

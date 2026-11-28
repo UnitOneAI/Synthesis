@@ -50,6 +50,7 @@ export function automaticSectionPlan(model, options={}) {
     profile,sourceScope:g.production?'production-candidate':'supporting/test',status:'pending'});
   }
  }
+ if(!sections.length)throw Error('No security operations are available in the selected repository graph; inspect source coverage before review');
  sections.sort((a,b)=>a.priority-b.priority||a.title.localeCompare(b.title)||a.id.localeCompare(b.id));
  const contextKey=sectionContextKey(model);
  return {version:SECTION_VERSION,id:sha(JSON.stringify([contextKey,repositories,limit,sections.map(s=>s.id)])).slice(0,24),contextKey,repositories,operationsPerSection:limit,

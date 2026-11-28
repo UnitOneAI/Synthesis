@@ -1,9 +1,10 @@
+import {THREAT_RETRIEVAL_VERSION} from './threat-validation.mjs';
 import {systemModel} from './system-model.mjs';
 import {deploymentContext} from './deployment-context.mjs';
 import {interfacePriorities} from './review-order.mjs';
 import {automaticSectionPlan,sectionReviewPlan,sectionCompletion,sectionContextKey} from './automatic-sections.mjs';
 import {reviewFeatureCohorts} from './feature-review-run.mjs';
-import {verifiedStrideSource} from './stride-evidence.mjs';
+import {verifiedStrideSource,prepareStrideEvidence} from './stride-evidence.mjs';
 
 // One writer; the existing provider pool is shared inside each section. Store
 // each section before moving the active projection. No review confirmation gate.
@@ -32,7 +33,7 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
     const prior={...model,aiReview:saved.review,threatValidation:saved.validation};
     if(sectionCompletion(prior,section).complete)continue;
    }
-   if(saved?.status==='blocked'&&!options.retryBlocked)continue;
+   if(saved?.status==='blocked'&&saved.retrievalVersion===THREAT_RETRIEVAL_VERSION&&!options.retryBlocked)continue;
    run.activeSection=section.id;run.sectionsAttempted++;
    const result=saved || {status:'pending',calls:0,reportedTokens:0,unknownUsageRequests:0};state.results[section.id]=result;
    const priorReview=model.aiReview;
@@ -53,10 +54,10 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
     result.actionCalls=attempts.length;result.actionTokens=attempts.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);result.actionUnknown=attempts.filter(a=>!a.usage).length;
     await checkpoint();
    };
-   result.status='running';await save();
+   result.status='running';result.retrievalVersion=THREAT_RETRIEVAL_VERSION;await save();
    options.progress?.(`Section ${run.sectionsAttempted}: ${section.title}. ${section.interfaceIds.length} operations; all six STRIDE categories.`);
    await options.trace?.('section.started',{sectionId:section.id,title:section.title,interfaceIds:section.interfaceIds,contextKey:plan.contextKey});
-   await reviewFeatureCohorts(model,manifest,config,excerpts,fetchImpl,{...options,plan:preparedPlan,verifiedSource:source,runUntilComplete:true,maxBatches:100,checkpoint:save,categoryFollowUpLimit:3});
+   await reviewFeatureCohorts(model,manifest,config,excerpts,fetchImpl,{...options,plan:preparedPlan,verifiedSource:source,prepareBatch:b=>prepareStrideEvidence(b.packet,source,{sectionEvidence:true}),runUntilComplete:true,maxBatches:100,checkpoint:save,categoryFollowUpLimit:3});
    result.completion=sectionCompletion(model,section);
    const reason=model.featureReviewRun?.stopReason;
    const failure=['provider-failure','provider-or-source-failure','coordinator-failure','repeated-response-format-failure'].includes(reason);

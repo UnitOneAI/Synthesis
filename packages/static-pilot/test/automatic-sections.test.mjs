@@ -19,7 +19,7 @@ test('automatic catalog partitions every selected security subject once and keep
  assert.ok(p.sections.every(s=>s.interfaceIds.length<=3));assert.deepEqual(automaticSectionPlan({...f.model,interfaces:[...f.model.interfaces].reverse()}).sections,p.sections);
  assert.equal(JSON.stringify(f.model.sourceGraph),before);assert.throws(()=>automaticSectionPlan(f.model,{repositories:['absent']}),/loaded/);
  const many={...f.model,interfaces:Array.from({length:10000},(_,n)=>({...f.model.interfaces.find(securityFeatureSubject),id:String(n),operation:'GET /items/'+n,connection:{path:'/items/{id}',method:'GET'}}))};
- const large=automaticSectionPlan(many);assert.equal(large.primaryOperations,10000);assert.equal(large.sections.length,3334);
+ const large=automaticSectionPlan(many);assert.throws(()=>automaticSectionPlan({...f.model,interfaces:[]}),/No security operations/);assert.equal(large.primaryOperations,10000);assert.equal(large.sections.length,3334);
 });
 test('automatic sections finish all six categories, persist, export and resume without paid calls',async t=>{
  const f=await fixture(t),graph=JSON.stringify(f.model.sourceGraph),cwe=JSON.stringify(f.model.cweReview);
@@ -88,4 +88,27 @@ test('category citation omissions get one bounded repair even when no new source
  const f=await fixture(t);let count=0,feedback=[];
  const send=async(_,req)=>{count++;const p=JSON.parse(JSON.parse(req.body).messages[0].content),r=response(p);if(count===1)r.categoryReviews[0].citations=[];else feedback=p.sourceContext.priorReview?.missingCode || [];return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(r)}],usage:{input_tokens:10,output_tokens:20}});};
  await run(f,{fetchImpl:send});assert.equal(f.model.automaticSections.run.status,'complete');assert.equal(count,2);assert.ok(feedback.some(s=>/cited|citation/i.test(s)));assert.equal(Object.values(f.model.automaticSections.results)[0].calls,2);
+});
+test('category closure preserves retained cases and distinguishes optional search candidates from required missing source',async t=>{
+ const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0];
+ const prepared=await prepareStrideEvidence(sectionReviewPlan(f.model,section).batches[0].packet,source,{sectionEvidence:true}),p=prepared.packet;
+ const {validateRepositoryReview,validateCategoryFollowUp,repositoryThreatWire}=await import('../src/repository-assessment.mjs');
+ const r=response(p),i=p.records.find(i=>section.interfaceIds.includes(i.id));
+ r.threats=[{title:'Synthetic conditional write',category:'Tampering',actor:'Fixture actor',startingAccess:'Fixture access',asset:'Fixture data',scenario:'Synthetic scenario',prerequisites:'Fixture assumptions',controls:'Fixture controls',mitigation:'Fixture fix',interfaceIds:[i.id],evidenceIds:i.evidence.map(e=>e.id)}];
+ const initial=validateRepositoryReview(r,p);
+ p.sourceContext.priorReview={retainedThreats:initial.threats.map(repositoryThreatWire)};
+ const follow=response(p);const closed=validateCategoryFollowUp(follow,p);
+ assert.equal(closed.threats.length,1);assert.deepEqual(closed.threats,initial.threats,'No renamed case or changed engineering issue hash');
+ assert.equal(closed.categoryReviews.find(c=>c.category==='Tampering').status,'evidence-gap','A clean category cannot hide a retained scenario');
+ p.sourceContext.priorReview.retainedThreats=[];p.sourceContext.gaps=[{reason:'source-context-window-limit',required:false}];
+ assert.ok(validateCategoryFollowUp(response(p),p).categoryReviews.every(c=>c.status==='no-scenario-identified'));
+ p.sourceContext.gaps[0].required=true;assert.ok(validateCategoryFollowUp(response(p),p).categoryReviews.every(c=>c.status==='evidence-gap'));
+ const bad=response(p);bad.threats=[{...r.threats[0],interfaceIds:['invented']}];assert.throws(()=>validateCategoryFollowUp(bad,p),/validation/);
+});
+test('restart after interrupted category replacement restores the last successful paid packet',async t=>{
+ const f=await fixture(t);await run(f);const original=structuredClone(f.model.aiReview.batches[0]),id=f.model.aiReview.scope.poc.id;
+ f.model.featureEvidenceHistory=[{batchId:original.id,previous:original}];
+ f.model.aiReview.batches[0].status='pending';f.model.aiReview.coverage.completedBatches=0;f.model.aiReview.coverage.pendingBatches=1;
+ f.model.automaticSections.results[id].status='interrupted';
+ assert.equal(await run(f),0);assert.equal(f.model.automaticSections.results[id].status,'complete');
 });
