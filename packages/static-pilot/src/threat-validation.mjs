@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-15';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-16';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -74,7 +74,8 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   const definition = n => ['function','class','method','type'].includes(n.kind);
   const refs = [], searches = [], gaps = [];
   for (const symbol of symbols) {
-    const matches = []; let after = '';
+    const local=source.localDefinitions?.(symbol,issue.locations);
+    const matches = [...(local?.matches || [])]; let after = '';
     for (let page = 0; page < 2; page++) {
       const result = source.search(symbol, after);
       matches.push(...result.items.filter(n => n.kind === 'file' || n.name === symbol || n.name?.endsWith('.' + symbol) || n.name?.endsWith('::' + symbol)));
@@ -83,15 +84,16 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }
     const sameFile = n => issue.locations.some(r=>r.repository===n.repository && r.path===n.path);
     const sameRepository = n => issue.locations.some(r=>r.repository===n.repository);
-    let found = matches.sort((a,b) => Number(definition(b))-Number(definition(a)) || Number(sameFile(b))-Number(sameFile(a)) ||
+    let found = [...new Map(matches.map(n=>[n.id,n])).values()].sort((a,b) => Number(definition(b))-Number(definition(a)) || Number(sameFile(b))-Number(sameFile(a)) ||
       Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') ||
       Number(sameRepository(b))-Number(sameRepository(a)) || Number(a.kind === 'file')-Number(b.kind === 'file')).slice(0,4);
     if(found.some(definition))found=found.filter(definition);
     const declarationMatches=symbol==='APIRouter'?found.filter(n=>n.kind==='call'&&sameFile(n)).length:0;
-    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
+    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after)||Boolean(local?.limited), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
-    for (const n of found.slice(0,requiredSymbols.has(symbol)?3:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol) });
+    const localDefinitions=found.filter(n=>sameFile(n)&&definition(n));
+    for (const n of found.slice(0,requiredSymbols.has(symbol)?4:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n)) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
@@ -183,7 +185,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
     if(entry && ['static-supported','ruled-out'].includes(entry.assessment) && entry.issueHash===hashes.get(entry.sourceId) && model.threatValidation.contextKey===threatValidationKey(model)) {
       model.threatValidationHistory=[...(model.threatValidationHistory || []),structuredClone(model.threatValidation)].slice(-3);
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
-      entry.challengeCompleted=false;entry.assessment='not-assessed';entry.rounds=0;delete entry.stopReason;
+      entry.challengeCompleted=false;entry.assessment='not-assessed';entry.rounds=0;delete entry.continuationReferences;delete entry.stopReason;
     }
   }
   // Upgrade selected older positive assessments by challenging their existing
@@ -197,9 +199,9 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   // A changed retriever may resolve an exhausted code gap. Reopen it once for
   // this policy; retain prior attempts and never reset conclusive assessments.
   if (model.threatValidation && model.threatValidation.retrievalVersion !== THREAT_RETRIEVAL_VERSION) {
-    for (const entry of model.threatValidation.entries || []) if (entry.assessment === 'needs-context' && entry.issueHash === hashes.get(entry.sourceId) && (entry.rounds >= INVESTIGATION_LIMITS.contextRounds || entry.stopReason === 'no-new-evidence')) {
-      entry.history = [...(entry.history || []),{assessment:entry.assessment,packetHash:entry.packetHash,attemptId:entry.attemptId,usage:entry.usage,rounds:entry.rounds,reason:'retrieval-policy-updated'}];
-      entry.rounds=0;delete entry.stopReason;
+    for (const entry of model.threatValidation.entries || []) if ((entry.assessment === 'needs-context'||(entry.assessment==='failed'&&/^Security assessment failed|^Model did not return the required JSON/.test(entry.error || ''))) && entry.issueHash === hashes.get(entry.sourceId) && (entry.rounds >= INVESTIGATION_LIMITS.contextRounds || entry.stopReason === 'no-new-evidence')) {
+      entry.history = [...(entry.history || []),{assessment:entry.assessment,packetHash:entry.packetHash,attemptId:entry.attemptId,usage:entry.usage,rounds:entry.rounds,continuationReferences:entry.continuationReferences,reason:'retrieval-policy-updated'}];
+      entry.rounds=0;delete entry.continuationReferences;delete entry.stopReason;
     }
   }
   const priorEntries = new Map();

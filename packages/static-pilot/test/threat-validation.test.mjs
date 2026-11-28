@@ -553,3 +553,26 @@ test('a later isolated format failure gets bounded correction despite older fail
  }});
  assert.equal(calls,4);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');assert.equal(f.model.usageLedger.attempts.length,4);
 });
+
+test('section retrieval follows indexed primary calls to base and overriding method candidates',async t=>{
+ const code='class Base:\n    def persist(self, value):\n        self.value = value\nclass Disk(Base):\n    def persist(self, value):\n        super().persist(value)\ndef write(request):\n    storage.persist(request.value)\n';
+ const f=await threatFixture(t,[['repo0/Store.py',code]]),{InvestigationSource}=await import('../src/investigation-source.mjs');
+ const source=new InvestigationSource(f.model,f.manifest,f.root),window=await source.functionWindow({repository:'repo0',path:'Store.py',line:7});
+ source.search=()=>({items:[],next:'global-page-limit'}); // Global paging must not hide same-file definitions.
+ const result=source.calledImplementations([window]);
+ assert.ok(result.searches.some(s=>s.symbol==='persist'));
+ assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===2));
+ assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===5));
+ assert.ok(result.references.every(r=>r.required===false));assert.match(result.interpretation,/do not establish/);
+ await fs.appendFile(path.join(f.root,'repo0/Store.py'),'# changed');
+ await assert.rejects(()=>source.functionWindow(result.references[0]),/changed|hash|match/);
+});
+
+test('retrieval upgrade can repair an exhausted evidence validation failure without resetting settled work',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const e=f.model.threatValidation.entries[0];e.assessment='failed';e.error='Security assessment failed schema or evidence validation';e.rounds=5;f.model.threatValidation.retrievalVersion='old';
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
+});

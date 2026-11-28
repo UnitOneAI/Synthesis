@@ -30,6 +30,10 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
   };
   const remaining=()=>continuous?100:Math.max(0,budget-run.calls);
   const followCategoryEvidence=async()=>{
+    if(plan.scope?.poc?.kind==='section') {
+      const lookup=threatAssessmentLookup(model);
+      if((model.aiReview?.threats || []).some(t=>{const a=threatAssessment(model,t.id,lookup);return !['static-supported','ruled-out'].includes(a.assessment)||(a.assessment==='static-supported'&&!a.challengeCompleted);}))return;
+    }
     const current=[...(model.aiReview?.batches || [])];
     for(const previous of current) {
       if(!remaining()||options.signal?.aborted||run.stopReason)break;

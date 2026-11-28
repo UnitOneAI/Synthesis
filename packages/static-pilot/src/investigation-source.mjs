@@ -178,6 +178,52 @@ export class InvestigationSource {
     return {references:references.slice(0,16),searchedFiles,bytes,limited,failures,
       interpretation:'Bounded identifier/member search in indexed source; local receiver aliases are candidates, not proven bindings. No match does not establish an absent control.'};
   }
+  // One bounded call hop from actual submitted primary source. Matches are
+  // candidates, not proof of receiver dispatch or control enforcement.
+  localDefinitions(symbol,seeds) {
+    this.definitionFiles ||= new Map();
+    const matches=[];let limited=false;
+    const files=[...new Map(seeds.map(s=>[s.repository+'\0'+s.path,s])).entries()];
+    for(const [key,seed] of files.slice(0,4)) {
+      let cached=this.definitionFiles.get(key);
+      if(!cached){
+        const nodes=[];let truncated=false;
+        for(const kind of ['function','method','class','type']){const rows=this.nodes({kind,repository:seed.repository,path:seed.path,limit:513});nodes.push(...rows.slice(0,512));truncated ||= rows.length>512;}
+        cached={nodes,truncated};if(this.definitionFiles.size>=16)this.definitionFiles.delete(this.definitionFiles.keys().next().value);this.definitionFiles.set(key,cached);
+      }
+      limited ||= cached.truncated;
+      matches.push(...cached.nodes.filter(n=>n.name===symbol||n.name?.endsWith('.'+symbol)||n.name?.endsWith('::'+symbol)));
+    }
+    return {matches,limited:limited||files.length>4};
+  }
+  calledImplementations(records) {
+    const calls=[],references=[],searches=[];let limited=false;
+    const files=[...new Map(records.map(r=>[r.repository+'\0'+r.path,r])).values()];
+    for(const file of files.slice(0,4)) {
+      let after='';
+      for(let page=0;page<4;page++) {
+        const rows=this.nodes({kind:'call',repository:file.repository,path:file.path,after,limit:257});
+        calls.push(...rows.slice(0,256).filter(n=>records.some(r=>r.repository===n.repository&&r.path===n.path&&n.line>=r.startLine&&n.line<=r.endLine)));
+        if(rows.length<=256)break;
+        after=rows[255].id;if(page===3)limited=true;
+      }
+    }
+    limited ||= files.length>4;
+    const names=[...new Set(calls.sort((a,b)=>a.line-b.line).map(n=>String(n.name || '').split(/\.|::/).at(-1)).filter(n=>/^[A-Za-z_]\w{2,99}$/.test(n)))];
+    limited ||= names.length>12;
+    for(const symbol of names.slice(0,12)) {
+      const localMatches=this.localDefinitions(symbol,records);const matches=[...localMatches.matches];limited ||= localMatches.limited;let after='';
+      for(let page=0;page<2;page++){const result=this.search(symbol,after);matches.push(...result.items.filter(n=>['function','method'].includes(n.kind)&&(n.name===symbol||n.name?.endsWith('.'+symbol)||n.name?.endsWith('::'+symbol))));after=result.next;if(!after)break;}
+      const local=n=>records.some(r=>r.repository===n.repository&&r.path===n.path);
+      const sameRepo=n=>records.some(r=>r.repository===n.repository);
+      const unique=[...new Map(matches.map(n=>[n.id,n])).values()];
+      unique.sort((a,b)=>Number(local(b))-Number(local(a))||Number(sameRepo(b))-Number(sameRepo(a))||a.line-b.line);
+      searches.push({symbol,matches:unique.length,truncated:Boolean(after)||localMatches.limited});limited ||= Boolean(after)||unique.length>3;
+      for(const n of unique.slice(0,3))if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&r.line===n.line))references.push({repository:n.repository,path:n.path,line:n.line,kind:n.kind,required:false,basis:'Candidate implementation of call in supplied primary source; receiver binding unproven'});
+    }
+    limited ||= references.length>16;
+    return {references:references.slice(0,16),searches,limited,interpretation:'One bounded indexed call hop. Missing or truncated name matches do not establish absent controls or resolved dispatch.'};
+  }
   catalog(records) {
     const map = new Map();
     let omitted = false;

@@ -72,16 +72,19 @@ export async function prepareStrideEvidence(original, source, options = {}) {
   };
   const primaryEvidence=new Set(packet.records.filter(r=>(packet.reviewUnit?.primaryInterfaceIds || []).includes(r.id)).flatMap(r=>r.evidence).map(r=>`${r.repository}\0${r.path}\0${r.line}`));
   if(options.sectionEvidence)packet.sourceContext.retrievalPolicy='section-candidates-1';
-  const seedText=[];
+  const seedText=[],primaryWindows=[];
   if (original.reviewFocus?.selectedProfile) for (const ref of packet.records.flatMap(r=>r.evidence).slice(0,8)) {
-    try {seedText.push((await source.functionWindow(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
+    try {const window=await source.functionWindow(ref);seedText.push(window.code);if(primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line}`))primaryWindows.push(window);} catch { /* Regular retrieval records the evidence gap below. */ }
   }
   const controlLookup = original.reviewFocus?.selectedProfile ? await controlContext(source, packet.records.flatMap(r=>r.evidence), seedText.join('\n')) : null;
   if (controlLookup) packet.sourceContext.controlLookup = {searches:controlLookup.searches,omitted:controlLookup.omitted,basis:controlLookup.basis};
+  const called=options.sectionEvidence&&source.calledImplementations?source.calledImplementations(primaryWindows):null;
+  if(called)packet.sourceContext.calledImplementations={...called,references:undefined};
   const refs = [
     ...(options.references || []),
     ...packet.records.flatMap((r) => r.evidence),
     ...(controlLookup?.references || []),
+    ...(called?.references || []),
   ];
   const requiredRefs=new Set(refs.filter(r=>r.required===true||primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`)).map(r=>`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`));
   for (const ref of refs) {
