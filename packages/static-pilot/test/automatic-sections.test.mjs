@@ -100,6 +100,11 @@ test('category closure preserves retained cases and distinguishes optional searc
  p.sourceContext.priorReview={retainedThreats:initial.threats.map(repositoryThreatWire)};
  const follow=response(p);const closed=validateCategoryFollowUp(follow,p);
  assert.equal(closed.threats.length,1);assert.deepEqual(closed.threats,initial.threats,'No renamed case or changed engineering issue hash');
+ const {sha}=await import('../src/sources.mjs');const originals=initial.threats.map(repositoryThreatWire);
+ p.sourceContext.priorReview={retainedThreats:originals.map((v,index)=>({index,title:v.title,category:v.category,interfaceIds:v.interfaceIds})),retainedDigest:sha(JSON.stringify(originals))};
+ assert.deepEqual(validateCategoryFollowUp(follow,p,originals).threats,initial.threats,'Compact provider references must retain the exact original scenarios for validation and saved findings');
+ assert.throws(()=>validateCategoryFollowUp(follow,p),/integrity/);assert.throws(()=>validateCategoryFollowUp(follow,p,[{...originals[0],scenario:'altered'}]),/integrity/);
+ p.sourceContext.priorReview={retainedThreats:originals};
  assert.equal(closed.categoryReviews.find(c=>c.category==='Tampering').status,'evidence-gap','A clean category cannot hide a retained scenario');
  p.sourceContext.priorReview.retainedThreats=[];p.sourceContext.gaps=[{reason:'source-context-window-limit',required:false}];
  assert.ok(validateCategoryFollowUp(response(p),p).categoryReviews.every(c=>c.status==='no-scenario-identified'));

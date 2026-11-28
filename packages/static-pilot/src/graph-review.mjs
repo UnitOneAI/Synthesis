@@ -913,13 +913,14 @@ export async function enrichGraphModel(
       // bounded actions/restarts so their errors and retry instructions persist.
       review.batches = review.batches.filter((b) => b.id !== entry.id);
       review.batches.push(entry);
-      let attempt;
+      let attempt, retainedThreats;
       const requestStartedAt = performance.now();
       try {
         if (options.prepareBatch) {
           const prepared = await options.prepareBatch(batch);
           batch = { ...batch, packet: prepared.packet };
           entry.evidenceContext = prepared.context;
+          retainedThreats = prepared.retainedThreats;
           metrics.set(batch.id, {
             bytes: Buffer.byteLength(JSON.stringify(batch.packet)),
             excerpts: batch.packet.records.flatMap((r) =>
@@ -1013,7 +1014,7 @@ export async function enrichGraphModel(
             ? { responseSchema: options.responseSchema }
             : {}),
           ...(options.validate ? { validate: options.validate } : {}),
-          ...(categoryClosure?{systemPrompt:CATEGORY_FOLLOWUP_PROMPT,validate:validateCategoryFollowUp}:{}),
+          ...(categoryClosure?{systemPrompt:CATEGORY_FOLLOWUP_PROMPT,validate:(value,packet)=>validateCategoryFollowUp(value,packet,retainedThreats)}:{}),
           signal: options.signal,
           onResponseShape: (shape) => {
             entry.responseShape = shape;
