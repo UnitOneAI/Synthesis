@@ -4,6 +4,7 @@ import {beginUsageRun,beginAttempt,finishAttempt} from './token-usage.mjs';
 import {securityContext} from './security-intelligence.mjs';
 import {sourceWindow} from './graph-package.mjs';
 import {controlSymbols} from './control-context.mjs';
+import {compactEvidence} from './evidence-transport.mjs';
 import {threatBatch,batchSchema,validateThreatBatch,THREAT_BATCH_PROMPT,THREAT_BATCH_VERSION} from './threat-batch.mjs';
 
 // One coordinator owns entries and usage. Requests batch cases only inside an
@@ -49,7 +50,7 @@ export async function reviewSectionThreats(manifest,model,options) {
      const next={...item,caseId:item.issue.id,packet,old,packetHash};
      // A common source record is evidence sharing, not policy equivalence. No
      // shared window means a separate batch. Size limits split, never omit cases.
-     if(prepared.length){const candidate=threatBatch([...prepared,next]);if(!candidate.packet.sharedRecordIds.length||Buffer.byteLength(JSON.stringify(candidate.packet))>160000)break;}
+     if(prepared.length){const candidate=threatBatch([...prepared,next]);const bytes=config.compactEvidence?compactEvidence(candidate.packet).metrics.wireBytes:Buffer.byteLength(JSON.stringify(candidate.packet));if(!candidate.packet.sharedRecordIds.length||bytes>160000)break;}
      prepared.push(next);
     }catch(error){const entry={...old,issueId:item.issue.id,sourceId:item.issue.sourceId,issueHash:item.hash,assessment:'failed',error:redact(error.message).slice(0,600),rounds:contextRounds+2};report.entries=report.entries.filter(e=>e.issueId!==entry.issueId);report.entries.push(entry);}
    }

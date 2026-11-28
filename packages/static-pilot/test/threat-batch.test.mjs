@@ -93,3 +93,10 @@ test('non-applicability cites registration evidence without pretending an unused
  assert.equal(validateThreatBatch(v,batch,validateThreatAssessment).results[0].review.assessment,'static-supported');
  app.bindingCitations=[{recordId:batch.packet.cases[0].entryRecordIds[0],startLine:1,endLine:1}];assert.match(validateThreatBatch(v,batch,validateThreatAssessment).results[0].error,/non-applicability/);
 });
+test('batch size uses transmitted source bytes, retaining every line and case under the wire limit',async t=>{
+ const f=await fixture(t);let calls=0;
+ const build=async(m,mf,root,issue)=>{const n=Number(issue.id.slice(4)),p=packet(n);p.candidate.locations=[{repository:'service',path:'shared-route.py',line:1}];p.records[0]={...rec('entry'+n,'shared-route.py'),basis:'case '+n,endLine:200,lines:Array.from({length:200},(_,i)=>({line:i+1,text:'x'.repeat(240)}))};return p;};
+ const packets=await Promise.all(f.options.candidateIssues.map(async issue=>({caseId:issue.id,packet:await build(null,null,null,issue)})));assert.ok(threatBatch(packets).stats.batchBytes>160000);
+ await reviewSectionThreats(f.manifest,f.model,{...f.options,packetBuilder:build,fetchImpl:async(_,req)=>{calls++;const wire=JSON.parse(JSON.parse(req.body).messages[0].content),p=expandEvidence(wire);assert.equal(p.cases.length,4);assert.equal(p.records.filter(r=>r.path==='shared-route.py').length,4);assert.ok(p.records.filter(r=>r.path==='shared-route.py').every(r=>r.lines.length===200&&r.lines[199].text==='x'.repeat(240)));return response(answer(p));}});
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.pending,0);assert.ok(f.model.threatValidation.entries.every(e=>e.challengeCompleted));
+});
