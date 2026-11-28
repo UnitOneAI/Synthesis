@@ -644,3 +644,21 @@ test('a section positive reached from an unresolved draft gets a challenge of it
  assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
  assert.equal(f.model.usageLedger.attempts.length,2);
 });
+
+test('ambiguous indexed ownership is not missing code when all candidate bodies are supplied',async t=>{
+ const f=await threatFixture(t,[['repo0/Overlap.py',Array.from({length:100},(_,n)=>'# source '+n).join('\n')]]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const nodes=source.nodes.bind(source);source.nodes=options=>options.kind==='function'?[{line:8,endLine:20,name:'first'},{line:8,endLine:30,name:'second'}]:nodes(options);
+ const supplied=await source.functionWindow({repository:'repo0',path:'Overlap.py',line:10});
+ assert.equal(supplied.functionContext.complete,true);assert.match(supplied.functionContext.reason,/binding still requires/);
+ source.nodes=options=>options.kind==='function'?[{line:8,endLine:95,name:'first'},{line:8,endLine:30,name:'second'}]:nodes(options);
+ const truncated=await source.functionWindow({repository:'repo0',path:'Overlap.py',line:10});
+ assert.equal(truncated.functionContext.complete,false);assert.equal(truncated.functionContext.reason,'ambiguous-function-owner');
+});
+
+test('a citation inside one function does not become ambiguous with the following function',async t=>{
+ const f=await threatFixture(t,[['repo0/Neighbors.py','def first():\n    x = 1\n    return x\ndef next():\n    return 2\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const w=await source.functionWindow({repository:'repo0',path:'Neighbors.py',line:3});
+ assert.equal(w.functionContext.complete,true);assert.equal(w.functionContext.name,'first');assert.equal(w.endLine,3);
+});

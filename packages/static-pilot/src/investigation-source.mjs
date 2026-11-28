@@ -119,10 +119,15 @@ export class InvestigationSource {
     if(['class','type'].includes(ref.kind)&&!exactType)return this.window(ref);
     const exact=exactType||(indexed&&['function','method'].includes(indexed.kind)&&indexed.repository===ref.repository&&indexed.path===ref.path&&indexed.line===line);
     const nodes=exact?[indexed]:this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
-    const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
+    const containing=nodes.filter(n=>Number.isInteger(n.endLine)&&n.endLine>=line&&n.line<=line);
+    const candidates=(containing.length?containing:nodes.filter(n=>Number.isInteger(n.endLine)&&n.endLine>=line&&n.line<=line+4))
       .sort((a,b)=>Math.abs(a.line-line)-Math.abs(b.line-line));
     const n=candidates[0];
-    if(nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line)))return {...await this.window(ref),functionContext:{complete:false,reason:nodes.length>128?'function-index-page-limit':'ambiguous-function-owner'}};
+    if(nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line))) {
+      const window=await this.window(ref);
+      const covered=nodes.length<=128&&candidates.every(c=>c.line>=window.startLine&&c.endLine<=window.endLine);
+      return {...window,functionContext:{complete:covered,reason:covered?'candidate-owners-fully-included; binding still requires code assessment':nodes.length>128?'function-index-page-limit':'ambiguous-function-owner'}};
+    }
     if(!n)return this.window(ref);
     const first=exactType?Math.max(1,line-4):Math.min(line,n.line),last=n.endLine;
     if(last-first+1>200)return {...await this.window(ref),functionContext:{name:n.name,startLine:first,endLine:last,complete:false,reason:'function-exceeds-200-line-window'}};
