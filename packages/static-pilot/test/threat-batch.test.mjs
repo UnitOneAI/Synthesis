@@ -80,3 +80,15 @@ test('additional verified control source can be shared without substituting a si
  batch.items[1].packet.gaps.push({reason:'Required implementation unavailable'});assert.equal(validateThreatBatch(v,batch,validateThreatAssessment).results[1].review.assessment,'needs-context');
  const unseen=structuredClone(v);edit(unseen.cases[0],a=>a.evidenceReview.controls[0].endLine=3);assert.match(validateThreatBatch(unseen,batch,validateThreatAssessment).results[0].error,/validation/);
 });
+test('supporting candidate locations cannot replace the actual interface entry anchor',()=>{
+ const p=packet(1);p.primaryOperationLocations=[...p.candidate.locations];p.candidate.locations.push({repository:'service',path:'control.py',line:1});
+ const batch=threatBatch([{caseId:'case1',packet:p}]),v=answer(batch.packet);
+ edit(v.cases[0],a=>{for(const o of a.engineering.obligations.filter(o=>['entry','path-binding'].includes(o.kind)))o.citations=[{recordId:batch.packet.sharedRecordIds[0] || batch.packet.records.find(r=>r.path==='control.py').id,startLine:1,endLine:1,reason:'A helper is not the case entry'}];});
+ assert.match(validateThreatBatch(v,batch,validateThreatAssessment).results[0].error,/primary operation/);
+});
+
+test('non-applicability cites registration evidence without pretending an unused control is on the path',()=>{
+ const batch=threatBatch([{caseId:'case1',packet:packet(1)}]),v=answer(batch.packet),app=v.cases[0].controlApplications[0];app.effect='not-applicable';app.bindingCitations=[{recordId:batch.packet.records.find(r=>r.path==='control.py').id,startLine:1,endLine:2}];
+ assert.equal(validateThreatBatch(v,batch,validateThreatAssessment).results[0].review.assessment,'static-supported');
+ app.bindingCitations=[{recordId:batch.packet.cases[0].entryRecordIds[0],startLine:1,endLine:1}];assert.match(validateThreatBatch(v,batch,validateThreatAssessment).results[0].error,/non-applicability/);
+});

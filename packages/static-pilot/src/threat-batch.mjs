@@ -4,7 +4,7 @@ import {stableJson} from './local-review-cache.mjs';
 export const THREAT_BATCH_VERSION='section-threat-batch-2';
 export const THREAT_BATCH_PROMPT=`
 BATCH CONTRACT overrides the single-case wire envelope: return {sharedControls, cases}. Each cases item is {caseId, assessmentJson, controlApplications}; assessmentJson is a JSON-encoded string containing the complete original single-case assessment object (assessment, caseDetails, evidenceReview, remediation, engineering). Encode that object once as a JSON string, not markdown. Its full schema is supplied in the assessmentJson description; the application parses and validates every field and source citation independently. Return exactly one item for every supplied caseId, never combine or omit threats. The shared records array supplies hash-checked source. A case may cite records in its recordIds, within each record's exact range. entryRecordIds identify this case's primary operation; supportingRecordIds are additional source from related cases, not proof that their routes or controls apply here. The input trace, established entry and established path-binding must each cite this case's entryRecordIds. Never substitute a sibling route. Merge sharedContext into each case packet.context. Original missing-source gaps remain unless the additional source actually resolves them.
-Analyze a common control implementation once in sharedControls (id, conclusion, citations). For each case that uses it, return a separate controlApplications item (controlId, effect, reason, bindingCitations). Binding citations must include that case's entry and actual path binding. A shared function name or repository is not proof of enforcement. Explain route-specific bypasses, identity, configuration and ordering. "enforces" means this control actually applies on this case path, not that every threat is ruled out. "ineffective", "not-applicable", and "unresolved" are distinct. Unresolved applicability must leave a missing applicable-controls obligation. Each assessment must independently cite its entry, sensitive operation, path binding and applicable controls. Shared conclusions do not replace those obligations. If no reusable control is established, use an empty sharedControls array and assess the cases separately. Keep each result concise; do not repeat the source or a common control's full explanation. Never reduce category coverage or invent policy to save tokens.
+Analyze a common control implementation once in sharedControls (id, conclusion, citations). For each case that uses it, return a separate controlApplications item (controlId, effect, reason, bindingCitations). For enforces or ineffective, binding citations must include that case's entry and actual path binding. For not-applicable, cite the case's applicable-controls obligation showing the registration or other control evidence that excludes this helper; an omitted search result alone is insufficient. A shared function name or repository is not proof of enforcement. Explain route-specific bypasses, identity, configuration and ordering. "enforces" means this control actually applies on this case path, not that every threat is ruled out. "ineffective", "not-applicable", and "unresolved" are distinct. Unresolved applicability must leave a missing applicable-controls obligation. Each assessment must independently cite its entry, sensitive operation, path binding and applicable controls. Shared conclusions do not replace those obligations. If no reusable control is established, use an empty sharedControls array and assess the cases separately. Keep each result concise; do not repeat the source or a common control's full explanation. Never reduce category coverage or invent policy to save tokens.
 For the independent challenge, challenge every case and every shared-control applicability from fresh source. The first pass and its shared conclusions are hypotheses, not evidence. Preserve an explicit outcome for every case.`;
 const obj=properties=>({type:'object',additionalProperties:false,properties,required:Object.keys(properties)});
 const str={type:'string'};
@@ -26,12 +26,12 @@ export function threatBatch(items) {
   const map=new Map(),ids=[];
   for(const r of packet.records){const key='r-'+sha(stableJson({...r,id:undefined})).slice(0,24);records.set(key,{...r,id:key});map.set(key,r.id);ids.push(key);if(!owners.has(key))owners.set(key,new Set());owners.get(key).add(caseId);}
   maps.set(caseId,map);
-  const {records:_,context,...rest}=packet;
+  const {records:_,context,primaryOperationLocations,...rest}=packet;
   return {caseId,recordIds:ids,packet:{...rest,context:Object.fromEntries(Object.entries(context || {}).filter(([k])=>!Object.hasOwn(sharedContext,k)))}};
  });
  const validationItems=items.map((item,index)=>{
   const c=cases[index],map=maps.get(item.caseId),originalIds=[...c.recordIds];
-  const locations=item.packet.candidate?.locations || [];
+  const locations=item.packet.primaryOperationLocations ?? item.packet.candidate?.locations ?? [];
   const anchorRecords=item.packet.records.filter(r=>locations.some(l=>l.repository===r.repository&&l.path===r.path&&(!l.blobSha256||l.blobSha256===r.blobSha256)&&l.line>=r.startLine&&l.line<=r.endLine));
   c.entryRecordIds=originalIds.filter(id=>anchorRecords.some(r=>r.id===map.get(id)));
   c.supportingRecordIds=[...records.keys()].filter(id=>!originalIds.includes(id));
@@ -82,8 +82,14 @@ export function validateThreatBatch(value,batch,validate) {
    if(!['enforces','ineffective','not-applicable','unresolved'].includes(app.effect)||!Array.isArray(c.citations)||!c.citations.length||c.citations.length>8||!Array.isArray(app.bindingCitations)||!app.bindingCitations.length||app.bindingCitations.length>8)throw Error('Security assessment failed batch validation (bounded control and binding citations required)');
    const citations=c.citations.map(r=>sourceRef(mapRefs(r,map),packet.records,batch.packet.records)),bindings=app.bindingCitations.map(r=>sourceRef(mapRefs(r,map),packet.records,batch.packet.records));
    const obligations=review.engineering?.obligations || [];
-   for(const kind of ['entry','path-binding'])if(!bindings.some(r=>obligations.find(o=>o.kind===kind)?.citations.some(c=>overlaps(r,c))))throw Error('Security assessment failed batch validation (control reuse needs this case entry and path-binding citations)');
-   if(app.effect!=='unresolved'&&!citations.some(r=>obligations.find(o=>o.kind==='applicable-controls')?.citations.some(c=>overlaps(r,c))))throw Error('Security assessment failed batch validation (shared control not cited by this case control obligation)');
+   // Enforcement/ineffectiveness requires the path. Non-applicability instead
+   // cites the registration/control evidence explaining why it is absent there.
+   // Both retain the primary-operation entry/path checks above.
+   if(['enforces','ineffective'].includes(app.effect)){
+    for(const kind of ['entry','path-binding'])if(!bindings.some(r=>obligations.find(o=>o.kind===kind)?.citations.some(c=>overlaps(r,c))))throw Error('Security assessment failed batch validation (control reuse needs this case entry and path-binding citations)');
+    if(!citations.some(r=>obligations.find(o=>o.kind==='applicable-controls')?.citations.some(c=>overlaps(r,c))))throw Error('Security assessment failed batch validation (shared control not cited by this case control obligation)');
+   }
+   if(app.effect==='not-applicable'&&!bindings.some(r=>obligations.find(o=>o.kind==='applicable-controls')?.citations.some(c=>overlaps(r,c))))throw Error('Security assessment failed batch validation (non-applicability requires this case control or registration evidence)');
    if(app.effect==='unresolved'&&(review.assessment!=='needs-context'||obligations.find(o=>o.kind==='applicable-controls')?.status!=='missing'))throw Error('Security assessment failed batch validation (unresolved control cannot settle a case)');
    applications.push({controlId:c.id,conclusion:c.conclusion,effect:app.effect,reason:app.reason,citations,bindingCitations:bindings});
   }
