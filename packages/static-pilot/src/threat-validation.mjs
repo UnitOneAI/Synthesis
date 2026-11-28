@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-22';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-23';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -210,9 +210,9 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   // Upgrade selected older positive assessments by challenging their existing
   // argument, not by repeating discovery. Their original response remains intact.
   if(model.threatValidation?.contextKey===threatValidationKey(model)) for(const entry of model.threatValidation.entries || []) {
-    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.draftAssessment?.assessment!=='static-supported')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
+    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.challengeBasis!=='current-positive-1')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
-      if(entry.assessment==='static-supported')entry.assessment='not-assessed';entry.rounds=0;
+      if(entry.assessment==='static-supported'){entry.assessment='not-assessed';entry.followUp=[];entry.missingEvidence=[];delete entry.continuationReferences;}entry.rounds=0;
     }
   }
   // A changed retriever may resolve an exhausted code gap. Reopen it once for
@@ -255,7 +255,10 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
         if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
       }
       for(const ref of [...(prior?.engineering?.obligations || []).flatMap(o=>o.citations),...(prior?.engineering?.conditions || []).flatMap(c=>c.citations)]) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
-      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || []).map(r=>({...r,required:m.aiReview?.scope?.poc?.kind==='section'?false:true}))],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      const positive=prior?.challengeStarted&&prior.draftAssessment?.assessment==='static-supported'?prior.draftAssessment:null;
+      const currentIssue=positive?{...issue,title:'Current source-supported claim under independent challenge',explanation:positive.engineering.conclusion,preconditions:positive.engineering.conditions.map(c=>c.statement),controls:positive.counterEvidence,analysis:positive.impact}:issue;
+      const packet=await threatInvestigationPacket(m,mf,root,currentIssue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || []).map(r=>({...r,required:m.aiReview?.scope?.poc?.kind==='section'?false:true}))],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      if(positive)packet.challengeBasis='current-positive-1';
       if(prior?.decisionReviewRequired) packet.decisionReview={
         task:'Reconcile the previous code argument with its unresolved questions. It marked all four code obligations established but withheld the conclusion. Independently check the fresh code below. For each previous missing fact decide whether it changes this exact code path or is deployment context / broader follow-up. Return an honest supported conditional conclusion, a cited ruled-out path, or mark the exact code obligation missing. Do not change a status merely to satisfy this request. Narrow impact to the directly demonstrated operation; do not infer all downstream traffic, theft or exploitation from a configuration write. A reviewer answer establishes only that condition, not the full attack. Upstream authentication does not imply administrator authorization.',
         previousConclusion:prior.engineering.conclusion,

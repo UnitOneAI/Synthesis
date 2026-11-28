@@ -32,7 +32,7 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
   const followCategoryEvidence=async()=>{
     if(plan.scope?.poc?.kind==='section') {
       const lookup=threatAssessmentLookup(model);
-      if((model.aiReview?.threats || []).some(t=>{const a=threatAssessment(model,t.id,lookup);return !['static-supported','ruled-out'].includes(a.assessment)||(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.draftAssessment?.assessment!=='static-supported')));}))return;
+      if((model.aiReview?.threats || []).some(t=>{const a=threatAssessment(model,t.id,lookup);return !['static-supported','ruled-out'].includes(a.assessment)||(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.challengeBasis!=='current-positive-1')));}))return;
     }
     const current=[...(model.aiReview?.batches || [])];
     for(const previous of current) {
@@ -75,7 +75,7 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
     const assessmentLookup=threatAssessmentLookup(model);
     const threatIds=model.aiReview.threats.filter(t=>{
       const a=threatAssessment(model,t.id,assessmentLookup);
-      if(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.draftAssessment?.assessment!=='static-supported')))return true;
+      if(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.challengeBasis!=='current-positive-1')))return true;
       return !['static-supported','ruled-out'].includes(a.assessment) && !(model.threatValidation?.retrievalVersion===THREAT_RETRIEVAL_VERSION && a.assessment==='needs-context' && (a.rounds>=(plan.scope?.poc?.kind==='section'?5:3) || a.stopReason==='no-new-evidence'));
     }).map(t=>t.id);
     if(!threatIds.length)return;

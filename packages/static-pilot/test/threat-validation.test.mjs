@@ -640,7 +640,7 @@ test('a section positive reached from an unresolved draft gets a challenge of it
  const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>answer(JSON.parse(JSON.parse(request.body).messages[0].content))};
  await reviewThreatScenarios(f.manifest,f.model,options);
  const e=f.model.threatValidation.entries[0];e.assessment='static-supported';e.challengeCompleted=true;e.challengeStarted=true;e.engineering.conclusion='Narrow current persistent write';e.engineering.obligations.forEach(o=>o.status='established');e.draftAssessment={assessment:'needs-context',engineering:{conclusion:'Older speculative impact'}};
- await reviewThreatScenarios(f.manifest,f.model,{...options,fetchImpl:async(_,request)=>{const p=JSON.parse(JSON.parse(request.body).messages[0].content);assert.equal(p.decisionChallenge.priorClaim,'Narrow current persistent write');return answer(p);}});
+ await reviewThreatScenarios(f.manifest,f.model,{...options,fetchImpl:async(_,request)=>{const p=JSON.parse(JSON.parse(request.body).messages[0].content);assert.equal(p.decisionChallenge.priorClaim,'Narrow current persistent write');assert.equal(p.candidate.explanation,'Narrow current persistent write');assert.equal(p.challengeBasis,'current-positive-1');return answer(p);}});
  assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
  assert.equal(f.model.usageLedger.attempts.length,2);
 });

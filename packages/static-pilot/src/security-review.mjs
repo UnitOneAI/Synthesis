@@ -571,6 +571,7 @@ export async function reviewSecurityIssues(
           if(response.review.assessment==='static-supported')entry.assessment='not-assessed';
         } else if(old?.challengeStarted) {
           entry.challengePending=false;entry.challengeCompleted=true;
+          if(packet.challengeBasis)entry.challengeBasis=packet.challengeBasis;
         }
         // Repeating an identical evidence packet is not progress.
         if (
