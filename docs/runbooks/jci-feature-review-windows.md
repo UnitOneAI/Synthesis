@@ -1,4 +1,4 @@
-# JCI: feature threat review on the saved graph (0.12.0)
+# JCI: feature threat review on the saved graph (0.12.1)
 
 This update reuses the existing graph and saved STRIDE packets. It changes how results are presented and how individual threats are checked against controls. It does not make an incomplete JCI assessment complete. Unresolved assessments use an explicit engineering decision: entry, sensitive operation, path binding and applicable controls. Compatible results and their source references are retained. Positive findings receive a separate critical check before publication; existing positives can enter that check without repeating discovery. Prior attempts remain in history. Do not restart the entire discovery run just to generate the new report.
 
@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application checks failed.' }
 node -p "require('./package.json').version"
 ```
 
-The version should be **0.12.0 or later**. Keep the existing `C:/SynthesisState/JCI-Metasys` workspace and source clones.
+The version should be **0.12.1 or later**. Keep the existing `C:/SynthesisState/JCI-Metasys` workspace and source clones.
 
 ## Start with the JCI gateway
 
@@ -78,3 +78,38 @@ Private networking does not remove authenticated-user or compromised-peer threat
 Use **Export complete technical review · HTML** for every hypothesis and investigation task. Browser downloads need Save As or a configured download folder; they do not automatically use the trace directory. Traces automatically go to `C:/SynthesisState/Exports/Traces`.
 
 For JCI qualification, revisit the previously unresolved `ApplyAuthorization` / `TryRevokeAccess` / `SolutionAuthorizationHandler` path. Confirm actual definitions are cited, not only callers. If incomplete, export errors and the technical review with the exact remaining binding. Do not start another broad run to hide an unresolved first cohort.
+
+## New decision and guide controls (0.12.1)
+
+Opening or exporting the existing review does not make model calls. Each assessed
+threat now shows **Actor-to-operation evidence**, with separate code binding,
+control, exposure and runtime status. Operation groups show recorded reviews and
+settled threats separately from complete STRIDE category decisions.
+
+For an older decision with contradictory deployment advice, open that threat in
+**Threat register**. Expand **Recheck this decision's conditions**, enable source
+sharing for that case, then click **Recheck conditions for this threat**. This uses
+up to four requests for that case only. It preserves discovery and the prior
+assessment in history. Inspect the new conclusion before expanding review scope.
+Normal resume does not automatically repeat already settled cases.
+
+To supply the hardening guide baseline, open **Deployment context → Declared
+deployment guidance** and import:
+
+`C:/Tools/Synthesis/examples/deployment-guidance/jci-protected-server.json`
+
+The example applies to API Gateway and MUI and cites the supplied Release 16.0
+Rev A guide. Confirm that version/profile applies; edit the JSON repository list
+if your selected names differ. Importing a guide is an analysis-context change,
+so affected results can require re-review. Do this before starting the next cohort.
+Do not import it solely to reformat an already completed report.
+
+The other supported modes are `authorized-user-or-peer` and `exposure-deviation`.
+Use a separately named profile with cited statements when evaluating these cases.
+A guide describes intended deployment; it does not prove a listener is isolated,
+repair code controls or automatically approve a trust boundary. Unexpected exposure
+and authenticated/internal actors remain investigation subjects.
+
+Reviewer answers record one condition only. Old advice is labeled legacy and is
+not repeated as authoritative Yes/No consequences. New questions use explicit
+conditions with bounded consequences; missing code remains an engineering task.

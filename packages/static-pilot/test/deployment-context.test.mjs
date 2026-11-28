@@ -290,3 +290,22 @@ test('planner transition retains prior paid system review for comparison', async
   await enrichGraphModel(f.model, modelConfig('anthropic','claude-opus-4-6',{ANTHROPIC_API_KEY:'fixture'}), new Map(), async()=>{throw Error('fixture provider unavailable');}, {reviewScope:'system',maxBatches:1});
   assert.equal(f.model.stridePlanHistory[0].review.threats[0].id, 'historical-threat');
 });
+
+test('cited guide profiles remain declared intent, scope packet context and preserve the source graph',async t=>{
+ const f=await fixture(t,2),before=JSON.stringify(f.model.sourceGraph);
+ const profile={title:'Protected server',document:'Deployment guide',documentVersion:'16.0',mode:'protected-deployment',repositories:['repo-0'],statements:[{area:'exposure',statement:'The API listener is intended for internal access only.',reference:'Table 1.6.1.2'}]};
+ assert.equal(updateDeploymentContext(f.model,{revision:deploymentContext(f.model).revision,action:'select-guidance',id:''}),f.model);
+ const oldPlan=systemReviewPlan(f.model);
+ const m=updateDeploymentContext(f.model,{revision:deploymentContext(f.model).revision,action:'guidance',profile});
+ assert.equal(updateDeploymentContext(m,{revision:deploymentContext(m).revision,action:'guidance',profile}),m);
+ const context=deploymentContext(m);assert.equal(context.guidance.mode,'protected-deployment');assert.match(context.guidance.basis,/unverified/);assert.match(context.guidance.instruction,/bypass/);
+ assert.equal(JSON.stringify(m.sourceGraph),before);assert.equal(f.model.deploymentContext,undefined);
+ const newPlan=systemReviewPlan(m),unrelated=oldPlan.batches.filter(b=>b.packet.records.every(r=>r.repository==='repo-1'));
+ assert.ok(unrelated.length);assert.ok(unrelated.every(b=>newPlan.batches.some(n=>n.id===b.id)),'unrelated packet identities stay reusable');
+ assert.ok(newPlan.batches.some(b=>b.packet.deploymentContext.guidance));
+ const restored=updateDeploymentContext(m,{revision:context.revision,action:'select-guidance',id:''});
+ assert.deepEqual(systemReviewPlan(restored).batches.map(b=>b.id),oldPlan.batches.map(b=>b.id));
+ assert.throws(()=>updateDeploymentContext(m,{revision:context.revision,action:'guidance',profile:{...profile,repositories:['not-loaded']}}),/loaded repository/);
+ assert.throws(()=>updateDeploymentContext(m,{revision:'old',action:'guidance',profile}),/refresh/);
+ const store=await workspaceStore(f.root,f.workspace);try {await store.save({model:m,manifest:f.manifest});const saved=await store.load();assert.equal(deploymentContext(saved.model).activeGuidanceId,context.activeGuidanceId);}finally{await store.close();}
+});

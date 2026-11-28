@@ -336,3 +336,16 @@ test('feature coordinator requires source consent and cancellation makes no mode
  await reviewFeatureCohorts(f.model,f.manifest,config,new Map(),send,{sourceRoot:f.root,verifiedSource:source,signal:controller.signal,prepareBatch:b=>prepareStrideEvidence(b.packet,source)});
  assert.equal(f.model.featureReviewRun.calls,0);assert.equal(f.model.featureReviewRun.stopReason,'cancelled');
 });
+
+test('case evidence distinguishes cross-repository controls, unresolved bindings and deployment declarations',async()=>{
+ const {decisionPath}=await import('../src/decision-path.mjs');
+ const threat={id:'t',boundaryIds:['boundary'],validation:{actor:'Ordinary user',initialAccess:'Can reach the entry',engineering:{obligations:[
+  {kind:'entry',status:'established',reason:'Route',citations:[{repository:'api',path:'route.cs',startLine:1,endLine:2}]},
+  {kind:'path-binding',status:'missing',reason:'Registration not supplied',citations:[]},
+  {kind:'applicable-controls',status:'blocks-attack',reason:'Shared policy rejects ordinary users',citations:[{repository:'policy',path:'policy.cs',startLine:3,endLine:4}]},
+  {kind:'sensitive-operation',status:'established',reason:'Write',citations:[{repository:'api',path:'store.cs',startLine:5,endLine:6}]}]}}};
+ const system={boundaries:[{id:'boundary',name:'Caller / service',reference:'TB-1',reviewState:'pending'}]},before=JSON.stringify([threat,system]);
+ const p=decisionPath(threat,system);assert.deepEqual(p.repositories,['api','policy']);assert.equal(p.pathStatus,'Cited blocking fact');assert.equal(p.stages[1].status,'missing');assert.match(p.runtime,/Not tested/);assert.equal(p.boundaries[0].state,'pending');assert.equal(JSON.stringify([threat,system]),before);
+ const legacy=await import('../src/reviewer-questions.mjs');const q=legacy.questionPresentation({}, {question:'Enable auth?',ifYes:'All routes are safe',ifNo:'All routes are accessible'});
+ assert.doesNotMatch(q.ifYes,/All routes/);assert.equal(q.originalInterpretation.ifYes,'All routes are safe');
+});

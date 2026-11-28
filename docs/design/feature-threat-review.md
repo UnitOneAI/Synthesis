@@ -99,3 +99,31 @@ Do not silently retry authentication failures. Distinguish provider HTTP, invali
 ## Explicit follow-on work
 
 Large-scale graph partitioning, cross-case proven-control caching, independently configured validation models, per-case multi-worker leases and JCI-ground-truth competitive benchmarking require separate qualification. The first implementation must not advertise them as working. Architecture supports them without making completion depend on a wholesale graph rewrite.
+
+## Decision contract and compatibility
+
+The native provider response uses five groups: assessment, caseDetails,
+evidenceReview, remediation and engineering. Input/sink references are derived
+from the locally validated trace rather than duplicated nullable wire objects.
+Condition bindings reference established code obligations and reuse their exact
+validated citations. These changes reduce native grammar complexity without
+removing local source-window, enum, completeness or redaction validation. CWE's
+response contract is unchanged.
+
+The saved assessment remains in the existing canonical shape. New engineering
+records have version 2, conditions and a consistency result. Unresolved consistency
+cannot publish a supported or ruled-out conclusion. Critical checking receives
+prior conditions and remediation as hypotheses, alongside freshly verified source.
+
+Question IDs retain the previous algorithm for legacy questions. Version 2 IDs
+also include the bound condition, so changing its polarity or scope invalidates
+its answer. Answers never mutate the code assessment. An explicit one-case
+condition recheck archives the old report and reuses the existing challenge path;
+ordinary resume retains compatible conclusions.
+
+`decisionPath` and operation counters are read-only projections. They do not alter
+coverage, source graphs, actor declarations or boundary states. Guide profiles are
+bounded JSON declarations (32 KiB; eight profiles; twelve cited statements each),
+with explicit source/version and repository scope. They do not fetch URLs or run
+commands. Only relevant packets receive guide context; affected results require
+review when context changes. Raw evidence and technical exports remain available.

@@ -1,0 +1,19 @@
+{
+  "title": "JCI Metasys protected server — declared guide baseline",
+  "document": "Metasys Release 16.0 Secure Deployment Guide Rev A FINAL",
+  "documentVersion": "16.0 Rev A",
+  "mode": "protected-deployment",
+  "repositories": ["cp-metasys-api-gateway", "cp-metasys-mui"],
+  "statements": [
+    {
+      "area": "exposure",
+      "statement": "The guide recommends protected access rather than direct internet exposure. Applicability to this installation is unconfirmed; investigate routes or bindings that bypass the intended protection.",
+      "reference": "Section 1.3.1; confirm the applicable product version and deployment profile"
+    },
+    {
+      "area": "exposure",
+      "statement": "Ports 9505 (rate limiting), 9506 (API rewriting) and 9507 (internal API) are classified as internal-only in the guide. This classification does not establish effective listener, proxy or firewall enforcement.",
+      "reference": "Table 1.6.1.2, Internal Only Port numbers and protocols, printed page 31"
+    }
+  ]
+}

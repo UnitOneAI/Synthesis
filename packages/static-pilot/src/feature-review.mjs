@@ -12,8 +12,9 @@ export function featureReviewSummary(model, system) {
     const path=i.evidence.map(id=>evidence.get(id)?.path).find(Boolean)||'Unmapped source';
     const key=JSON.stringify([i.repository,i.component,path]);
     if(!groups.has(key))groups.set(key,{id:sha(key).slice(0,16),repository:i.repository,
-      name:system.components.find(c=>c.id===i.component)?.name || i.repository,path,interfaceIds:[]});
+      name:system.components.find(c=>c.id===i.component)?.name || i.repository,path,interfaceIds:[],operations:[]});
     groups.get(key).interfaceIds.push(i.id);
+    groups.get(key).operations.push({id:i.id,name:i.operation || i.name || i.kind});
   }
   const stale=!review || review.status==='stale' || (review.basedOnRevision&&review.basedOnRevision!==model.modelRevision);
   const assessments=new Map();
@@ -38,11 +39,14 @@ export function featureReviewSummary(model, system) {
       }
       return {category,total:members.size,...counts,state:stale?'stale':counts.decided===members.size?'decision available':counts.incomplete?'incomplete code':counts.decided?'partial':'not reviewed'};
     });
-    return {...group,categories,threatIds:related.map(t=>t.id),supported:related.filter(t=>t.outcome?.kind==='supported').length,
+    const reviewedOperations=group.interfaceIds.filter(id=>REPOSITORY_CATEGORIES.some(c=>(assessments.get(id+'\0'+c)||[]).some(r=>r.batchStatus==='completed'))).length;
+    const incompleteThreats=related.filter(t=>!['supported','ruled-out'].includes(t.outcome?.kind));
+    return {...group,reviewedOperations,unreviewedOperations:group.interfaceIds.length-reviewedOperations,
+      investigations:incompleteThreats.length,conditions:related.filter(t=>t.outcome?.kind==='supported').flatMap(t=>t.validation?.engineering?.reviewerQuestions||[]).length,categories,threatIds:related.map(t=>t.id),supported:related.filter(t=>t.outcome?.kind==='supported').length,
       ruledOut:related.filter(t=>t.outcome?.kind==='ruled-out').length,
       actorIds:[...new Set(related.flatMap(t=>t.actorIds||[]))],boundaryIds:[...new Set(related.flatMap(t=>t.boundaryIds||[]))],
       complete:!stale&&categories.every(c=>c.decided===c.total)};
   });
   return {features,complete:features.length>0&&features.every(f=>f.complete),stale,
-    interpretation:'Feature groups organize source operations; they do not prove a shared policy. Each subject/category requires a cited result and every returned scenario a settled code decision. Deployment acceptance is separate.'};
+    interpretation:'Source operation groups are navigation aids, not inferred business capabilities. Reviewed operations and settled threats are separate from complete category decisions. Feature groups organize source operations; they do not prove a shared policy. Each subject/category requires a cited result and every returned scenario a settled code decision. Deployment acceptance is separate.'};
 }

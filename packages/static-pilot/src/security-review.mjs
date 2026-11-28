@@ -492,6 +492,11 @@ export async function reviewSecurityIssues(
         if(challengePrompt && old?.challengeStarted) packet.decisionChallenge={
           priorClaim:old.draftAssessment?.engineering?.conclusion || old.engineering?.conclusion,
           priorImpact:old.draftAssessment?.impact || old.impact,
+          ...((old.draftAssessment?.engineering || old.engineering)?.conditions ? {
+            priorConditions:(old.draftAssessment?.engineering || old.engineering).conditions.map(({citations,...c})=>c),
+            priorRemediation:old.draftAssessment?.remediation || old.remediation,
+            priorConsistency:(old.draftAssessment?.engineering || old.engineering).consistency,
+          } : {}),
           instruction:'Challenge this proposed finding against the freshly supplied source. The earlier assessment is a hypothesis, not evidence. Retain only the directly demonstrated impact; narrow unsupported extensions. Return your own complete assessment and deployment questions.',
         };
         if(Buffer.byteLength(JSON.stringify(packet))>INVESTIGATION_LIMITS.packetBytes)throw Error('Security packet metadata exceeds size limit');
