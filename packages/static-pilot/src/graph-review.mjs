@@ -1088,19 +1088,19 @@ export async function enrichGraphModel(
           }
         }
         delete entry.error;
-        recordOutcome(false);
-        finishAttempt(attempt, "succeeded");
+        if(attempt){recordOutcome(false);finishAttempt(attempt, "succeeded");}
         Object.assign(entry, {
           status: "completed",
           review: result.review,
           responseHash: result.responseHash,
           requestPromptHash: result.requestPromptHash,
+          ...(result.localReuse ? {localReuse:result.localReuse} : {}),
         });
         entry.interfaceIds.forEach((i) => reviewed.add(i));
-        await emit("model.request-completed", {
+        await emit(result.localReuse ? "review.local-cache-reused" : "model.request-completed", {
           runKey,
           batchId: batch.id,
-          attemptId: attempt.id,
+          attemptId: attempt?.id,
           responseHash: result.responseHash,
           requestPromptHash: result.requestPromptHash,
         });
@@ -1130,12 +1130,12 @@ export async function enrichGraphModel(
       }
       if (review.recovery?.batchId === batch.id) review.recovery.state = entry.status === 'completed' ? 'recovered' : 'stopped';
       entry.durationMs = Math.round(performance.now() - requestStartedAt);
-      attempt.durationMs = entry.durationMs;
+      if(attempt)attempt.durationMs = entry.durationMs;
       await emit("review.agent-finished", {
         runKey,
         agentId,
         batchId: batch.id,
-        attemptId: attempt.id,
+        attemptId: attempt?.id,
         status: entry.status,
         durationMs: entry.durationMs,
       });

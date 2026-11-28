@@ -103,6 +103,7 @@ try {
                 }
               : {}),
             reviewScope: workerData.options.reviewScope,
+            reviewCacheFile: workerData.options.reviewCacheFile,
             maxBatches: workerData.options.reviewBatches,
             concurrency: workerData.options.concurrency,
             runUntilComplete: workerData.options.runUntilComplete,

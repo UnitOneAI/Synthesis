@@ -31,6 +31,17 @@ test('automatic sections finish all six categories, persist, export and resume w
  assert.equal(await run(f),0);const html=await sectionReport(f.model,f.manifest,f.root,p.sections[0].id);assert.match(html,/Section static threat model complete/);for(const c of REPOSITORY_CATEGORIES)assert.ok(html.includes(c));assert.match(html,/Confidential/);
  const app=await serve({sourceRoot:f.root,workspace:f.workspace,persist:true,port:0,quiet:true});try{const base=new URL(app.url).origin,headers={'X-Synthesis-Token':app.token};const r=await fetch(base+'/api/sections',{headers});assert.equal(r.status,200);const loaded=await r.json();assert.ok(loaded.sections.every(s=>s.status==='complete'));assert.equal((await fetch(base+'/api/section-report?id='+p.sections[0].id)).status,401);assert.match(await (await fetch(base+'/api/section-report?id='+p.sections[0].id,{headers})).text(),/Section static threat model complete/);}finally{await app.close();}
 });
+test('local response cache restores all six categories from a fresh projection without charging provider usage',async t=>{
+ const f=await fixture(t),initial=structuredClone(f.model),cacheFile=f.dir+'/review-cache.sqlite';
+ const cold=await run(f,{reviewCacheFile:cacheFile});assert.ok(cold>0);const decisions=Object.values(f.model.automaticSections.results).map(r=>r.completion);
+ f.model=structuredClone(initial);assert.equal(await run(f,{reviewCacheFile:cacheFile}),0);
+ assert.equal(f.model.automaticSections.run.status,'complete');assert.deepEqual(Object.values(f.model.automaticSections.results).map(r=>r.completion),decisions);
+ assert.equal(f.model.usageLedger.attempts.length,0);assert.equal(f.model.automaticSections.run.localCache.hits,cold);
+ const summary=automaticSectionSummary(f.model);assert.equal(summary.sections.reduce((n,s)=>n+s.localCacheHits,0),cold);
+ f.model=structuredClone(initial);f.model.deploymentContext={profile:'new deployment assumptions'};assert.ok(await run(f,{reviewCacheFile:cacheFile})>0);
+ f.model=structuredClone(initial);await fs.appendFile(f.root+'/service/app.py','\n# code changed\n');
+ await assert.rejects(run(f,{reviewCacheFile:cacheFile}),/changed|hash|rebuild/i);
+});
 test('completion rejects missing category, unresolved scenario, failed batch and changed context',async t=>{
  const f=await fixture(t);await run(f);const section=f.model.automaticSections.plan.sections[0],result=f.model.automaticSections.results[section.id];
  const good=structuredClone(result.review);const check=()=>sectionCompletion({...f.model,aiReview:result.review},section);

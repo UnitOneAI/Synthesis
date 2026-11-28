@@ -5,6 +5,7 @@ import {interfacePriorities} from './review-order.mjs';
 import {automaticSectionPlan,sectionReviewPlan,sectionCompletion,sectionContextKey} from './automatic-sections.mjs';
 import {reviewFeatureCohorts} from './feature-review-run.mjs';
 import {verifiedStrideSource,prepareStrideEvidence} from './stride-evidence.mjs';
+import {LocalReviewCache} from './local-review-cache.mjs';
 
 // One writer; the existing provider pool is shared inside each section. Store
 // each section before moving the active projection. No review confirmation gate.
@@ -20,9 +21,15 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
  const state=model.automaticSections;
  const run={status:'running',activeSection:null,sectionsAttempted:0,completedThisRun:0,blockedThisRun:0,startedAt:new Date().toISOString()};state.run=run;
  const checkpoint=()=>options.checkpoint?.(model.aiReview,model.usageLedger);
- let source;
+ let source,cache;
+ const efficiency={requestsCompacted:0,inputBytesRemoved:0};
  try {
   source=options.verifiedSource || await verifiedStrideSource(model,manifest,options.sourceRoot,options.progress);
+  if(options.reviewCacheFile) {
+   try {cache=new LocalReviewCache(options.reviewCacheFile,{sourceRoot:options.sourceRoot});}
+   catch {run.cacheNotice='Local assessment cache unavailable; validated review will proceed without reuse.';}
+  }
+  const reviewConfig={...config,compactEvidence:true,localReviewCache:cache,localReviewContext:plan.contextKey,reviewEfficiency:efficiency};
   const staticSystem=systemModel({...model,aiReview:undefined},{matrix:false});
   const staticContext={system:staticSystem,deployment:deploymentContext(model,staticSystem),priorities:interfacePriorities(model,staticSystem)};
   for(const section of plan.sections) {
@@ -44,6 +51,8 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
    model.aiReview=result.review;model.threatValidation=result.validation;
    const preparedPlan=sectionReviewPlan(model,section,excerpts,staticContext);
    const beforeAttempts=new Set((model.usageLedger?.attempts || []).map(a=>a.id));
+   const beforeHits=cache?.stats.hits || 0,beforeBytes=efficiency.inputBytesRemoved;
+   const priorHits=result.localCacheHits || 0,priorBytes=result.inputBytesRemoved || 0;
    const save=async()=>{
     result.review=model.aiReview;result.validation=model.threatValidation;result.featureRun=model.featureReviewRun;result.phase=model.featureReviewRun?.phase;
     const ledger=model.usageLedger?.attempts || [];
@@ -52,12 +61,15 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
     const owned=new Set(result.attemptIds),total=ledger.filter(a=>owned.has(a.id));
     result.calls=total.length;result.reportedTokens=total.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);result.unknownUsageRequests=total.filter(a=>!a.usage).length;
     result.actionCalls=attempts.length;result.actionTokens=attempts.reduce((n,a)=>n+(a.usage?.totalTokens || 0),0);result.actionUnknown=attempts.filter(a=>!a.usage).length;
+    result.localCacheHits=priorHits+(cache?.stats.hits || 0)-beforeHits;
+    result.inputBytesRemoved=priorBytes+efficiency.inputBytesRemoved-beforeBytes;
+    run.localCache={enabled:Boolean(cache),...(cache?.stats || {}),...efficiency};
     await checkpoint();
    };
    result.status='running';result.retrievalVersion=THREAT_RETRIEVAL_VERSION;await save();
    options.progress?.(`Section ${run.sectionsAttempted}: ${section.title}. ${section.interfaceIds.length} operations; all six STRIDE categories.`);
    await options.trace?.('section.started',{sectionId:section.id,title:section.title,interfaceIds:section.interfaceIds,contextKey:plan.contextKey});
-   await reviewFeatureCohorts(model,manifest,config,excerpts,fetchImpl,{...options,plan:preparedPlan,verifiedSource:source,prepareBatch:b=>prepareStrideEvidence(b.packet,source,{sectionEvidence:true}),runUntilComplete:true,maxBatches:100,checkpoint:save,categoryFollowUpLimit:3});
+   await reviewFeatureCohorts(model,manifest,reviewConfig,excerpts,fetchImpl,{...options,plan:preparedPlan,verifiedSource:source,prepareBatch:b=>prepareStrideEvidence(b.packet,source,{sectionEvidence:true}),runUntilComplete:true,maxBatches:100,checkpoint:save,categoryFollowUpLimit:3});
    result.completion=sectionCompletion(model,section);
    const reason=model.featureReviewRun?.stopReason;
    const failure=['provider-failure','provider-or-source-failure','coordinator-failure','repeated-response-format-failure'].includes(reason);
@@ -74,6 +86,6 @@ export async function reviewAutomaticSections(model,manifest,config,excerpts,fet
   run.status='failed';run.error=error.message;
   const result=state.results[run.activeSection];if(result?.status==='running'){result.status='failed';result.error=error.message;result.review=model.aiReview;result.validation=model.threatValidation;}
   throw error;
- } finally {run.finishedAt=new Date().toISOString();run.activeSection=null;await checkpoint();}
+ } finally {cache?.close();run.finishedAt=new Date().toISOString();run.activeSection=null;await checkpoint();}
  return model;
 }
