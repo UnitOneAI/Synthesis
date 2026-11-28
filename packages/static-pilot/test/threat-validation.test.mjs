@@ -612,3 +612,25 @@ test('section engineering fits a bounded multi-file proof without the smaller ge
  assert.ok(Buffer.byteLength(JSON.stringify(packet.records))<=66000);
  assert.ok(Buffer.byteLength(JSON.stringify(packet))<=94000);
 });
+
+test('exact small request types include their complete fields without unrelated handlers',async t=>{
+ const f=await threatFixture(t,[['repo0/Types.py','class Request:\n    config: dict\n    name: str\n\ndef unrelated():\n    return 1\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const n=source.localDefinitions('Request',[{repository:'repo0',path:'Types.py'}]).matches[0];
+ const w=await source.functionWindow({...n,nodeId:n.id});
+ assert.equal(w.functionContext.complete,true);assert.ok(w.lines.some(l=>l.text.includes('config: dict')));assert.ok(!w.lines.some(l=>l.text.includes('unrelated')));
+});
+
+test('automatic section corrects a contradictory decision without converting it into support',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:2,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){v.assessment='needs-context';v.engineering.obligations.forEach(o=>o.status='established');v.missingEvidence=[];v.followUp=[];}
+  else assert.match(p.previousValidationFailure,/contradictory section decision/);
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.threatValidation.entries[0].history[0].assessment,'failed');
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});

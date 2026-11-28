@@ -113,17 +113,18 @@ export class InvestigationSource {
     };
   }
   async functionWindow(ref) {
-    if(['class','type'].includes(ref.kind))return this.window(ref);
     const line=ref.line || 1;
     const indexed=ref.nodeId?this.node(ref.nodeId):null;
-    const exact=indexed&&['function','method'].includes(indexed.kind)&&indexed.repository===ref.repository&&indexed.path===ref.path&&indexed.line===line;
+    const exactType=indexed&&['class','type'].includes(indexed.kind)&&indexed.repository===ref.repository&&indexed.path===ref.path&&indexed.line===line&&Number.isInteger(indexed.endLine)&&indexed.endLine-line<=195;
+    if(['class','type'].includes(ref.kind)&&!exactType)return this.window(ref);
+    const exact=exactType||(indexed&&['function','method'].includes(indexed.kind)&&indexed.repository===ref.repository&&indexed.path===ref.path&&indexed.line===line);
     const nodes=exact?[indexed]:this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
     const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
       .sort((a,b)=>Math.abs(a.line-line)-Math.abs(b.line-line));
     const n=candidates[0];
     if(nodes.length>128 || (candidates[1] && Math.abs(n.line-line)===Math.abs(candidates[1].line-line)))return {...await this.window(ref),functionContext:{complete:false,reason:nodes.length>128?'function-index-page-limit':'ambiguous-function-owner'}};
     if(!n)return this.window(ref);
-    const first=Math.min(line,n.line),last=n.endLine;
+    const first=exactType?Math.max(1,line-4):Math.min(line,n.line),last=n.endLine;
     if(last-first+1>200)return {...await this.window(ref),functionContext:{name:n.name,startLine:first,endLine:last,complete:false,reason:'function-exceeds-200-line-window'}};
     const lines=[];let seed;
     for(let cursor=first;cursor<=last;cursor+=80){

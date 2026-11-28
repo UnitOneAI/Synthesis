@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-19';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-20';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -53,6 +53,7 @@ export function validateThreatAssessment(value, packet) {
   // New responses express every required code gap on a specific obligation.
   rest.missingEvidence=missingEvidence ?? argument.obligations.filter(o=>o.status==='missing').map(o=>o.reason);
   const assessed=validateSecurityAssessment(rest,packet);
+  if(packet.sectionReview===true && rest.assessment==='needs-context' && argument.consistency.status==='consistent' && argument.obligations.every(o=>o.status==='established') && !assessed.evidenceGaps.length)throw Error('Security assessment failed schema or evidence validation (contradictory section decision: all four code obligations are established and consistent, with no missing source, but assessment is needs-context. Independently conclude the narrower cited path, or mark the precise required code obligation missing and explain it. Unknown broader impacts must not block a narrower demonstrated write. Do not mark supported merely to pass validation.)');
   if(argument.consistency?.status==='unresolved') {
     assessed.assessment='needs-context';
     assessed.missingEvidence.push('Reconcile the decision: '+argument.consistency.reason);
@@ -154,10 +155,12 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     const primaryWindows=[];
     if(source.calledImplementations)for(const ref of issue.locations.slice(0,4))try{primaryWindows.push(await source.functionWindow(ref));}catch{/* Required retrieval below records the source failure. */}
     const called=source.calledImplementations?.(primaryWindows);
-    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3),...followUp.filter(r=>r.required!==false).slice(0,8).map(r=>({...r,required:true,basis:'requested-control'})),...(called?.references || [])];
+    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3),...refs.filter(r=>r.required),...followUp.filter(r=>r.required!==false).slice(0,8).map(r=>({...r,required:true,basis:'requested-control'}))];
     const keys=new Set(first.map(r=>r.repository+'\0'+r.path+'\0'+(r.line || 1)));
-    references.splice(0,references.length,...first,...references.filter(r=>!keys.has(r.repository+'\0'+r.path+'\0'+(r.line || 1))));
+    const rest=references.filter(r=>!keys.has(r.repository+'\0'+r.path+'\0'+(r.line || 1)));
+    references.splice(0,references.length,...first,...rest.filter(r=>r.required),...(called?.references || []),...rest.filter(r=>!r.required));
   }
+  const sourceByteLimit=model.aiReview?.scope?.poc?.kind==='section'?Math.max(16000,Math.min(66000,INVESTIGATION_LIMITS.packetBytes-24000-Buffer.byteLength(JSON.stringify({candidate:issue,context})))):42000;
   let records=[]; const continuationReferences=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
@@ -171,7 +174,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const merge=overlap.length && mergedLines.length<=200 && mergedLines.at(-1).line-mergedLines[0].line+1===mergedLines.length;
       const merged=merge ? {...record,id:sha(JSON.stringify([record.repository,record.path,record.blobSha256,mergedLines[0].line,mergedLines.at(-1).line])).slice(0,20),startLine:mergedLines[0].line,endLine:mergedLines.at(-1).line,lines:mergedLines,basis:'combined hash-matched source windows'} : record;
       const next=[...records.filter(r=>!merge || !overlap.includes(r)),merged];
-      const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?24:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>(model.aiReview?.scope?.poc?.kind==='section'?66000:42000) ? 'required-source-byte-limit' : null;
+      const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?24:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>sourceByteLimit ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
       if(ref.required&&!continuationReferences.some(r=>r.repository===ref.repository&&r.path===ref.path&&r.line===(ref.line || 1)))continuationReferences.push({repository:ref.repository,path:ref.path,line:ref.line || 1,blobSha256:record.blobSha256,...(ref.kind?{kind:ref.kind}:{}),...(ref.nodeId?{nodeId:ref.nodeId}:{}),reason:'Previously requested source, re-read and hash checked; prior conclusions are not evidence.'});
@@ -179,9 +182,9 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
   for(let i=gaps.length-1;i>=0;i--) if(gaps[i].startLine && records.some(r=>r.repository===gaps[i].repository && r.path===gaps[i].path && r.startLine<=gaps[i].startLine && r.endLine>=gaps[i].endLine)) gaps.splice(i,1);
-  const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,continuationReferences:continuationReferences.slice(0,16),availableFiles:[...availableFiles.values()].slice(0,64),gaps,
+  const packet={sectionReview:model.aiReview?.scope?.poc?.kind==='section',purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,continuationReferences:continuationReferences.slice(0,16),availableFiles:[...availableFiles.values()].slice(0,64),gaps,
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; record any required unresolved code path in a missing engineering obligation. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Name missing functions in the affected engineering obligation reason for bounded follow-up retrieval.',
-    retrieval:{coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    retrieval:{sourceByteLimit,coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }
