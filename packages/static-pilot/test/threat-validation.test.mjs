@@ -634,3 +634,13 @@ test('automatic section corrects a contradictory decision without converting it 
  assert.equal(f.model.threatValidation.entries[0].history[0].assessment,'failed');
  assert.equal(f.model.usageLedger.attempts.length,2);
 });
+
+test('a section positive reached from an unresolved draft gets a challenge of its current conclusion',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>answer(JSON.parse(JSON.parse(request.body).messages[0].content))};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const e=f.model.threatValidation.entries[0];e.assessment='static-supported';e.challengeCompleted=true;e.challengeStarted=true;e.engineering.conclusion='Narrow current persistent write';e.engineering.obligations.forEach(o=>o.status='established');e.draftAssessment={assessment:'needs-context',engineering:{conclusion:'Older speculative impact'}};
+ await reviewThreatScenarios(f.manifest,f.model,{...options,fetchImpl:async(_,request)=>{const p=JSON.parse(JSON.parse(request.body).messages[0].content);assert.equal(p.decisionChallenge.priorClaim,'Narrow current persistent write');return answer(p);}});
+ assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});

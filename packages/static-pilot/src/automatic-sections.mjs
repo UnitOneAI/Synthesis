@@ -72,7 +72,7 @@ export function sectionReviewPlan(model,section,excerpts=new Map(),staticContext
 const settledThreat=t=>{
  const e=t.engineering,ob=e?.obligations || [];
  if(e?.version!==2||e.consistency?.status!=='consistent'||ob.length!==4||new Set(ob.map(o=>o.kind)).size!==4)return false;
- if(t.assessment==='static-supported')return t.challengeCompleted===true&&ob.every(o=>o.status==='established'&&o.citations?.length);
+ if(t.assessment==='static-supported')return t.challengeCompleted===true&&t.draftAssessment?.assessment==='static-supported'&&ob.every(o=>o.status==='established'&&o.citations?.length);
  return t.assessment==='ruled-out'&&ob.some(o=>o.status==='blocks-attack'&&o.citations?.length);
 };
 export function sectionCompletion(model,section) {

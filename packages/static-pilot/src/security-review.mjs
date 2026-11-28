@@ -373,7 +373,7 @@ export async function reviewSecurityIssues(
     limits: {...INVESTIGATION_LIMITS,...(reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'?{records:24,sourceBytes:66000}:{}),contextRounds,...(challengePrompt?{maxRequestsPerScenario:contextRounds+1,criticalCheck:true}:{})},
   };
   model[reportField] = report;
-  const roundLimit=entry=>contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
+  const roundLimit=entry=>contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0)+(entry?.positiveChallengeRefresh?1:0);
   beginUsageRun(model);
   const save = async () => {
     const counts={selected:issues.length,assessed:0,sourceSupported:0,ruledOut:0,needsCodeContext:0,failed:0,unassessed:0};
@@ -458,7 +458,7 @@ export async function reviewSecurityIssues(
         followUp: structuredClone(old?.followUp || []),
         missingEvidence: structuredClone(old?.missingEvidence || []),
         assessment: "not-assessed",
-        ...(old?.challengeStarted ? {challengeStarted:true,challengePending:true,draftAssessment:old.draftAssessment} : {}),
+        ...(old?.challengeStarted ? {challengeStarted:true,challengePending:true,draftAssessment:old.draftAssessment,...(old.positiveChallengeRefresh?{positiveChallengeRefresh:true}:{})} : {}),
         history: [
           ...(old?.history || []),
           ...(old
@@ -563,7 +563,9 @@ export async function reviewSecurityIssues(
         Object.assign(entry, response.review, {
           responseHash: response.responseHash,
         });
-        if(challengePrompt && (response.review.assessment==='static-supported'||response.review.decisionReviewRequired) && !old?.challengeStarted) {
+        const refreshPositive=reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'&&response.review.assessment==='static-supported'&&old?.challengeStarted&&old.draftAssessment?.assessment!=='static-supported';
+        if(challengePrompt && (response.review.assessment==='static-supported'||response.review.decisionReviewRequired) && (!old?.challengeStarted||refreshPositive)) {
+          if(refreshPositive)entry.positiveChallengeRefresh=true;
           entry.draftAssessment=structuredClone(response.review);
           entry.challengeStarted=true;entry.challengePending=true;
           if(response.review.assessment==='static-supported')entry.assessment='not-assessed';

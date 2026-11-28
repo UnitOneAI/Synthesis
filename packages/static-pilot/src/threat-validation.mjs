@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-20';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-21';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -210,7 +210,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   // Upgrade selected older positive assessments by challenging their existing
   // argument, not by repeating discovery. Their original response remains intact.
   if(model.threatValidation?.contextKey===threatValidationKey(model)) for(const entry of model.threatValidation.entries || []) {
-    if(((entry.assessment==='static-supported'&&!entry.challengeCompleted)||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
+    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.draftAssessment?.assessment!=='static-supported')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
       if(entry.assessment==='static-supported')entry.assessment='not-assessed';entry.rounds=0;
     }

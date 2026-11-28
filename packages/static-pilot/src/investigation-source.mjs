@@ -212,7 +212,8 @@ export class InvestigationSource {
       }
     }
     limited ||= files.length>4;
-    const names=[...new Set(calls.sort((a,b)=>a.line-b.line).map(n=>String(n.name || '').split(/\.|::/).at(-1)).filter(n=>/^[A-Za-z_]\w{2,99}$/.test(n)))];
+    const declaredNames=[...new Set(records.flatMap(r=>(r.lines || []).slice(0,8).flatMap(l=>l.text.match(/\b[A-Z][A-Za-z0-9_]{2,99}\b/g) || [])))].slice(0,16).filter(name=>this.localDefinitions(name,records).matches.some(n=>['type','class'].includes(n.kind))).slice(0,4);
+    const names=[...new Set([...declaredNames,...calls.sort((a,b)=>a.line-b.line).map(n=>String(n.name || '').split(/\.|::/).at(-1)).filter(n=>/^[A-Za-z_]\w{2,99}$/.test(n))])];
     limited ||= names.length>12;
     for(const symbol of names.slice(0,12)) {
       const localMatches=this.localDefinitions(symbol,records);const matches=[...localMatches.matches];limited ||= localMatches.limited;let after='';
