@@ -68,7 +68,8 @@ You are the critical engineering reviewer, separate from the discovery assessmen
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
-  const requiredSymbols = new Set(controlSymbols(missing.join(' ')));
+  const requestedContext=[...missing,...followUp.map(r=>r.reason || '')].join(' ');
+  const requiredSymbols = new Set(controlSymbols(requestedContext));
   const symbols = [...new Set([...requiredSymbols,...controlSymbols([issue.controls, issue.explanation].join(' '))])];
   const definition = n => ['function','class','method','type'].includes(n.kind);
   const refs = [], searches = [], gaps = [];
@@ -94,18 +95,18 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
-  const members=[...new Set(missing.join(' ').match(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){1,2}\b/g) || [])].slice(0,6);
+  const members=[...new Set(requestedContext.match(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){1,2}\b/g) || [])].slice(0,6);
   const unresolvedSymbols=[...members,...searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol)];
   const fallback = source.findImplementation && unresolvedSymbols.length
     ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
-  const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
+  const authContext = await controlContext(source, issue.locations, [requestedContext,issue.controls,issue.explanation].join(' '));
   const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
   // Text hits are unbound candidates. Explicit requested locations stay required;
   // unrelated hits must not become mandatory dependencies merely by matching a
   // framework/constant name. Omitted candidates remain visible in retrieval.
   const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:Boolean(r.symbol?.includes('.')),basis:r.symbol?.includes('.')?'requested-member-use candidate':'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
-  const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
+  const routeCandidates = /route|caller|endpoint|service layer/i.test(requestedContext) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
   for(const route of routeCandidates) for(const id of route.evidence || []) {
     const ref=evidence.get(id);if(ref)references.splice(issue.locations.length+followUp.length,0,{...ref,basis:'resource-route-candidate'});
@@ -125,7 +126,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // Supply declarations before repeating the same middle-of-file window. Explicit
   // follow-up paths must still resolve to selected, hash-matched graph files.
-  if(/initializ|declar|environment|config|startup/i.test(missing.join(' '))) {
+  if(/initializ|declar|environment|config|startup/i.test(requestedContext)) {
     const seen=new Set();
     for(const r of [...followUp,...refs,...issue.locations]) {
       const k=r.repository+'\0'+r.path;

@@ -534,7 +534,7 @@ test('requested source survives a later follow-up that asks for a different bind
  await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:5,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
   const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
   const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
-  if(calls<3){v.assessment='needs-context';v.missingEvidence=[calls===1?'Inspect SecondGuard':'Inspect ThirdGuard'];}
+  if(calls<3){v.assessment='needs-context';v.missingEvidence=calls===1?['Inspect SecondGuard']:[];if(calls===2)v.followUp=[{repository:'repo11',path:'PermissionFilter.cs',line:1,reason:'Inspect ThirdGuard binding before deciding this path'}];}
   if(calls===3){assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'),'Previously requested source must remain available even when it was not cited');assert.ok(p.records.some(r=>r.path==='ThirdGuard.cs'));}
   raw.content[0].text=JSON.stringify(v);return Response.json(raw);
  }});
