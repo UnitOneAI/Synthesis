@@ -1,0 +1,37 @@
+# Automatic threat-model sections
+
+The user starts an automatic review once. Scope preview is explanatory, never an approval gate. The coordinator uses the existing graph and selected primary repositories, or all loaded repositories when none are selected. Supporting repositories remain available for evidence retrieval.
+
+## Completion contract
+
+A section is a stable set of named primary operations under explicit actor/access and boundary assumptions. Each primary operation needs a cited disposition in all six STRIDE categories. Every returned scenario needs a current source-supported, independently challenged conditional decision or a cited ruled-out path. Missing source, incomplete bindings, pending requests and failed assessments prevent completion. Deployment declarations remain separate from completion of the static code assessment.
+
+Completion must be computed from saved evidence, never the provider's summary or a zero pending-packet count. Sections cannot become complete by dropping a difficult operation, unanswered category or unsuccessful investigation. A blocked section retains its original membership and precise unresolved items. A transient provider failure stops dispatch and preserves progress. Cancel/restart resumes compatible checkpoints. No retry loop runs forever.
+
+## Planning and execution
+
+Use deterministic metadata to group operations by repository/component, route family, read/write behavior and source ownership. These are planning hints, not inferred identical controls or approved boundaries. Rank production entry points first; retain internal workers, stores, outbound calls and configuration as later sections. Test/supporting subjects remain visible and separately scoped. Split large groups into explicit numbered sections with a stable small operation count. Never build thousands of model packets before the first section.
+
+Materialize one section, verify source, retrieve applicable controls, assess all six categories, investigate returned threats and retrieve category gaps. Reassess gaps using fresh citations and preserved prior evidence. Evaluate the completion contract and checkpoint the result. Publish each section independently before advancing. Bound repeated unchanged retrieval and report specific blockers instead of asking the user to choose operations.
+
+Maintain source/context/provider provenance, exact members, saved review and engineering history per section. A changed graph, scope or deployment context cannot reuse a completion claim. Existing STRIDE, CWE and manual POC modes remain available. No code is executed, deployed or changed in target repositories.
+
+## Acceptance and prior workflow failures
+
+- A run cannot require JSON operation selection or confirmation clicks between sections.
+- All selected primary subjects occur exactly once in the automatic catalog; supporting traversal does not imply whole-repository review.
+- Model calls are paced by completed section investigations, not a growing portfolio of unresolved hypotheses.
+- All six categories appear with evidence and disposition in the section report.
+- No false completion on a missing category, blocked source, stale context, unchallenged threat, provider error, cancellation or restart.
+- Completion of one section does not claim completion of other sections or verified deployment.
+- Existing graph and paid legacy results are retained. Exports make no model calls.
+- Real qualification uses the automatic planner's first section, not a hand-selected easy endpoint. Record rejected attempts, total tokens and duration.
+- Cross-platform regression and real scanner checks pass before merge. JCI instructions start from the saved graph.
+
+## Resource and recovery behavior
+
+The planner partitions metadata without traversing the full call graph or materializing all review packets. It builds static architecture/deployment context once per automatic action, then materializes one section at a time. Completed sections retain their own report and paid validation. Request attempts, including rejected responses and unknown usage, are attached to the section and retained through interruption.
+
+Transport recovery follows bounded provider retry/backoff; access errors stop the run. A failed section packet can receive a bounded validation-feedback retry. Category code gaps get at most three changed-context follow-ups; missing code is never converted into a deployment assumption to force completion. No-progress or exhausted evidence retrieval leaves a blocked section, and the coordinator proceeds to independent sections. Unchanged blocked sections are not repeatedly resubmitted on ordinary resume. A changed graph/context creates a new catalog and retains the previous results as history.
+
+The first release stores the section catalog/results in the existing checkpoint with the existing workspace size limit. Checkpoint failure stops dispatch rather than losing work or claiming success. Parallelism remains bounded to the existing provider pool (maximum four); engineering has a single writer. This is a time-to-completed-section improvement, not a claim that total portfolio token cost is reduced.

@@ -855,13 +855,13 @@ $("bindings").onclick = async (event) => {
   }
 };
 async function download(format, preview = false, options = {}) {
-  if (["pdf", "cwe-pdf"].includes(format)) {
+  if (["pdf", "cwe-pdf", "section-pdf"].includes(format)) {
     window.open(
       "/print-report.html#" +
         new URLSearchParams({
           ...options,
           token,
-          format: format === "pdf" ? "threat-print-html" : "cwe-evidence-html",
+          format: format === "section-pdf" ? "section-print-html" : format === "pdf" ? "threat-print-html" : "cwe-evidence-html",
         }),
       "_blank",
       "noopener,noreferrer",

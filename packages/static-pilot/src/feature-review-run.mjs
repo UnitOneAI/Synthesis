@@ -32,19 +32,23 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
     const current=[...(model.aiReview?.batches || [])];
     for(const previous of current) {
       if(!remaining()||options.signal?.aborted||run.stopReason)break;
-      const missing=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').flatMap(c=>c.modelMissingEvidence || c.missingEvidence || []);
+      const missing=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').flatMap(c=>[...new Set([...(c.modelMissingEvidence || []),...(c.missingEvidence || [])])]);
       const symbols=controlSymbols(missing.join(' '));
-      if(previous.status!=='completed'||!symbols.length)continue;
+      if(previous.status!=='completed'||!missing.length)continue;
       const batch=batchesById.get(previous.id);if(!batch)continue;
       const key=sha(JSON.stringify([model.modelRevision,plan.scope.poc.id,batch.id]));
-      if((historyCounts.get(key)||0)>=2)continue;
+      if((historyCounts.get(key)||0)>=(options.categoryFollowUpLimit || 2))continue;
       const seeds=batch.packet.records.flatMap(r=>r.evidence);
+      const primary=new Set(batch.packet.reviewUnit.primaryInterfaceIds);
+      const threatIds=new Set((model.aiReview.threats || []).filter(t=>t.interfaceIds.some(id=>primary.has(id))).map(t=>t.id));
+      const resolved=(model.threatValidation?.entries || []).filter(t=>threatIds.has(t.sourceId)).flatMap(t=>(t.engineering?.obligations || []).flatMap(o=>o.citations || [])).map(r=>({...r,line:r.startLine}));
       const controls=await controlContext(source,seeds,missing.join(' '));
       const fallback=await source.findImplementation(symbols,seeds);
-      const prepared=await prepareStrideEvidence(batch.packet,source,{references:[...fallback.references,...controls.references],priorReview:{missingCode:missing,instruction:'Resolve these code dependencies using the newly supplied source. Prior output is a hypothesis, never evidence. Reassess all six categories and preserve unaffected supported conclusions with citations.'}});
-      if(prepared.context.fingerprint===previous.evidenceContext?.fingerprint)continue;
+      const prepared=await prepareStrideEvidence(batch.packet,source,{references:[...seeds,...resolved,...fallback.references,...controls.references],priorReview:{missingCode:missing,instruction:'Resolve these code dependencies using the newly supplied source. Prior output is a hypothesis, never evidence. Reassess all six categories and preserve unaffected supported conclusions with citations. For EVERY primary operation, cite its handler source in EACH category, including no-scenario and ruled-out decisions. All operations must be covered; a citation to one route does not review its siblings. Code facts are resolved from cited handlers, registration and helpers; effective network exposure and operator policy belong in deploymentConditions, not missingEvidence.'}});
+      const followUpKey=sha(JSON.stringify([prepared.context.fingerprint,missing]));
+      if((model.featureEvidenceHistory || []).some(h=>h.key===key&&h.followUpKey===followUpKey))continue;
       // Retain the paid prior result before a forced evidence reassessment.
-      model.featureEvidenceHistory=[...(model.featureEvidenceHistory || []),{key,batchId:batch.id,previous,at:new Date().toISOString()}];
+      model.featureEvidenceHistory=[...(model.featureEvidenceHistory || []),{key,followUpKey,batchId:batch.id,previous,at:new Date().toISOString()}];
       historyCounts.set(key,(historyCounts.get(key)||0)+1);
       run.phase='category evidence';options.progress?.('Following exact missing category controls before expanding discovery');await save();
       await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,maxBatches:1,concurrency:1,
@@ -86,14 +90,24 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
       const before=model.aiReview?.scope?.poc?.id===plan.scope.poc.id ? model.aiReview?.coverage?.completedBatches || 0 : 0;
       run.phase='discovery';run.cohorts++;
       await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,
-        maxBatches:Math.min(remaining(),options.concurrency || 2,4),checkpoint:save});
+        maxBatches:Math.min(remaining(),options.concurrency || 2,4),recoverFailures:plan.scope?.poc?.kind==='section',checkpoint:save});
       const discoveryCalls=model.aiReview.coverage?.callsThisRun;
       if(!Number.isFinite(discoveryCalls))throw Error('Discovery request accounting unavailable');
       run.calls+=discoveryCalls;run.discoveryCalls+=discoveryCalls;
       const reason=model.aiReview.stopReason;
       if(['provider-failure','repeated-response-format-failure','cancelled','time-budget'].includes(reason)){run.stopReason=reason;break;}
-      await followCategoryEvidence();if(!run.stopReason)await settle();await save();
-      if(!model.aiReview.coverage.pendingBatches) {run.stopReason=model.aiReview.coverage.failedBatches?'discovery-failures':'planned-discovery-finished';break;}
+      await followCategoryEvidence();if(!run.stopReason)await settle();
+      if(!run.stopReason && plan.scope?.poc?.kind==='section'){await followCategoryEvidence();if(!run.stopReason)await settle();}
+      await save();
+      if(!model.aiReview.coverage.pendingBatches) {
+        if(plan.scope?.poc?.kind==='section' && model.aiReview.coverage.failedBatches && run.cohorts<3) {options.progress?.('Retrying failed section packets with validation feedback; successful packets remain saved');continue;}
+        if(plan.scope?.poc?.kind==='section')for(let pass=0;pass<3&&!run.stopReason&&remaining()&&!options.signal?.aborted;pass++) {
+          const beforeFollow=run.calls;
+          await followCategoryEvidence();if(!run.stopReason)await settle();await save();
+          if(run.calls===beforeFollow)break;
+        }
+        run.stopReason ||= model.aiReview.coverage.failedBatches?'discovery-failures':'planned-discovery-finished';break;
+      }
       if(model.aiReview.coverage.completedBatches<=before){run.stopReason='no-new-completed-discovery';break;}
     }
     run.stopReason=options.signal?.aborted?'cancelled':run.stopReason||'request-budget';

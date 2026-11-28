@@ -2,7 +2,13 @@
 
 Graph-first local source review with optional Claude or Gemini analysis and no target-system access. Add existing clones or import inventory, build the source graph, review automatically discovered DFD connections, run resumable STRIDE and CWE source-review batches, and export HTML, SVG, Mermaid, CSV and JSON.
 
-**This is a discovery and review pilot, not the completed Synthesis architecture.** Tree-sitter syntax graphs cover C#, C/C++, JavaScript, TypeScript and Python. Security interface collectors remain bounded lexical recognizers. Neither establishes effective authorization, compiler-resolved call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Every report remains a draft with gaps. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
+**This is a discovery and review pilot, not the completed Synthesis architecture.** Tree-sitter syntax graphs cover C#, C/C++, JavaScript, TypeScript and Python. Security interface collectors remain bounded lexical recognizers. Neither establishes effective authorization, compiler-resolved call paths or exploitable vulnerabilities. Structured collectors establish declarations in source, not deployed facts. Portfolio discovery can contain gaps. An automatic section can complete its static assessment only when its cited completion contract passes; deployment verification remains separate. The existing Next.js product and its heuristic/demo pipeline are separate and unchanged.
+
+## Automatic completed sections in 0.13.0
+
+Use **STRIDE → Plan and run sections automatically**. Synthesis partitions the saved primary repository scope into small named sections, follows their controls across supporting repositories, and finishes all six STRIDE categories and the returned threat investigations before declaring each section complete. No operation-selection confirmation is required. Sections have independent progress, token totals and PDF exports. Compatible completed sections survive restart and are skipped on resume. Real missing code remains blocked, while other independent sections continue; access failures stop dispatch.
+
+See the [completion contract and design](../../docs/design/automatic-threat-sections.md) and [exact JCI Windows instructions](../../docs/runbooks/jci-automatic-sections-windows.md). Existing manual STRIDE and CWE modes remain available.
 
 ## Feature decisions in 0.12.0
 
