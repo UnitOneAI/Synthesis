@@ -68,7 +68,7 @@ test('section reports and status cannot use an unchallenged positive to claim co
  const i=f.model.interfaces.find(i=>section.interfaceIds.includes(i.id));const threat={id:'t',title:'Conditional',scenario:'Current path',interfaceIds:[i.id],evidenceIds:i.evidence,category:'Tampering'};
  result.review.threats=[threat];const view={...f.model,aiReview:result.review};view.threatValidation={contextKey:threatValidationKey(view),entries:[{sourceId:'t',issueHash:sha(JSON.stringify(threatIssue(view,threat))),assessment:'static-supported',challengeCompleted:false}]};
  assert.equal(sectionCompletion(view,section).complete,false);view.threatValidation.entries[0].challengeCompleted=true;assert.equal(sectionCompletion(view,section).complete,false);
- view.threatValidation.entries[0].draftAssessment={assessment:'static-supported'};view.threatValidation.entries[0].challengeBasis='current-positive-1';
+ view.threatValidation.entries[0].draftAssessment={assessment:'static-supported'};
  view.threatValidation.entries[0].engineering={version:2,consistency:{status:'consistent'},obligations:['entry','sensitive-operation','path-binding','applicable-controls'].map(kind=>({kind,status:'established',citations:[{recordId:'fixture'}]}))};
  assert.equal(sectionCompletion(view,section).complete,true);
  view.threatValidation.entries[0].engineering.obligations[3].status='missing';assert.equal(sectionCompletion(view,section).complete,false);

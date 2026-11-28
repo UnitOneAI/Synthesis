@@ -210,7 +210,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
   // Upgrade selected older positive assessments by challenging their existing
   // argument, not by repeating discovery. Their original response remains intact.
   if(model.threatValidation?.contextKey===threatValidationKey(model)) for(const entry of model.threatValidation.entries || []) {
-    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.challengeBasis!=='current-positive-1')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
+    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.draftAssessment?.assessment!=='static-supported')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
       if(entry.assessment==='static-supported'){entry.assessment='not-assessed';entry.followUp=[];entry.missingEvidence=[];delete entry.continuationReferences;}entry.rounds=0;
     }
