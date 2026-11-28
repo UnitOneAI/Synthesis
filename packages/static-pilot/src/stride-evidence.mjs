@@ -80,12 +80,15 @@ export async function prepareStrideEvidence(original, source, options = {}) {
   if (controlLookup) packet.sourceContext.controlLookup = {searches:controlLookup.searches,omitted:controlLookup.omitted,basis:controlLookup.basis};
   const called=options.sectionEvidence&&source.calledImplementations?source.calledImplementations(primaryWindows):null;
   if(called)packet.sourceContext.calledImplementations={...called,references:undefined};
-  const refs = [
-    ...(options.references || []),
-    ...packet.records.flatMap((r) => r.evidence),
-    ...(controlLookup?.references || []),
-    ...(called?.references || []),
-  ];
+  const packetRefs=packet.records.flatMap(r=>r.evidence);
+  const headers=options.sectionEvidence?[...new Map(primaryWindows.map(r=>[r.repository+'\0'+r.path,{repository:r.repository,path:r.path,line:1,required:false,basis:'Primary module declarations; applicability requires assessment'}])).values()].slice(0,2):[];
+  const refs = options.sectionEvidence?[
+    ...packetRefs.filter(r=>primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line}`)),
+    ...(options.references || []).filter(r=>r.required===true),
+    ...(controlLookup?.references || []).filter(r=>r.basis==='application-registration-candidate'),
+    ...headers,...(called?.references || []),
+    ...(options.references || []).filter(r=>r.required!==true),...packetRefs,...(controlLookup?.references || []),
+  ]:[...(options.references || []),...packetRefs,...(controlLookup?.references || []),...(called?.references || [])];
   const requiredRefs=new Set(refs.filter(r=>r.required===true||primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`)).map(r=>`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`));
   for (const ref of refs) {
     const key = `${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`;

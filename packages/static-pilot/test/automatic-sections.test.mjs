@@ -123,3 +123,13 @@ test('optional oversized candidates remain visible without hiding required sourc
   assert.ok(validateRepositoryReview(response(p.packet),p.packet).categoryReviews.every(c=>c.status===(required?'evidence-gap':'no-scenario-identified')));
  }
 });
+
+test('category closure keeps primary types before broad optional search candidates',async t=>{
+ const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0],packet=sectionReviewPlan(f.model,section).batches[0].packet;
+ const proxy=Object.create(source);proxy.calledImplementations=()=>({references:[{repository:'service',path:'request-type.py',line:1,required:false}],searches:[],limited:false});
+ proxy.functionWindow=async ref=>/^(request-type|candidate-)/.test(ref.path)?{id:ref.path,repository:'service',path:ref.path,startLine:1,endLine:1,code:'1: class Request: pass',lines:[],blobSha256:'synthetic'}:source.functionWindow(ref);
+ const refs=Array.from({length:30},(_,n)=>({repository:'service',path:'candidate-'+n+'.py',line:1,required:false}));
+ const p=await prepareStrideEvidence(packet,proxy,{sectionEvidence:true,references:refs});
+ assert.ok(p.packet.sourceContext.records.some(r=>r.path==='request-type.py'));
+ assert.ok(p.context.gaps.some(g=>g.path?.startsWith('candidate-')&&g.required===false));
+});
