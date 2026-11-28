@@ -88,7 +88,7 @@ test('checkpoint projection preserves interruption and failure so automatic resu
 test('category citation omissions get one bounded repair even when no new source exists',async t=>{
  const f=await fixture(t);let count=0,feedback=[];
  const send=async(_,req)=>{count++;const p=JSON.parse(JSON.parse(req.body).messages[0].content),r=response(p);if(count===1)r.categoryReviews[0].citations=[];else feedback=p.sourceContext.priorReview?.validationCorrections || [];return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(r)}],usage:{input_tokens:10,output_tokens:20}});};
- await run(f,{fetchImpl:send});assert.equal(f.model.automaticSections.run.status,'complete');assert.equal(count,2);assert.ok(feedback.some(s=>/cited|citation/i.test(s)));assert.equal(Object.values(f.model.automaticSections.results)[0].calls,2);
+ await run(f,{fetchImpl:send});assert.equal(f.model.automaticSections.run.status,'complete');assert.equal(count,2);assert.ok(feedback.some(s=>s.startsWith('Spoofing: ')&&/cited|citation/i.test(s)),'Mechanical repair names its category, not an ambiguous global role request');assert.equal(Object.values(f.model.automaticSections.results)[0].calls,2);
 });
 test('category closure preserves retained cases and distinguishes optional search candidates from required missing source',async t=>{
  const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0];
