@@ -24,7 +24,7 @@ export function decisionPathHtml(path) {
   return `<section class="decision-path"><h4>Actor-to-operation evidence</h4><p><strong>${e(path.actor)}</strong> · Required access: ${e(path.access)}</p><p>${e(path.pathStatus)}. ${e(path.interpretation)}</p><ol>${path.stages.map(stage=>`<li><strong>${e(stage.label)} · ${e(stage.status)}</strong><p>${e(stage.explanation)}</p>${stage.citations.map(c=>`<small>${e(c.repository)} / ${e(c.path)}:${e(c.startLine)}–${e(c.endLine)}</small>`).join('<br>')}</li>`).join('')}</ol><p><strong>Exposure:</strong> ${e(path.declaredExposure)}<br><strong>Runtime:</strong> ${e(path.runtime)}</p><p><strong>Decision consistency:</strong> ${e(path.consistency.status)} — ${e(path.consistency.reason)}</p><p><strong>Linked boundaries:</strong> ${e(path.boundaries.map(b=>`${b.reference}: ${b.name} (${b.state})`).join('; ') || 'No case-specific boundary established.')} These links do not approve enforcement.</p><p>Evidence repositories: ${e(path.repositories.join(', ') || 'None recorded')}. Multiple repositories alone do not demonstrate a security benefit; the cited control or binding must change the decision.</p></section>`;
 }
 // Present saved conclusions without another model call or lossy sentence trimming.
-// Conditions stay visible; the full engineering argument remains expandable.
+// Conditions stay visible; reports also print the full argument in an appendix.
 export function threatBriefHtml(t,{includeDetails=true}={}) {
  const a=t.validation || {},eng=a.engineering,path=t.decisionPath;
  const row=(label,value)=>value?`<p class="${label==='Developer action'?'required-action':''}"><strong>${e(label)}:</strong> ${e(value)}</p>`:'';
@@ -36,7 +36,10 @@ export function threatBriefHtml(t,{includeDetails=true}={}) {
 }
 export function threatSupportingHtml(t) {
  const a=t.validation || {},row=(label,value)=>value?`<p><strong>${e(label)}:</strong> ${e(value)}</p>`:'';
- return `${decisionPathHtml(t.decisionPath)}${row('Opposing evidence considered',a.counterEvidence)}${(a.sharedControlApplications || []).map(c=>row('Shared control — '+c.effect,c.conclusion+' '+c.reason)).join('')}${row('Interim control',a.remediation?.interimControl)}${row('Residual risk',a.remediation?.residualRisk)}${row('Recovery',a.remediation?.recovery)}${row('Approval',a.remediation?.approval)}${row('Rollback',a.remediation?.rollback)}`;
+ const refs=items=>(items || []).map(c=>`${c.repository} / ${c.path}:${c.startLine}–${c.endLine}`).join('; ');
+ const conditions=a.engineering?.conditions || [];
+ const original=t.sourceConclusion?`${row('Automated assessment before reviewer conclusion',a.engineering?.conclusion)}${row('Automated remediation proposal',a.remediation?.codeFix)}<p>The reviewer conclusion appears above. The original automated conditions remain below for traceability; they are not additional reviewer-approved facts.</p>`:'';
+ return `${original}${decisionPathHtml(t.decisionPath)}${conditions.length?`<h4>Complete condition scope and evidence</h4>${conditions.map(c=>`${row('Condition',c.statement)}${row('Required answer',c.requiredAnswer)}${row('Applies to',c.scope)}${row('Basis',c.basis==='code-dependent'?'Code-dependent condition; effective deployment remains unverified':'Deployment assumption; not established by static analysis')}${row('Binding evidence',refs(c.citations))}`).join('')}`:''}${row('Opposing evidence considered',a.counterEvidence)}${(a.sharedControlApplications || []).map(c=>row('Shared control — '+c.effect,c.conclusion+' '+c.reason)+row('Control evidence',refs(c.citations))+row('Case binding evidence',refs(c.bindingCitations))).join('')}${row('Interim control',a.remediation?.interimControl)}${row('Residual risk',a.remediation?.residualRisk)}${row('Recovery',a.remediation?.recovery)}${row('Approval',a.remediation?.approval)}${row('Rollback',a.remediation?.rollback)}`;
 }
 export function selectedPath(s, actorId) {
   return actorPath(s, actorId).flowIds;

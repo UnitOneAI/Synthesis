@@ -46,3 +46,5 @@ The existing completion rules are unchanged: every named operation must have all
 ## Performance limits
 
 Local caching avoids compatible repeat requests. It cannot make a stateless gateway remember prior prompts and does not eliminate a cold assessment of new code. Compaction reduces duplicate transport, not the number of independent investigations. Fewer cold calls will require measured batching of related cases and evidence-backed shared-control applicability; neither should be claimed as delivered by this change.
+
+First-run batching is separately specified in [section threat batching](section-threat-batching.md). It shares verified supporting source while retaining per-case primary anchors and applicability checks; exact-request caching alone does not provide this behavior.

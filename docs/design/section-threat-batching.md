@@ -8,9 +8,9 @@ A section is a completion unit. A threat batch is an execution unit within that 
 
 ## First-run sharing
 
-Up to four related cases share one model request when they share exact source records and their combined packet fits 160,000 bytes. A larger or unrelated group is split, never silently dropped. Identical source and context are supplied once; each case retains its original source ownership, missing evidence and deployment conditions. The existing lossless source-window transport can additionally pool overlapping lines.
+Up to four related cases share one model request when they share exact source records and their combined packet fits 160,000 bytes. A larger or unrelated group is split, never silently dropped. Identical source and context are supplied once; each case retains its primary-operation anchors, missing evidence and deployment conditions. The batch explicitly makes the already hash-checked source from related cases available as supporting context; it never treats another operation as the current entry point. The existing lossless source-window transport can additionally pool overlapping lines.
 
-The model analyzes a shared control once and returns a separate applicability decision for each case: enforces, ineffective, not applicable, or unresolved. Each use must cite that case's entry and path binding. An enforcing control must also appear in its applicable-controls evidence. Every case still receives the original complete engineering assessment and validator. A common helper name does not establish enforcement.
+The model analyzes a shared control once and returns a separate applicability decision for each case: enforces, ineffective, not applicable, or unresolved. Each use must cite that case's entry and path binding. Every settled shared-control applicability must also appear in its applicable-controls evidence. Entry and path obligations, plus the input trace, must retain a citation to that case's primary-operation window. Supporting source is retained in the evidence record and rechecked on resume. Every case still receives the original complete engineering assessment and validator. A common helper name does not establish enforcement.
 
 All supported cases receive a separate challenge request. The challenge assesses source and applicability again; a shared initial conclusion is a hypothesis, not proof. A failed case cannot discard successful siblings. Follow-up retrieval targets only unresolved cases. Invalid batches shrink on bounded retries. Provider authorization or transport failures stop dispatch and preserve saved progress.
 
@@ -40,7 +40,7 @@ flowchart TD
     C --> P[Follow cited entry, sensitive operation and controls]
     P --> B[Batch related cases; supply common evidence once]
     B --> A[Shared control analysis with separate applicability for each case]
-    A --> V[Validate each case against its own source]
+    A --> V[Validate primary anchors and explicitly supplied supporting source]
     V -->|Supported| X[Independent challenge of each positive]
     V -->|Exact code missing| P
     X --> D{Section evidence and category decisions settled?}
@@ -55,3 +55,7 @@ Local exact-request caching complements this first-run sharing. It does not make
 Microsoft documents MDASH source graphs, attack-surface/threat-model preparation, specialized auditor agents, independent debate, LSP-based validation and runtime context. Synthesis must not claim those capabilities are unique. The proposed JCI differentiation is an explicit system threat-model review package with section completion, all-six-category decisions, actor/boundary assumptions and deployment-specific actions. Accuracy, speed or cost superiority requires a same-scope benchmark; none against MDASH has been performed.
 
 Sources checked 2026-11-28: [Microsoft overview](https://learn.microsoft.com/en-us/security-exposure-management/ai-code-security-overview), [Microsoft FAQ](https://learn.microsoft.com/en-us/security-exposure-management/codename-mdash-faq).
+
+## Source ownership qualification
+
+Live qualification exposed a distinction that a simple shared source pool missed: related cases can retrieve different windows of the same helper. Restricting all citations to the original per-case windows rejects legitimate supporting evidence; allowing any source to replace the entry lets cases bleed into one another. The final contract makes additional supporting windows explicit while mechanically requiring the case's own entry and path anchors. The original complete validator still checks each exact range and hash; independent challenge still checks semantic applicability. Missing-source gaps are not silently cleared by pooling.
