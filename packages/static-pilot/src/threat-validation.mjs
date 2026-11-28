@@ -93,7 +93,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     searches.at(-1).requested = requiredSymbols.has(symbol);
     const localDefinitions=found.filter(n=>sameFile(n)&&definition(n));
     for (const n of found.slice(0,requiredSymbols.has(symbol)?4:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n)) });
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, nodeId:n.id, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n)) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
@@ -158,7 +158,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?INVESTIGATION_LIMITS.records:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
-      if(ref.required&&!continuationReferences.some(r=>r.repository===ref.repository&&r.path===ref.path&&r.line===(ref.line || 1)))continuationReferences.push({repository:ref.repository,path:ref.path,line:ref.line || 1,blobSha256:record.blobSha256,...(ref.kind?{kind:ref.kind}:{}),reason:'Previously requested source, re-read and hash checked; prior conclusions are not evidence.'});
+      if(ref.required&&!continuationReferences.some(r=>r.repository===ref.repository&&r.path===ref.path&&r.line===(ref.line || 1)))continuationReferences.push({repository:ref.repository,path:ref.path,line:ref.line || 1,blobSha256:record.blobSha256,...(ref.kind?{kind:ref.kind}:{}),...(ref.nodeId?{nodeId:ref.nodeId}:{}),reason:'Previously requested source, re-read and hash checked; prior conclusions are not evidence.'});
       if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,detail:'Only a partial function window was supplied; do not infer full control coverage.'});
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }

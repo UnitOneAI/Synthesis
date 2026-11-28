@@ -564,6 +564,8 @@ test('section retrieval follows indexed primary calls to base and overriding met
  assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===2));
  assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===5));
  assert.ok(result.references.every(r=>r.required===false));assert.match(result.interpretation,/do not establish/);
+ const originalNodes=source.nodes.bind(source);source.nodes=options=>options.kind==='function'&&options.limit===129?Array.from({length:129},(_,n)=>({id:String(n),line:1000+n,endLine:1000+n})):originalNodes(options);
+ assert.equal((await source.functionWindow(result.references[0])).functionContext.complete,true,'Exact saved function identity bypasses unrelated file-page limits');
  await fs.appendFile(path.join(f.root,'repo0/Store.py'),'# changed');
  await assert.rejects(()=>source.functionWindow(result.references[0]),/changed|hash|match/);
 });

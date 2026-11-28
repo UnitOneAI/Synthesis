@@ -115,7 +115,9 @@ export class InvestigationSource {
   async functionWindow(ref) {
     if(['class','type'].includes(ref.kind))return this.window(ref);
     const line=ref.line || 1;
-    const nodes=this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
+    const indexed=ref.nodeId?this.node(ref.nodeId):null;
+    const exact=indexed&&['function','method'].includes(indexed.kind)&&indexed.repository===ref.repository&&indexed.path===ref.path&&indexed.line===line;
+    const nodes=exact?[indexed]:this.nodes({kind:'function',repository:ref.repository,path:ref.path,limit:129});
     const candidates=nodes.filter(n=>Number.isInteger(n.endLine) && n.endLine>=line && n.line<=line+4)
       .sort((a,b)=>Math.abs(a.line-line)-Math.abs(b.line-line));
     const n=candidates[0];
@@ -219,7 +221,7 @@ export class InvestigationSource {
       const unique=[...new Map(matches.map(n=>[n.id,n])).values()];
       unique.sort((a,b)=>Number(local(b))-Number(local(a))||Number(sameRepo(b))-Number(sameRepo(a))||a.line-b.line);
       searches.push({symbol,matches:unique.length,truncated:Boolean(after)||localMatches.limited});limited ||= Boolean(after)||unique.length>3;
-      for(const n of unique.slice(0,3))if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&r.line===n.line))references.push({repository:n.repository,path:n.path,line:n.line,kind:n.kind,required:false,basis:'Candidate implementation of call in supplied primary source; receiver binding unproven'});
+      for(const n of unique.slice(0,3))if(!references.some(r=>r.repository===n.repository&&r.path===n.path&&r.line===n.line))references.push({repository:n.repository,path:n.path,line:n.line,nodeId:n.id,kind:n.kind,required:false,basis:'Candidate implementation of call in supplied primary source; receiver binding unproven'});
     }
     limited ||= references.length>16;
     return {references:references.slice(0,16),searches,limited,interpretation:'One bounded indexed call hop. Missing or truncated name matches do not establish absent controls or resolved dispatch.'};
