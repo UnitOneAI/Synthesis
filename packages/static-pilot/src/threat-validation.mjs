@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-25';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-27';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -252,7 +252,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
       }
       for(const ref of anchors.slice()) {
         const initial=prior?.evidence?.find(r=>r.repository===ref.repository && r.path===ref.path && r.startLine===1);
-        if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
+        if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1,required:m.aiReview?.scope?.poc?.kind!=='section'});
       }
       for(const ref of [...(prior?.engineering?.obligations || []).flatMap(o=>o.citations),...(prior?.engineering?.conditions || []).flatMap(c=>c.citations)]) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
       const positive=prior?.challengeStarted&&prior.draftAssessment?.assessment==='static-supported'?prior.draftAssessment:null;

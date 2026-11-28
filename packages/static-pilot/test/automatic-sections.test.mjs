@@ -148,3 +148,24 @@ test('automatic categories require a specific gap instead of persisting an unexp
  value.categoryReviews[0].missingEvidence=['The invoked policy handler implementation is not supplied.'];
  assert.equal(validateRepositoryReview(value,prepared.packet).categoryReviews[0].status,'evidence-gap');
 });
+
+test('targeted category closure retains hash-bound completed decisions and refuses stale citations or hidden new cases',async t=>{
+ const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0];
+ const {packet}=await prepareStrideEvidence(sectionReviewPlan(f.model,section).batches[0].packet,source,{sectionEvidence:true});
+ const {validateRepositoryReview,validateCategoryFollowUp}=await import('../src/repository-assessment.mjs');const {sha}=await import('../src/sources.mjs');
+ const prior=validateRepositoryReview(response(packet),packet);prior.categoryReviews[0].status='evidence-gap';prior.categoryReviews[0].missingEvidence=['Read the exact guard'];
+ const state={categories:prior.categoryReviews,records:packet.sourceContext.records};
+ const fresh=structuredClone(packet);fresh.sourceContext.records.forEach(r=>r.id='fresh-'+r.id);
+ fresh.sourceContext.priorReview={retainedThreats:[],retainedDigest:sha('[]'),targetCategories:['Spoofing'],categoryStateDigest:sha(JSON.stringify(state))};
+ const value=response(fresh);value.categoryReviews=value.categoryReviews.filter(c=>c.category==='Spoofing');
+ const closed=validateCategoryFollowUp(value,fresh,[],state);assert.equal(closed.categoryReviews.length,6);assert.equal(closed.categoryReviews.filter(c=>c.reused).length,5);assert.ok(closed.categoryReviews.every(c=>c.status==='no-scenario-identified'));
+ fresh.sourceContext.gaps=[{required:true,reason:'source-context-byte-limit'}];
+ const limited=validateCategoryFollowUp(value,fresh,[],state);assert.equal(limited.categoryReviews[0].status,'evidence-gap');assert.ok(limited.categoryReviews.slice(1).every(c=>c.status==='no-scenario-identified'));
+ fresh.sourceContext.gaps=[];
+ const stale=structuredClone(value);stale.categoryReviews[0].citations=prior.categoryReviews[0].citations;assert.throws(()=>validateCategoryFollowUp(stale,fresh,[],state),/fresh supplied source/);
+ assert.throws(()=>validateCategoryFollowUp({...value,categoryReviews:[]},fresh,[],state),/targeted category/);
+ assert.throws(()=>validateCategoryFollowUp(value,fresh,[],{...state,categories:[]}),/integrity/);
+ const reopened=response(fresh).categoryReviews.find(c=>c.category==='Tampering');reopened.status='evidence-gap';reopened.missingEvidence=['New counterevidence requires the called guard to be read'];
+ const review=validateCategoryFollowUp({...value,categoryReviews:[...value.categoryReviews,reopened]},fresh,[],state);assert.equal(review.categoryReviews.find(c=>c.category==='Tampering').status,'evidence-gap');
+ assert.throws(()=>validateCategoryFollowUp({...value,threats:[{category:'Tampering'}]},fresh,[],state),/reopen its category/);
+});
