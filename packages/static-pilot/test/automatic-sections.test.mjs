@@ -86,7 +86,7 @@ test('checkpoint projection preserves interruption and failure so automatic resu
 });
 test('category citation omissions get one bounded repair even when no new source exists',async t=>{
  const f=await fixture(t);let count=0,feedback=[];
- const send=async(_,req)=>{count++;const p=JSON.parse(JSON.parse(req.body).messages[0].content),r=response(p);if(count===1)r.categoryReviews[0].citations=[];else feedback=p.sourceContext.priorReview?.missingCode || [];return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(r)}],usage:{input_tokens:10,output_tokens:20}});};
+ const send=async(_,req)=>{count++;const p=JSON.parse(JSON.parse(req.body).messages[0].content),r=response(p);if(count===1)r.categoryReviews[0].citations=[];else feedback=p.sourceContext.priorReview?.previousUnresolvedItems || [];return Response.json({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(r)}],usage:{input_tokens:10,output_tokens:20}});};
  await run(f,{fetchImpl:send});assert.equal(f.model.automaticSections.run.status,'complete');assert.equal(count,2);assert.ok(feedback.some(s=>/cited|citation/i.test(s)));assert.equal(Object.values(f.model.automaticSections.results)[0].calls,2);
 });
 test('category closure preserves retained cases and distinguishes optional search candidates from required missing source',async t=>{
@@ -111,4 +111,14 @@ test('restart after interrupted category replacement restores the last successfu
  f.model.aiReview.batches[0].status='pending';f.model.aiReview.coverage.completedBatches=0;f.model.aiReview.coverage.pendingBatches=1;
  f.model.automaticSections.results[id].status='interrupted';
  assert.equal(await run(f),0);assert.equal(f.model.automaticSections.results[id].status,'complete');
+});
+test('optional oversized candidates remain visible without hiding required source omissions',async t=>{
+ const f=await fixture(t),source=await verifiedStrideSource(f.model,f.manifest,f.root),section=automaticSectionPlan(f.model).sections[0],packet=sectionReviewPlan(f.model,section).batches[0].packet;
+ const proxy=Object.create(source);proxy.functionWindow=async ref=>ref.path==='candidate.py'?{id:'candidate',repository:'service',path:'candidate.py',startLine:1,endLine:1,code:'x'.repeat(100000),lines:[],blobSha256:'synthetic'}:source.functionWindow(ref);
+ const {validateRepositoryReview}=await import('../src/repository-assessment.mjs');
+ for(const required of [false,true]){
+  const p=await prepareStrideEvidence(packet,proxy,{sectionEvidence:true,references:[{repository:'service',path:'candidate.py',line:1,required}]});
+  assert.equal(p.context.gaps.find(g=>g.path==='candidate.py').required,required);
+  assert.ok(validateRepositoryReview(response(p.packet),p.packet).categoryReviews.every(c=>c.status===(required?'evidence-gap':'no-scenario-identified')));
+ }
 });

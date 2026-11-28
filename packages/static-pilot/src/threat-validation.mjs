@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-14';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-15';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -139,7 +139,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // second model request; these remain candidate context, never proof of binding.
   const declarations=[...new Map(references.filter(r=>r.required).map(r=>[r.repository+'\0'+r.path,{...r,line:1,required:false,basis:'source-declarations'}])).values()].slice(0,3);
   references.splice(references.filter(r=>r.required).length,0,...bootstrapRefs,...declarations);
-  let records=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
+  let records=[]; const continuationReferences=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
     if(source.file(ref.repository,ref.path)) availableFiles.set(key,{repository:ref.repository,path:ref.path});
@@ -155,11 +155,12 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?INVESTIGATION_LIMITS.records:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
+      if(ref.required&&!continuationReferences.some(r=>r.repository===ref.repository&&r.path===ref.path&&r.line===(ref.line || 1)))continuationReferences.push({repository:ref.repository,path:ref.path,line:ref.line || 1,blobSha256:record.blobSha256,...(ref.kind?{kind:ref.kind}:{}),reason:'Previously requested source, re-read and hash checked; prior conclusions are not evidence.'});
       if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,detail:'Only a partial function window was supplied; do not infer full control coverage.'});
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
   for(let i=gaps.length-1;i>=0;i--) if(gaps[i].startLine && records.some(r=>r.repository===gaps[i].repository && r.path===gaps[i].path && r.startLine<=gaps[i].startLine && r.endLine>=gaps[i].endLine)) gaps.splice(i,1);
-  const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
+  const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,continuationReferences:continuationReferences.slice(0,16),availableFiles:[...availableFiles.values()].slice(0,64),gaps,
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; record any required unresolved code path in a missing engineering obligation. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Name missing functions in the affected engineering obligation reason for bounded follow-up retrieval.',
     retrieval:{coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
@@ -232,7 +233,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
         if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
       }
       for(const ref of [...(prior?.engineering?.obligations || []).flatMap(o=>o.citations),...(prior?.engineering?.conditions || []).flatMap(c=>c.citations)]) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
-      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8)],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || [])],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
       if(prior?.decisionReviewRequired) packet.decisionReview={
         task:'Reconcile the previous code argument with its unresolved questions. It marked all four code obligations established but withheld the conclusion. Independently check the fresh code below. For each previous missing fact decide whether it changes this exact code path or is deployment context / broader follow-up. Return an honest supported conditional conclusion, a cited ruled-out path, or mark the exact code obligation missing. Do not change a status merely to satisfy this request. Narrow impact to the directly demonstrated operation; do not infer all downstream traffic, theft or exploitation from a configuration write. A reviewer answer establishes only that condition, not the full attack. Upstream authentication does not imply administrator authorization.',
         previousConclusion:prior.engineering.conclusion,

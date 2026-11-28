@@ -83,23 +83,15 @@ export async function prepareStrideEvidence(original, source, options = {}) {
     ...packet.records.flatMap((r) => r.evidence),
     ...(controlLookup?.references || []),
   ];
+  const requiredRefs=new Set(refs.filter(r=>r.required===true||primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`)).map(r=>`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`));
   for (const ref of refs) {
     const key = `${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`;
     if (seen.has(key)) continue;
     seen.add(key);
     try {
       const line = ref.line || (ref.startLine ? ref.startLine + 20 : 1);
-      if (
-        records.some(
-          (w) =>
-            w.repository === ref.repository &&
-            w.path === ref.path &&
-            w.startLine <= line &&
-            w.endLine >= line &&
-            (!ref.blobSha256 || ref.blobSha256 === w.blobSha256),
-        )
-      )
-        continue;
+      const covering=records.find(w=>w.repository===ref.repository&&w.path===ref.path&&w.startLine<=line&&w.endLine>=line&&(!ref.blobSha256||ref.blobSha256===w.blobSha256));
+      if(covering){if(options.sectionEvidence&&requiredRefs.has(key))covering.required=true;continue;}
       if (records.length >= (options.sectionEvidence?24:16)) throw Error("source-context-window-limit");
       const w = await (original.reviewFocus?.selectedProfile ? source.functionWindow.bind(source) : source.window.bind(source))({
         ...ref,
@@ -109,6 +101,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
       // code already contains numbered lines. Sending the identical text again
       // as structured lines wastes context and can evict applicable controls.
       const {lines, ...transmitted} = w;
+      if(options.sectionEvidence)transmitted.required=requiredRefs.has(key);
       records.push(transmitted);
       if (
         Buffer.byteLength(JSON.stringify(packet)) >
@@ -117,13 +110,13 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         records.pop();
         throw Error("source-context-byte-limit");
       }
-      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason,...(options.sectionEvidence?{required:ref.required===true||primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`)}:{})});
+      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason,...(options.sectionEvidence?{required:requiredRefs.has(key)}:{})});
     } catch (error) {
       gaps.push({
         repository: ref.repository,
         path: ref.path,
         line: ref.line,
-        ...(options.sectionEvidence?{required:ref.required===true||primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`),basis:'Unread retrieval candidate; only applicable missing bindings prevent a section conclusion.'}:{}),
+        ...(options.sectionEvidence?{required:requiredRefs.has(key),basis:'Unread retrieval candidate; only applicable missing bindings prevent a section conclusion.'}:{}),
         reason: /^source-/.test(error.message)
           ? error.message
           : "source-unavailable",
@@ -187,6 +180,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
       repository: omitted.repository,
       path: omitted.path,
       line: omitted.startLine,
+      ...(options.sectionEvidence?{required:omitted.required!==false}:{}),
     });
   }
   if (Buffer.byteLength(JSON.stringify(packet)) > REVIEW_LIMITS.packetBytes)

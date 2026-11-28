@@ -504,6 +504,7 @@ export async function reviewSecurityIssues(
         if(Buffer.byteLength(JSON.stringify(packet))>INVESTIGATION_LIMITS.packetBytes)throw Error('Security packet metadata exceeds size limit');
         entry.packetHash = sha(JSON.stringify(packet));
         entry.retrieval = packet.retrieval;
+        if(packet.continuationReferences)entry.continuationReferences=packet.continuationReferences;
         entry.evidenceGaps = packet.gaps;
         entry.evidence = packet.records.map(({ lines, ...r }) => r);
         if (
@@ -607,7 +608,7 @@ export async function reviewSecurityIssues(
         )
       )
         break;
-      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
+      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < contextRounds && old?.assessment!=='failed' && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         (entry.challengePending || (entry.assessment === "needs-context" &&
         (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))))) &&

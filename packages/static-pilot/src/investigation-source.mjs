@@ -176,7 +176,7 @@ export class InvestigationSource {
       if(references.length>=16){limited=true;break;}
     }
     return {references:references.slice(0,16),searchedFiles,bytes,limited,failures,
-      interpretation:'Bounded exact text search in indexed source; no match does not establish an absent control.'};
+      interpretation:'Bounded identifier/member search in indexed source; local receiver aliases are candidates, not proven bindings. No match does not establish an absent control.'};
   }
   catalog(records) {
     const map = new Map();

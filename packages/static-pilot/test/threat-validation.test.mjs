@@ -528,3 +528,28 @@ test('requested member uses retrieve local storage and serialization candidates 
  const changed=await source.findImplementation(['session.config'],[{repository:'repo0',path:'Store.py',line:2}]);
  assert.equal(changed.references.filter(r=>r.path==='Store.py').length,0);assert.ok(changed.failures.length);
 });
+
+test('requested source survives a later follow-up that asks for a different binding',async t=>{
+ const f=await threatFixture(t,[['repo9/ThirdGuard.cs','class ThirdGuard { public bool Check() { return false; } }']]);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:5,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls<3){v.assessment='needs-context';v.missingEvidence=[calls===1?'Inspect SecondGuard':'Inspect ThirdGuard'];}
+  if(calls===3){assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'),'Previously requested source must remain available even when it was not cited');assert.ok(p.records.some(r=>r.path==='ThirdGuard.cs'));}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,3);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+});
+
+test('a later isolated format failure gets bounded correction despite older failure history',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:5,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1||calls===3)v.trace[0].endLine=100000;
+  if(calls===2){v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];}
+  if(calls===4){assert.match(p.previousValidationFailure,/citation/);assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'));}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,4);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');assert.equal(f.model.usageLedger.attempts.length,4);
+});
