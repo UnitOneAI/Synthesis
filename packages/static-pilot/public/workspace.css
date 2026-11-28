@@ -507,3 +507,5 @@ nav[aria-label="Workflow"] button {
 .ws-scope-preview h4 { margin: 0 0 10px; }
 .ws-scope-preview p:last-child { margin-bottom: 0; }
 .ws-scope-preview:focus-visible { outline: 2px solid #245a9a; outline-offset: 2px; }
+
+.ws-decision-path ol{padding-left:24px}.ws-decision-path li{border-left:3px solid #5683aa;padding:8px 12px;margin:8px 0;background:#f4f8fc}.ws-decision-path small{overflow-wrap:anywhere}

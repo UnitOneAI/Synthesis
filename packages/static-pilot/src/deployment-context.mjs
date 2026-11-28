@@ -1,3 +1,4 @@
+import { validateDeploymentGuidance, guidanceForRepositories } from './deployment-guidance.mjs';
 import { deploymentArtifact } from './deployment-artifacts.mjs';
 import { sourceScope } from './architecture.mjs';
 import { id, sha } from './sources.mjs';
@@ -69,12 +70,16 @@ export function deploymentContext(model, system) {
   }
   const profileEvidence = model.evidence.filter(e => /appsettings|web[.]|[.]wxs$|[.]wxi$|installer|docker|compose|deployment/i.test(e.path));
   return { version: 1, revision: sha(JSON.stringify([model.modelRevision, stored])), profile, profileStatus: staleProfile ? 'previous profile no longer supported by current source; unconfirmed assumptions used' : 'analysis selection; deployment not verified', profiles, profileEvidenceIds: profileEvidence.map(e => e.id), claims, questions,
+    guidanceProfiles:stored.guidanceProfiles || [],activeGuidanceId:stored.activeGuidanceId || '',
+    guidanceInterfaceIds:model.interfaces.filter(i=>stored.guidanceProfiles?.find(p=>p.id===stored.activeGuidanceId)?.repositories.includes(i.repository)).map(i=>i.id),
+    guidance:guidanceForRepositories(model,model.sources.map(s=>s.name)),
     artifacts: stored.artifacts || [], assumptions: questions.filter(q => !q.answer?.choice).length,
     interpretation: 'Analysis proceeds under explicit assumptions. Answers are reviewer statements, not runtime verification. No answer is required to run STRIDE.' };
 }
 export function contextForInterfaces(context, ids) {
   const included = new Set(ids);
   return { profile: context.profile, profileStatus: context.profileStatus,
+    ...(context.guidance && context.guidanceInterfaceIds.some(id=>included.has(id)) ? {guidance:context.guidance} : {}),
     assumptions: context.questions.filter(q => q.interfaceIds.some(i => included.has(i))).map(q => ({ id: q.id, statement: q.statement, basis: q.answer?.choice ? 'operator-statement; not runtime-verified' : 'assumption', rationale: q.answer?.rationale || '' })),
     artifacts: context.artifacts.map(a => ({ id: a.id, name: a.name, sha256: a.sha256, declarations: a.declarations })),
   };
@@ -83,7 +88,7 @@ export function updateDeploymentContext(model, input) {
   const context = deploymentContext(model);
   if (input.revision !== context.revision) throw Error('Deployment context changed; refresh before saving');
   const state = structuredClone(model.deploymentContext || { version: 1, answers: [], artifacts: [] });
-  let affected;
+  let affected, guidanceRepositories;
   if (input.action === 'answer') {
     const question = context.questions.find(q => q.id === input.questionId);
     if (!question || !Number.isInteger(input.choice) || !question.choices[input.choice]) throw Error('Choose a supplied deployment answer');
@@ -100,20 +105,34 @@ export function updateDeploymentContext(model, input) {
     const artifact = deploymentArtifact(input);
     state.artifacts = [...state.artifacts.filter(a => a.id !== artifact.id), artifact];
     affected = null;
+  } else if(input.action==='guidance') {
+    const profile=validateDeploymentGuidance(input.profile,model);
+    if(state.activeGuidanceId===profile.id)return model;
+    state.guidanceProfiles ||= [];
+    if(state.guidanceProfiles.length>=8&&!state.guidanceProfiles.some(p=>p.id===profile.id))throw Error('At most eight guidance profiles; reuse an existing profile');
+    state.guidanceProfiles=[...state.guidanceProfiles.filter(p=>p.id!==profile.id),profile];
+    guidanceRepositories=[...new Set([...(context.guidance?.repositories || []),...profile.repositories])];
+    state.activeGuidanceId=profile.id;affected=null;
+  } else if(input.action==='select-guidance') {
+    if((state.activeGuidanceId || '')===(input.id || ''))return model;
+    if(input.id && !state.guidanceProfiles?.some(p=>p.id===input.id))throw Error('Choose a saved guidance profile');
+    guidanceRepositories=[...new Set([...(context.guidance?.repositories || []),...(state.guidanceProfiles?.find(p=>p.id===input.id)?.repositories || [])])];
+    state.activeGuidanceId=input.id || '';affected=null;
   } else throw Error('Unsupported deployment context action');
   const next = { ...model, deploymentContext: state };
   // Reviewer identity alone does not change packet content; rationale can change interpretation.
   const before = contextForInterfaces(context, model.interfaces.map(i => i.id));
   const after = contextForInterfaces(deploymentContext(next), model.interfaces.map(i => i.id));
-  if (JSON.stringify(before) !== JSON.stringify(after)) invalidateDeploymentReview(next, affected);
+  if (JSON.stringify(before) !== JSON.stringify(after)) invalidateDeploymentReview(next, affected, guidanceRepositories);
   return next;
 }
-export function invalidateDeploymentReview(model, questionIds) {
+export function invalidateDeploymentReview(model, questionIds, repositories) {
   if (!model.aiReview) return;
   model.aiReview = structuredClone(model.aiReview);
   const review = model.aiReview;
   if (review.reviewScope !== 'system') return; // Legacy review did not consume deployment assumptions.
-  const affected = review.batches.filter(b => questionIds === null || b.deploymentQuestionIds?.some(id => questionIds.includes(id)));
+  const scopedIds=repositories ? new Set(model.interfaces.filter(i=>repositories.includes(i.repository)).map(i=>i.id)) : null;
+  const affected = review.batches.filter(b => (!scopedIds || b.interfaceIds?.some(id=>scopedIds.has(id))) && (questionIds === null || b.deploymentQuestionIds?.some(id => questionIds.includes(id))));
   for (const batch of affected) if (batch.status === 'completed') { batch.status = 'stale'; batch.staleReason = 'Deployment assumption changed'; }
   const current = review.batches.filter(b => b.status === 'completed');
   const validIds = new Set(current.map(b => b.id));

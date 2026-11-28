@@ -167,6 +167,13 @@ export function addReviewPresentation(s, model) {
         ? "Limited analysis context"
         : "Source-referenced scenario; exploitability unverified";
     t.outcome = threatOutcome(t);
+    if(t.validation.engineering?.version===2 && ['supported','ruled-out'].includes(t.outcome.kind) && !t.sourceConclusion) {
+      // A narrowed engineering conclusion supersedes a speculative display title;
+      // the original discovery record and stable reference remain intact.
+      t.originalTitle=t.name;
+      const sentence=t.validation.engineering.conclusion.split(/(?<=[.!?])\s/)[0];
+      t.name=sentence.length>220?sentence.slice(0,217).replace(/\s+\S*$/,'')+'…':sentence;
+    }
     t.investigationAction = investigationAction(t);
   }
   const review = model.aiReview,

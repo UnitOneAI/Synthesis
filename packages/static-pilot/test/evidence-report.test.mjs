@@ -396,9 +396,9 @@ test('decision report preserves every ID, separates supported paths and binds us
   f.model.threatValidation.entries[0].engineering={conclusion:'A caller with request access can change the reviewed record.',obligations:[{kind:'path-binding',reason:'The handler calls the write operation.',citations:[{repository:'service',path:'api.py',startLine:1,endLine:2}]}],reviewerQuestions:[{question:'Can an ordinary caller reach this route?',ifYes:'Apply the administrator check before writing.',ifNo:'This caller does not have the required access in this deployment.'}]};
   const saved=()=>JSON.stringify([f.model.aiReview,f.model.threatValidation,f.model.usageLedger,f.model.sourceGraph,f.model.modelRevision]);
   const before=saved();
-  const html=systemPrintReport(f.model),priority=html.split('<h2>Priority threats</h2>')[1].split('<h2>Decided paths')[0];
+  const html=systemPrintReport(f.model),priority=html.split('<h2>Priority threats</h2>')[1].split('<h2>Threat details')[0];
   assert.match(priority,/Supported path/);assert.doesNotMatch(priority,/Unassessed claim|Countered path/);
-  assert.match(html,/Ruled out for the cited path/);assert.match(systemPrintReport(f.model,{technical:true}),/Unassessed claim/);assert.match(html,/unresolved hypotheses are omitted/);
+  assert.match(html,/Ruled-out paths and decisive controls/);assert.match(html,/Ruled out for the cited path/);assert.match(systemPrintReport(f.model,{technical:true}),/Unassessed claim/);assert.match(html,/unresolved hypotheses are omitted/);
   assert.match(html,/12 \/ 3756 STRIDE packets completed/);
   assert.match(html,/2 of 3 scenarios received a code assessment/);
   assert.doesNotMatch(html,/reported tokens|Graph fingerprint|Source revision|STRIDE action/);
@@ -406,7 +406,12 @@ test('decision report preserves every ID, separates supported paths and binds us
   for(const category of ['Spoofing','Tampering','Repudiation','Information Disclosure','Denial of Service','Elevation of Privilege'])assert.ok(html.includes(category));
   assert.match(html,/A caller with request access can change the reviewed record/);
   assert.match(html,/Can an ordinary caller reach this route/);
-  assert.match(html,/Yes: Apply the administrator check/);
+  assert.match(html,/Legacy question; consequences were not consistency-checked/);
+  assert.match(html,/Yes: Record yes for this question only/);
+  assert.doesNotMatch(html,/Yes: Apply the administrator check/);
+  assert.match(html,/Actor-to-operation evidence/);
+  assert.doesNotMatch(html,/Evidence supporting the decision/);
+  assert.match(systemPrintReport(f.model,{technical:true}),/Evidence supporting the decision/);
   assert.ok(html.indexOf('Threat details')<html.indexOf('Deployment decisions'));
   assert.match(systemPrintReport(f.model,{technical:true}),/Decisions for the deployment reviewer/);
   assert.equal(saved(),before,'Export must not mutate paid results or their provenance');

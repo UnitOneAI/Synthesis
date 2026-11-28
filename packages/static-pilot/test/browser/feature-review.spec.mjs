@@ -42,6 +42,18 @@ test('feature scope preview and deployment answers preserve graph and paid revie
   await page.goto('about:blank');await app.close();app=await serve(options);await open();
   await expect(page.locator('#ws-repo-depth')).toHaveValue('security-features');
   await page.getByText(/Deployment decisions for the reviewer/).click();await expect(page.locator('[data-deployment-question]')).toContainText('Recorded no by JCI reviewer');
+  await page.getByRole('button',{name:'Threat register',exact:true}).click();
+  await page.locator('[data-select="tls-path"]').first().click();
+  await expect(page.locator('.ws-decision-path')).toContainText('Actor-to-operation evidence');
+  await expect(page.locator('.ws-decision-path')).toContainText('Incomplete code argument');
+  await page.getByRole('button',{name:'Deployment context',exact:true}).click();
+  await page.getByText('Declared deployment guidance',{exact:true}).click();
+  const guide={title:'Protected deployment',document:'Example hardening guide',documentVersion:'1.0',mode:'protected-deployment',repositories:['service'],statements:[{area:'exposure',statement:'Use an isolated upstream network.',reference:'Section 1'}]};
+  await page.locator('#dc-guidance').setInputFiles({name:'guide.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(guide))});
+  await page.getByRole('button',{name:'Import guide profile',exact:true}).click();
+  await expect(page.locator('#dc-guidance-profile')).toContainText('Protected deployment');
+  const withGuide=await read();expect(withGuide.sourceGraph.fingerprint).toBe(fingerprint);expect(withGuide.deploymentContext.guidanceProfiles).toHaveLength(1);
+  expect(withGuide.cweReview.findings).toHaveLength(1);expect(withGuide.threatValidation.entries[0].assessment).toBe('static-supported');
   expect(errors).toEqual([]);
  } finally {await page.goto('about:blank');await app?.close();await fs.rm(f.dir,{recursive:true,force:true});}
 });

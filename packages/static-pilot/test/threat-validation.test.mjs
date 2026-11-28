@@ -33,7 +33,7 @@ export async function threatFixture(t, extraFiles=[]) {
 function answer(packet, filename = 'PermissionFilter.cs') {
  const r=packet.records.find(r=>r.path===filename);assert.ok(r,'The named control in the twelfth repository must be retrieved');
  const ref={recordId:r.id,startLine:r.startLine,endLine:r.startLine,reason:'PermissionFilter checks authority on this fixture path'};
- return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({engineering:{conclusion:'The cited permission control rejects the stated request.',obligations:['entry','sensitive-operation','path-binding','applicable-controls'].map(kind=>({kind,status:kind==='applicable-controls'?'blocks-attack':'established',reason:'Cited fixture behavior for '+kind,citations:[ref]})),reviewerQuestions:[]},inputEvidence:null,sinkEvidence:null,deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
+ return Response.json({stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:20},content:[{type:'text',text:JSON.stringify({engineering:{conditions:[],consistency:{status:'consistent',reason:'The cited blocking control is consistent with the narrow conclusion.'},conclusion:'The cited permission control rejects the stated request.',obligations:['entry','sensitive-operation','path-binding','applicable-controls'].map(kind=>({kind,status:kind==='applicable-controls'?'blocks-attack':'established',reason:'Cited fixture behavior for '+kind,citations:[ref]})),reviewerQuestions:[]},inputEvidence:null,sinkEvidence:null,deploymentAssumptions:[],assessment:'ruled-out',actorKind:'external-attacker',actor:'API caller',initialAccess:'Assumed access',input:'Job request',impact:'Unauthorized job',trace:[{...ref,role:'control'}],controls:[ref],counterEvidence:'Cited permission check rejects unauthorized callers in the fixture.',missingEvidence:[],followUp:[],remediation:{codeFix:'No change for this stated path',interimControl:'Review deployment exposure',residualRisk:'Other callers remain outside this assessment',recovery:'No compromise established',owner:'unknown',approval:'required',validation:'Static fixture',rollback:'Not applicable'},severityChangeConditions:'A caller bypassing the cited filter changes this assessment'})}]});
 }
 test('saved SQLite graph finds named cross-repository controls, preserves STRIDE, and reuses validated results after restart',async t=>{
  const f=await threatFixture(t), before=JSON.stringify(f.model.aiReview);let calls=0;
@@ -286,7 +286,8 @@ test('engineering obligations require exact evidence, preserve code gaps, and se
  const data=await answer(p).json(),v=JSON.parse(data.content[0].text);
  v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
  v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'entry'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'write'};
- v.engineering.reviewerQuestions=[{question:'Can a non-admin reach this entry?',ifYes:'Restrict this write to administrators.',ifNo:'This actor cannot use this path in that deployment.'}];
+ v.engineering.conditions=[{id:'access',kind:'network-access',statement:'A non-admin can reach this entry.',scope:'write entry',requiredAnswer:'yes',basis:'deployment-only',citations:[]}];
+ v.engineering.reviewerQuestions=[{conditionId:'access',question:'Can a non-admin reach this entry?'}];
  v.deploymentAssumptions=['Non-admin can reach the entry.'];
  assert.equal(validateThreatAssessment(v,p).assessment,'static-supported');
  const invalid=structuredClone(v);invalid.engineering.obligations[0].citations[0].recordId='invented';
@@ -458,4 +459,59 @@ test('unbound text-search candidates cannot turn unrelated files into required c
  assert.equal(packet.gaps.length,0);
  assert.ok(packet.records.some(r=>r.path==='routes.py'));
  assert.equal(packet.retrieval.indexedSourceSearch.limited,true);
+});
+
+test('structured conditions reject unbound settings and inconsistent conclusions without promoting them',async()=>{
+ const {validateThreatAssessment}=await import('../src/threat-validation.mjs');
+ const {questionPresentation}=await import('../src/reviewer-questions.mjs');
+ const r={id:'r',repository:'app',path:'routes.py',blobSha256:'hash',startLine:1,endLine:5,lines:[{line:1,text:'entry'},{line:2,text:'read'}]};
+ const p={records:[r],availableFiles:[],gaps:[]};
+ const v=JSON.parse((await answer(p,'routes.py').json()).content[0].text);
+ v.assessment='static-supported';v.engineering.obligations.forEach(o=>o.status='established');
+ v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'entry'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'read'};
+ v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',basis:'code-dependent',citations:[]}];
+ v.engineering.reviewerQuestions=[{conditionId:'setting',question:'Is authentication disabled?'}];
+ assert.throws(()=>validateThreatAssessment(v,p),/code-dependent condition requires binding citations/);
+ v.engineering.conditions[0].citations=[{recordId:'r',startLine:6,endLine:6}];
+ assert.throws(()=>validateThreatAssessment(v,p),/condition citation outside/);
+ v.engineering.conditions=[{id:'network',kind:'network-access',statement:'An ordinary caller can reach GET /gap.',scope:'GET /gap',requiredAnswer:'yes',basis:'deployment-only',citations:[]}];
+ v.engineering.reviewerQuestions=[{conditionId:'network',question:'Can an ordinary caller reach this route?'}];
+ v.engineering.consistency={status:'unresolved',reason:'The prerequisite contradicts the absence of an attached authentication dependency.'};
+ const unresolved=validateThreatAssessment(v,p);assert.equal(unresolved.assessment,'needs-context');assert.match(unresolved.missingEvidence.join(' '),/Reconcile the decision/);
+ v.engineering.consistency={status:'consistent',reason:'The route-specific code claim requires only the declared caller access.'};
+ const a=validateThreatAssessment(v,p);assert.equal(a.assessment,'static-supported');
+ const q=questionPresentation(a.engineering,a.engineering.reviewerQuestions[0]);assert.equal(q.question,a.engineering.conditions[0].statement);
+ assert.match(q.ifYes,/Other prerequisites/);assert.match(q.ifNo,/other paths and actors are not cleared/);
+ assert.doesNotMatch(q.ifYes,/all routes|confirms exploitation/);
+ v.engineering.reviewerQuestions[0].conditionId='invented';assert.throws(()=>validateThreatAssessment(v,p),/question must reference/);
+ delete v.engineering.conditions;delete v.engineering.consistency;assert.throws(()=>validateThreatAssessment(v,p),/structured conditions/);
+});
+
+test('explicit condition recheck challenges one saved case and retains its prior decision and graph',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const before=structuredClone(f.model.threatValidation),graph=JSON.stringify(f.model.sourceGraph),discovery=JSON.stringify(f.model.aiReview);
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,1);
+ await reviewThreatScenarios(f.manifest,f.model,{...options,recheckConditions:true});assert.equal(calls,2);
+ assert.ok(f.model.threatValidationHistory.some(h=>h.entries.some(e=>e.attemptId===before.entries[0].attemptId&&e.assessment==='ruled-out')));
+ assert.equal(f.model.threatValidation.entries[0].engineering.version,2);
+ assert.equal(JSON.stringify(f.model.sourceGraph),graph);assert.equal(JSON.stringify(f.model.aiReview),discovery);
+ await assert.rejects(()=>reviewThreatScenarios(f.manifest,f.model,{...options,threatIds:undefined,recheckConditions:true}),/exactly one/);
+});
+
+test('compact native response retains exact entry, operation and condition-binding validation',async()=>{
+ const {validateThreatAssessment,THREAT_ASSESSMENT_SCHEMA}=await import('../src/threat-validation.mjs');
+ const record={id:'r',repository:'app',path:'PermissionFilter.cs',blobSha256:'hash',startLine:1,endLine:5,lines:[]};
+ const packet={records:[record],availableFiles:[],gaps:[]};
+ const canonical=JSON.parse((await answer(packet).json()).content[0].text);
+ canonical.engineering.conditions=[{id:'policy',kind:'configuration',statement:'The cited admin restriction is enabled.',scope:'admin route',requiredAnswer:'yes',binding:'applicable-controls'}];
+ canonical.engineering.reviewerQuestions=['policy'];
+ const wire={assessment:canonical.assessment,caseDetails:{},evidenceReview:{},remediation:canonical.remediation,engineering:canonical.engineering};
+ for(const key of Object.keys(THREAT_ASSESSMENT_SCHEMA.properties.caseDetails.properties))wire.caseDetails[key]=canonical[key];
+ for(const key of Object.keys(THREAT_ASSESSMENT_SCHEMA.properties.evidenceReview.properties))wire.evidenceReview[key]=canonical[key];
+ const validated=validateThreatAssessment(wire,packet);assert.equal(validated.assessment,'ruled-out');assert.equal(validated.engineering.conditions[0].citations[0].repository,'app');
+ assert.equal(validated.engineering.reviewerQuestions[0].conditionId,'policy');
+ wire.engineering.conditions[0].binding='imaginary';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
+ wire.engineering.conditions[0].binding='entry';wire.engineering.obligations[0].status='missing';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
 });

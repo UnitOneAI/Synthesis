@@ -1282,11 +1282,12 @@ export async function serve({
         if (input.includeSourceCode !== true || !Number.isInteger(input.budget) || input.budget < 1 || input.budget > 100 || (input.runUntilComplete !== undefined && typeof input.runUntilComplete !== 'boolean')) return send(400, { error: 'Enable source sharing and choose 1–100 requests' });
         if (!model.aiReview?.coverage?.completedBatches || model.aiReview.status === 'stale' || (model.aiReview.basedOnRevision && model.aiReview.basedOnRevision !== model.modelRevision)) return send(409, { error: 'Current completed STRIDE results are required' });
         if (input.threatIds !== undefined && (!Array.isArray(input.threatIds) || !input.threatIds.length || input.threatIds.some(id => !model.aiReview.threats.some(t => t.id === id)))) return send(400, { error: 'Select saved threat IDs' });
+        if (input.recheckConditions !== undefined && (typeof input.recheckConditions !== 'boolean' || input.recheckConditions && input.threatIds?.length !== 1)) return send(400, {error:'Select exactly one threat for a condition recheck'});
         cweController = new AbortController();
         const jobId = randomBytes(12).toString('hex');
         job = { status: 'running', mode: 'threat-validation', jobId, message: 'Following saved threat evidence and named controls' };
         cweTask = withGraph(() => reviewThreatScenarios(manifest, model, {
-          sourceRoot: root, config: modelConfig, budget: input.budget, runUntilComplete: input.runUntilComplete === true, threatIds: input.threatIds,
+          sourceRoot: root, config: modelConfig, budget: input.budget, runUntilComplete: input.runUntilComplete === true, threatIds: input.threatIds, recheckConditions:input.recheckConditions === true,
           signal: cweController.signal, fetchImpl: cweModelFetch,
           trace: (event, data) => traces.record(event, { ...data, jobId }),
           progress: message => { job.message = message; },

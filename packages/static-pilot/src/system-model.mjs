@@ -1,3 +1,4 @@
+import { decisionPath } from './decision-path.mjs';
 import { deploymentContext } from './deployment-context.mjs';
 import { featureReviewSummary } from './feature-review.mjs';
 import { deploymentDecisionQuestions } from './reviewer-questions.mjs';
@@ -533,6 +534,7 @@ export function systemModel(model, { matrix = true } = {}) {
   result.deploymentContext = deploymentContext(model, result);
   result.matrix = matrix ? systemMatrix(result, model, w) : [];
   const presented=addReviewPresentation(result, model);
+  for(const threat of presented.threats) if(threat.origin==='analysis') threat.decisionPath=decisionPath(threat,presented);
   presented.featureReview=featureReviewSummary(model,presented);
   presented.deploymentDecisionQuestions=deploymentDecisionQuestions(model);
   return presented;
