@@ -589,3 +589,14 @@ test('section follow-up retains its entry and application composition ahead of b
  assert.equal(packet.records[0].path,'api.py');assert.equal(packet.records[1].repository,'repo2','Every named interface must supply its own entry source even when discovery cited only one');assert.ok(packet.candidate.locations.every(r=>!('excerpt' in r)));assert.ok(packet.records.slice(0,3).some(r=>r.path==='server.py'));
  assert.ok(packet.records.find(r=>r.path==='server.py').lines.some(l=>l.text.includes('include_router')));
 });
+
+test('section search history does not become a required dependency but current requests still do',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'section',locations:[{repository:'repo0',path:'Api.cs',line:1}],controls:'',explanation:'Assess this entry'};
+ const old={repository:'repo0',path:'UnboundCandidate.cs',line:1,reason:'Old search candidate',required:false};
+ const candidate=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[old],{},[]);
+ assert.ok(!candidate.gaps.some(g=>g.path===old.path));assert.ok(candidate.retrieval.candidateWindowsOmitted>0);
+ const requested=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[{...old,required:true}],{},[]);
+ assert.ok(requested.gaps.some(g=>g.path===old.path));
+});

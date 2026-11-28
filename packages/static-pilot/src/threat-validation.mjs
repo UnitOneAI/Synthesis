@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-17';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-18';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -74,7 +74,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     issue={...issue,locations:[...new Map([...issue.locations,...owned].map(r=>[r.repository+'\0'+r.path+'\0'+r.line,r])).values()]};
   }
 
-  const requestedContext=[...missing,...followUp.map(r=>r.reason || '')].join(' ');
+  const requestedContext=[...missing,...followUp.filter(r=>r.required!==false).map(r=>r.reason || '')].join(' ');
   const requiredSymbols = new Set(controlSymbols(requestedContext));
   const symbols = [...new Set([...requiredSymbols,...controlSymbols([issue.controls, issue.explanation].join(' '))])];
   const definition = n => ['function','class','method','type'].includes(n.kind);
@@ -112,7 +112,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // Text hits are unbound candidates. Explicit requested locations stay required;
   // unrelated hits must not become mandatory dependencies merely by matching a
   // framework/constant name. Omitted candidates remain visible in retrieval.
-  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:Boolean(r.symbol?.includes('.')),basis:r.symbol?.includes('.')?'requested-member-use candidate':'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:Boolean(r.symbol?.includes('.')),basis:r.symbol?.includes('.')?'requested-member-use candidate':'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:r.required!==false, basis:r.required===false?'prior-search-candidate':'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
   const routeCandidates = /route|caller|endpoint|service layer/i.test(requestedContext) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
@@ -151,7 +151,10 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   if(model.aiReview?.scope?.poc?.kind==='section') {
     // Keep the primary operation and application composition visible while
     // following new controls; broad identifier matches must not evict them.
-    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3)];
+    const primaryWindows=[];
+    if(source.calledImplementations)for(const ref of issue.locations.slice(0,4))try{primaryWindows.push(await source.functionWindow(ref));}catch{/* Required retrieval below records the source failure. */}
+    const called=source.calledImplementations?.(primaryWindows);
+    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3),...followUp.filter(r=>r.required!==false).slice(0,8).map(r=>({...r,required:true,basis:'requested-control'})),...(called?.references || [])];
     const keys=new Set(first.map(r=>r.repository+'\0'+r.path+'\0'+(r.line || 1)));
     references.splice(0,references.length,...first,...references.filter(r=>!keys.has(r.repository+'\0'+r.path+'\0'+(r.line || 1))));
   }
@@ -249,7 +252,7 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
         if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
       }
       for(const ref of [...(prior?.engineering?.obligations || []).flatMap(o=>o.citations),...(prior?.engineering?.conditions || []).flatMap(c=>c.citations)]) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
-      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || [])],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || []).map(r=>({...r,required:m.aiReview?.scope?.poc?.kind==='section'?false:true}))],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
       if(prior?.decisionReviewRequired) packet.decisionReview={
         task:'Reconcile the previous code argument with its unresolved questions. It marked all four code obligations established but withheld the conclusion. Independently check the fresh code below. For each previous missing fact decide whether it changes this exact code path or is deployment context / broader follow-up. Return an honest supported conditional conclusion, a cited ruled-out path, or mark the exact code obligation missing. Do not change a status merely to satisfy this request. Narrow impact to the directly demonstrated operation; do not infer all downstream traffic, theft or exploitation from a configuration write. A reviewer answer establishes only that condition, not the full attack. Upstream authentication does not imply administrator authorization.',
         previousConclusion:prior.engineering.conclusion,
