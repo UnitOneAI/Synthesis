@@ -1,4 +1,4 @@
-import {REPOSITORY_PROMPT,REPOSITORY_SCHEMA,validateRepositoryReview} from './repository-assessment.mjs';
+import {REPOSITORY_PROMPT,REPOSITORY_SCHEMA,validateRepositoryReview,CATEGORY_FOLLOWUP_PROMPT,validateCategoryFollowUp} from './repository-assessment.mjs';
 import {pocReviewPlan} from './poc-scope.mjs';
 import { setTimeout as recoveryWait } from 'node:timers/promises';
 import { systemReviewPlan } from './system-review-units.mjs';
@@ -509,9 +509,9 @@ export async function enrichGraphModel(
           `Preparing STRIDE plan: ${state.stage}${state.preparedPackets ? " · " + state.preparedPackets + " packets prepared" : ""} · ${Math.round(state.elapsedMs / 1000)}s · no model calls yet`,
         ),
     }));
-  if(plan.scope?.poc?.kind==='repositories'){
+  if(['repositories','section'].includes(plan.scope?.poc?.kind)){
     if(!options.prepareBatch)throw Error('Repository STRIDE requires source evidence; enable source excerpts before review');
-    options={...options,systemPrompt:REPOSITORY_PROMPT,responseSchema:REPOSITORY_SCHEMA,validate:validateRepositoryReview};
+    options={...options,systemPrompt:REPOSITORY_PROMPT,responseSchema:REPOSITORY_SCHEMA,validate:validateRepositoryReview,CATEGORY_FOLLOWUP_PROMPT,validateCategoryFollowUp};
   }
   const planningMs = Math.round(performance.now() - planningStarted);
   if (!options.plan)
@@ -535,7 +535,7 @@ export async function enrichGraphModel(
           ),
         }
       : {}),
-    promptKind: plan.scope?.poc?.kind==='repositories' ? "repository-assessment" : options.systemPrompt ? "static-investigation" : "stride",
+    promptKind: ['repositories','section'].includes(plan.scope?.poc?.kind) ? "repository-assessment" : options.systemPrompt ? "static-investigation" : "stride",
     promptVersion: GRAPH_REVIEW_VERSION,
     promptHash: sha(options.systemPrompt || SYSTEM_PROMPT),
     guidance: {
@@ -880,7 +880,7 @@ export async function enrichGraphModel(
     stage: (index) => review.plan.batches[index].reviewStage,
     // System review must reach the other components even when an isolated unit
     // remains unresolved. Failed units stay failed; global failure guards still stop.
-    shouldAdvanceStage: (stage) => selectedScope === 'system' || plan.scope?.poc?.kind === 'repositories' || !review.batches.some(
+    shouldAdvanceStage: (stage) => selectedScope === 'system' || ['repositories','section'].includes(plan.scope?.poc?.kind) || !review.batches.some(
       (b) => b.status === "failed" && b.reviewStage <= stage,
     ),
     signal: options.signal,
@@ -894,7 +894,7 @@ export async function enrichGraphModel(
     run: async (index, { agentId }) => {
       let batch = plan.batches[index];
       options.progress?.(
-        `STRIDE review ${review.batches.length + 1}/${plan.batches.length}: ${batch.phase} · ${batch.label}`,
+        `STRIDE review: ${review.batches.filter(b=>b.status==='completed').length}/${plan.batches.length} packets saved; reviewing ${batch.phase} · ${batch.label}`,
       );
       const entry = {
         id: batch.id,
@@ -913,13 +913,15 @@ export async function enrichGraphModel(
       // bounded actions/restarts so their errors and retry instructions persist.
       review.batches = review.batches.filter((b) => b.id !== entry.id);
       review.batches.push(entry);
-      let attempt;
+      let attempt, retainedThreats, categoryState;
       const requestStartedAt = performance.now();
       try {
         if (options.prepareBatch) {
           const prepared = await options.prepareBatch(batch);
           batch = { ...batch, packet: prepared.packet };
           entry.evidenceContext = prepared.context;
+          retainedThreats = prepared.retainedThreats;
+          categoryState = prepared.categoryState;
           metrics.set(batch.id, {
             bytes: Buffer.byteLength(JSON.stringify(batch.packet)),
             excerpts: batch.packet.records.flatMap((r) =>
@@ -1002,6 +1004,8 @@ export async function enrichGraphModel(
             },
           );
         };
+        const categoryClosure=plan.scope?.poc?.kind==='section'&&Array.isArray(batch.packet.sourceContext?.priorReview?.retainedThreats);
+        entry.categoryClosure=categoryClosure;
         const requestOnce = () => requestReview(config, batch.packet, dispatch, {
           validationRetry: entry.validationRetry,
           ...(options.systemPrompt
@@ -1011,6 +1015,7 @@ export async function enrichGraphModel(
             ? { responseSchema: options.responseSchema }
             : {}),
           ...(options.validate ? { validate: options.validate } : {}),
+          ...(categoryClosure?{systemPrompt:CATEGORY_FOLLOWUP_PROMPT,validate:(value,packet)=>validateCategoryFollowUp(value,packet,retainedThreats,categoryState)}:{}),
           signal: options.signal,
           onResponseShape: (shape) => {
             entry.responseShape = shape;
@@ -1065,7 +1070,7 @@ export async function enrichGraphModel(
             await save();
             // Recovery is bounded and separately metered. A timeout may have consumed
             // provider tokens; never erase that unknown-usage attempt.
-            const retry = continuous && !options.signal?.aborted && !shouldStop() &&
+            const retry = (continuous || options.recoverFailures === true) && !options.signal?.aborted && !shouldStop() &&
               ((transient && transportRetries < 2) || (invalid && validationRetries < 1));
             const delayMs = Math.max(error.retryAfterMs || 0, options.recoveryDelayMs ?? (transient ? 2000 * 2 ** transportRetries : 1000));
             // Long server cooldowns require a later resume, never an early retry.

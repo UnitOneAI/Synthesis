@@ -316,6 +316,7 @@ export async function reviewSecurityIssues(
     retainConclusiveOnPromptChange = false,
     challengePrompt,
     finishCaseFirst = false,
+    contextRounds = INVESTIGATION_LIMITS.contextRounds,
     runUntilComplete = false,
     signal,
     fetchImpl = fetch,
@@ -328,6 +329,7 @@ export async function reviewSecurityIssues(
     throw Error("Configure an approved provider before security assessment");
   if (!Number.isInteger(budget) || budget < 1 || budget > 100)
     throw Error("Security request budget must be 1–100");
+  if(!Number.isInteger(contextRounds)||contextRounds<1||contextRounds>5)throw Error('Choose 1–5 evidence rounds');
   const context = securityContext(model),
     contextKey = contextKeyOverride || securityContextKey(model);
   const key = sha(
@@ -368,10 +370,10 @@ export async function reviewSecurityIssues(
     budget,
     candidateCount: issues.length,
     startedAt: new Date().toISOString(),
-    limits: challengePrompt ? {...INVESTIGATION_LIMITS,maxRequestsPerScenario:INVESTIGATION_LIMITS.contextRounds+1,criticalCheck:true} : INVESTIGATION_LIMITS,
+    limits: {...INVESTIGATION_LIMITS,...(reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'?{records:24,sourceBytes:66000}:{}),contextRounds,...(challengePrompt?{maxRequestsPerScenario:contextRounds+(reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'?2:1),criticalCheck:true}:{})},
   };
   model[reportField] = report;
-  const roundLimit=entry=>INVESTIGATION_LIMITS.contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0);
+  const roundLimit=entry=>contextRounds+(challengePrompt && entry?.challengeStarted ? 1 : 0)+(entry?.positiveChallengeRefresh?1:0);
   beginUsageRun(model);
   const save = async () => {
     const counts={selected:issues.length,assessed:0,sourceSupported:0,ruledOut:0,needsCodeContext:0,failed:0,unassessed:0};
@@ -456,7 +458,7 @@ export async function reviewSecurityIssues(
         followUp: structuredClone(old?.followUp || []),
         missingEvidence: structuredClone(old?.missingEvidence || []),
         assessment: "not-assessed",
-        ...(old?.challengeStarted ? {challengeStarted:true,challengePending:true,draftAssessment:old.draftAssessment} : {}),
+        ...(old?.challengeStarted ? {challengeStarted:true,challengePending:true,draftAssessment:old.draftAssessment,...(old.positiveChallengeRefresh?{positiveChallengeRefresh:true}:{})} : {}),
         history: [
           ...(old?.history || []),
           ...(old
@@ -502,6 +504,7 @@ export async function reviewSecurityIssues(
         if(Buffer.byteLength(JSON.stringify(packet))>INVESTIGATION_LIMITS.packetBytes)throw Error('Security packet metadata exceeds size limit');
         entry.packetHash = sha(JSON.stringify(packet));
         entry.retrieval = packet.retrieval;
+        if(packet.continuationReferences)entry.continuationReferences=packet.continuationReferences;
         entry.evidenceGaps = packet.gaps;
         entry.evidence = packet.records.map(({ lines, ...r }) => r);
         if (
@@ -560,12 +563,15 @@ export async function reviewSecurityIssues(
         Object.assign(entry, response.review, {
           responseHash: response.responseHash,
         });
-        if(challengePrompt && response.review.assessment==='static-supported' && !old?.challengeStarted) {
+        const refreshPositive=reportField==='threatValidation'&&model.aiReview?.scope?.poc?.kind==='section'&&response.review.assessment==='static-supported'&&old?.challengeStarted&&old.draftAssessment?.assessment!=='static-supported';
+        if(challengePrompt && (response.review.assessment==='static-supported'||response.review.decisionReviewRequired) && (!old?.challengeStarted||refreshPositive)) {
+          if(refreshPositive)entry.positiveChallengeRefresh=true;
           entry.draftAssessment=structuredClone(response.review);
           entry.challengeStarted=true;entry.challengePending=true;
-          entry.assessment='not-assessed';
+          if(response.review.assessment==='static-supported')entry.assessment='not-assessed';
         } else if(old?.challengeStarted) {
           entry.challengePending=false;entry.challengeCompleted=true;
+          if(packet.challengeBasis)entry.challengeBasis=packet.challengeBasis;
         }
         // Repeating an identical evidence packet is not progress.
         if (
@@ -605,7 +611,7 @@ export async function reviewSecurityIssues(
         )
       )
         break;
-      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < INVESTIGATION_LIMITS.contextRounds && !entry.history.some(h=>h.assessment==='failed') && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
+      if (retryInvalidAssessment && entry.assessment === 'failed' && entry.rounds < contextRounds && old?.assessment!=='failed' && /^Security assessment failed|^Model did not return the required JSON/.test(entry.error)) queue.push(item);
       if (
         (entry.challengePending || (entry.assessment === "needs-context" &&
         (entry.decisionReviewRequired || entry.followUp?.length || (followMissingControls && entry.missingEvidence?.some(s => controlSymbols(s).length))))) &&

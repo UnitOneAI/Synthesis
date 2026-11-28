@@ -7,11 +7,12 @@
   try {
     if (
       !/^[a-f0-9]{64}$/.test(key || "") ||
-      !["threat-print-html", "cwe-evidence-html"].includes(format)
+      !["threat-print-html", "cwe-evidence-html", "section-print-html"].includes(format)
     )
       throw Error("Open the report from the Synthesis workspace.");
     const response = await fetch(
       "/api/export?" + new URLSearchParams({ format,
+        sectionId: params.get('sectionId') || '',
         accessScope: params.get('accessScope') || 'all',
         includeUnresolved: params.get('includeUnresolved') || 'true',
       }),

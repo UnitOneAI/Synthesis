@@ -8,8 +8,8 @@ import { interfacePriorities, batchStage } from './review-order.mjs';
 export const SYSTEM_REVIEW_VERSION = 'system-review-3';
 export const operationSignature = (i,evidence) => JSON.stringify([i.repository,i.component,i.operation,i.protocol,i.direction,i.evidence.map(id=>evidence.get(id)).filter(Boolean).map(e=>[e.repository,e.path,e.line]).sort()]);
 export function systemReviewPlan(model, excerpts = new Map(), selection = null) {
-  const system = systemModel({ ...model, aiReview: undefined }, { matrix: false });
-  const context = deploymentContext(model, system);
+  const system = selection?.staticContext?.system || systemModel({ ...model, aiReview: undefined }, { matrix: false });
+  const context = selection?.staticContext?.deployment || deploymentContext(model, system);
   const evidence = new Map(model.evidence.map(e => [e.id, e]));
   const byId = new Map(model.interfaces.map(i => [i.id, i]));
   const production = i => i.evidence.some(e => sourceScope(evidence.get(e)?.path || '') === 'production-candidate');
@@ -21,7 +21,7 @@ export function systemReviewPlan(model, excerpts = new Map(), selection = null) 
     controls.get(i.component).push(i);
   }
   const indexes = { evidence, components: new Map(model.components.map(c => [c.id, c])) };
-  const priorities = interfacePriorities(model, system);
+  const priorities = selection?.staticContext?.priorities || interfacePriorities(model, system);
   const batches = [], omitted = [], gaps = [], obligations = [], splits = [];
   const covered = new Set(), flowGroups = new Map();
   const add = (records, flows, label, extraControls = []) => {

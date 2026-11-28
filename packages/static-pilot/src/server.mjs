@@ -1,3 +1,5 @@
+import {automaticSectionPlan,automaticSectionSummary,sectionModel,interruptAutomaticSections,syncAutomaticSectionProjection} from './automatic-sections.mjs';
+import {sectionReport} from './section-report.mjs';
 import {REPOSITORY_PROMPT} from './repository-assessment.mjs';
 import {resolvePocScope,pocReviewPlan} from './poc-scope.mjs';
 import { reviewThreatScenarios } from './threat-validation.mjs';
@@ -330,6 +332,7 @@ export async function serve({
           model.cweReview.error = "Interrupted scan; run CWE review again.";
         }
         interruptUsage(model.usageLedger);
+        interruptAutomaticSections(model);
         for (const report of [model.aiReview, model.cweModelReview]) {
           interruptReviewExecution(report, "interrupted");
           if (report?.runId) await updateReviewProgress(model, report);
@@ -377,6 +380,7 @@ export async function serve({
   const checkpoint = async () => {
     if (!model) return;
     try {
+      syncAutomaticSectionProjection(model);
       exploration.sync(model);
       if (!store) return;
       await store.save({ manifest, model });
@@ -394,6 +398,8 @@ export async function serve({
   };
   const outputModel = () => ({
     ...model,
+    automaticSections:undefined,automaticSectionHistory:undefined,
+    automaticSectionSummary:automaticSectionSummary(model),
     ...(model.aiReview
       ? {
           aiReview: {
@@ -461,6 +467,7 @@ export async function serve({
           at: new Date().toISOString(),
         };
         interruptReviewExecution(model.aiReview, "worker-failure");
+        interruptAutomaticSections(model,"worker-failure");
         void updateReviewProgress(model, model.aiReview);
       }
       traces
@@ -567,6 +574,8 @@ export async function serve({
           if (m.threatValidation) model.threatValidation = m.threatValidation;
           if (m.featureReviewRun) model.featureReviewRun = m.featureReviewRun;
           if (m.featureEvidenceHistory) model.featureEvidenceHistory = m.featureEvidenceHistory;
+          if (m.automaticSections) model.automaticSections = m.automaticSections;
+          if (m.automaticSectionHistory) model.automaticSectionHistory = m.automaticSectionHistory;
           await checkpoint();
           if (worker === active)
             active.postMessage({
@@ -601,6 +610,7 @@ export async function serve({
           job = {
             status: "ready",
             message:
+              model.automaticSections?.run && m.model.aiReview?.scope?.poc?.kind==='section' ? `Automatic sections: ${model.automaticSections.run.completedThisRun} completed this action; ${model.automaticSections.run.blockedThisRun} blocked or failed. Each section retains its own report. ${model.automaticSections.run.status}.` :
               model.featureReviewRun?.scopeId===model.aiReview?.scope?.poc?.id && model.featureReviewRun ? `Feature workflow saved: ${model.featureReviewRun.discoveryCalls} discovery requests and ${model.featureReviewRun.engineeringCalls} engineering requests this action. Stop: ${model.featureReviewRun.stopReason}. Inspect feature decisions and remaining scope below.` :
               model.aiReview?.scope?.poc && model.threatValidation ? `POC packets: ${model.aiReview.coverage.completedBatches}/${model.aiReview.coverage.totalBatches}. Code assessment: ${model.threatValidation.assessmentCounts?.sourceSupported || 0} supported, ${model.threatValidation.assessmentCounts?.ruledOut || 0} ruled out, ${model.threatValidation.assessmentCounts?.needsCodeContext || 0} need context, ${model.threatValidation.assessmentCounts?.failed || 0} failed. Inspect unassessed scenarios and deployment assumptions.` :
               model.aiReview?.status === "failed"
@@ -976,8 +986,9 @@ export async function serve({
           throw Error("Choose 1–4 parallel review workers");
         if (typeof input.includeSourceExcerpts !== "boolean")
           throw new Error("Choose whether to include source excerpts");
-        if (input.reviewScope !== undefined && !['system', 'deep', 'poc'].includes(input.reviewScope)) throw Error('Choose system, deep or scoped POC STRIDE review');
+        if (input.reviewScope !== undefined && !['system', 'deep', 'poc', 'sections'].includes(input.reviewScope)) throw Error('Choose system, deep or scoped POC STRIDE review');
         if (input.reviewScope === 'poc') { resolvePocScope(model); if (!input.includeSourceExcerpts) throw Error('Scoped POC requires source excerpts for control investigation'); }
+        if(input.reviewScope==='sections'&&!input.includeSourceExcerpts)throw Error('Automatic sections require source sharing');
         // Keep prior successful responses outside the active snapshot before a
         // repacked or changed-method review can replace its current projection.
         await store?.archiveReview(model);
@@ -996,7 +1007,7 @@ export async function serve({
             sourceRoot: root,
             includeSourceExcerpts: input.includeSourceExcerpts,
             concurrency,
-            runUntilComplete: runControl.mode === "until-complete",
+            runUntilComplete: input.reviewScope === 'sections' || runControl.mode === "until-complete",
             tokenTarget: runControl.tokenTarget,
             graphDatabase:
               model.sourceGraph?.storage === "sqlite"
@@ -1445,6 +1456,7 @@ export async function serve({
             "Review cancelled; continue to process remaining batches";
           model.aiReview.stopReason = "cancelled";
           interruptReviewExecution(model.aiReview, "cancelled");
+          interruptAutomaticSections(model,"cancelled");
         }
         interruptUsage(model?.usageLedger);
         if (reviewing && model?.aiReview)
@@ -1476,6 +1488,14 @@ export async function serve({
         return model
           ? send(200, outputModel())
           : send(409, { error: "No completed model" });
+      if(req.method==='GET'&&url.pathname==='/api/sections') {
+        if(!model)return send(409,{error:'Open the saved graph first'});
+        return send(200,automaticSectionSummary(model) || automaticSectionPlan(model));
+      }
+      if(req.method==='GET'&&url.pathname==='/api/section-report') {
+        if(!model)return send(409,{error:'Open the saved graph first'});
+        return send(200,await withGraph(()=>sectionReport(model,manifest,root,url.searchParams.get('id'))),'text/html; charset=utf-8');
+      }
       if (req.method === 'POST' && url.pathname === '/api/poc-scope') {
         if (!model || ['running','cancelling'].includes(job.status)) return send(409,{error:'Open the graph and stop review before changing POC scope'});
         const input = await body(req);
@@ -1634,6 +1654,7 @@ export async function serve({
           "cwe-csv": "cwe-findings.csv",
           "cwe-sarif": "cwe-findings.sarif",
           html: "threat-model.html",
+          "section-print-html": "section-threat-model.html",
           "threat-print-html": "threat-model-review.html",
           "threat-technical-html": "threat-model-technical-review.html",
           securityControls: "control-register.csv",
@@ -1717,6 +1738,7 @@ export async function serve({
             usageCsv(model.usageLedger),
             "text/csv; charset=utf-8",
           );
+        if(format==='section-print-html')return send(200,await withGraph(()=>sectionReport(model,manifest,root,url.searchParams.get('sectionId'))),'text/html; charset=utf-8');
         if (["threat-print-html","threat-technical-html"].includes(format))
           return send(
             200,
@@ -1834,6 +1856,7 @@ export async function serve({
       }
       interruptUsage(model?.usageLedger);
       interruptReviewExecution(model?.aiReview, "interrupted");
+      interruptAutomaticSections(model);
       if (model?.aiReview?.runId)
         await updateReviewProgress(model, model.aiReview);
       await checkpoint();

@@ -330,7 +330,7 @@ test('inconsistent settled-code assessment receives a bounded engineering decisi
   const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
   const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
   if(calls===1){v.assessment='needs-context';v.engineering.obligations.forEach(o=>o.status='established');v.missingEvidence=['Which network is used in production?'];v.followUp=[];}
-  else {assert.match(p.decisionReview.task,/Independently check/);assert.deepEqual(p.decisionReview.questionsToResolve,['Which network is used in production?']);}
+  else {assert.ok(p.decisionChallenge,'A settled-code inconsistency must reach the independent critical reviewer');assert.match(p.decisionReview.task,/Independently check/);assert.deepEqual(p.decisionReview.questionsToResolve,['Which network is used in production?']);}
   raw.content[0].text=JSON.stringify(v);return Response.json(raw);
  }});
  assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
@@ -471,6 +471,10 @@ test('structured conditions reject unbound settings and inconsistent conclusions
  v.inputEvidence={recordId:'r',startLine:1,endLine:1,reason:'entry'};v.sinkEvidence={recordId:'r',startLine:2,endLine:2,reason:'read'};
  v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',binding:'deployment-only'}];
  assert.throws(()=>validateThreatAssessment(v,p),/configuration condition requires a cited code binding/);
+ v.engineering.conditions=[{id:'external-audit',kind:'deployment-control',statement:'An external audit service independently attributes each request to a verified caller.',scope:'GET /gap',requiredAnswer:'no',binding:'deployment-only'}];
+ const external=validateThreatAssessment(v,p);assert.equal(external.engineering.conditions[0].basis,'deployment-only');assert.deepEqual(external.engineering.conditions[0].citations,[]);assert.equal(external.deploymentStatus,'unverified-assumptions');
+ v.engineering.conditions[0].binding='applicable-controls';assert.throws(()=>validateThreatAssessment(v,p),/unverified external condition/);
+ v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',binding:'deployment-only'}];
  v.engineering.conditions=[{id:'setting',kind:'configuration',statement:'Authentication is disabled.',scope:'GET /gap',requiredAnswer:'yes',basis:'code-dependent',citations:[]}];
  v.engineering.reviewerQuestions=[{conditionId:'setting',question:'Is authentication disabled?'}];
  assert.throws(()=>validateThreatAssessment(v,p),/code-dependent condition requires binding citations/);
@@ -516,4 +520,149 @@ test('compact native response retains exact entry, operation and condition-bindi
  assert.equal(validated.engineering.reviewerQuestions[0].conditionId,'policy');
  wire.engineering.conditions[0].binding='imaginary';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
  wire.engineering.conditions[0].binding='entry';wire.engineering.obligations[0].status='missing';assert.throws(()=>validateThreatAssessment(wire,packet),/condition binding/);
+});
+test('requested member uses retrieve local storage and serialization candidates from the saved graph',async t=>{
+ const f=await threatFixture(t,[['repo0/Store.py','class Store:\n    def update(self, session, config):\n        session.config = config\n\n    def serialize(self, item):\n        return item.config\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');
+ const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const found=await source.findImplementation(['session.config'],[{repository:'repo0',path:'Store.py',line:2}]);
+ assert.ok(found.references.some(r=>r.path==='Store.py'&&r.line===3));assert.ok(found.references.some(r=>r.path==='Store.py'&&r.line===6));
+ assert.ok(found.references.every(r=>r.basis.includes('binding unproven')));
+ await fs.appendFile(path.join(f.root,'repo0','Store.py'),'# changed\n');
+ const changed=await source.findImplementation(['session.config'],[{repository:'repo0',path:'Store.py',line:2}]);
+ assert.equal(changed.references.filter(r=>r.path==='Store.py').length,0);assert.ok(changed.failures.length);
+});
+
+test('requested source survives a later follow-up that asks for a different binding',async t=>{
+ const f=await threatFixture(t,[['repo9/ThirdGuard.cs','class ThirdGuard { public bool Check() { return false; } }']]);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:5,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls<3){v.assessment='needs-context';v.missingEvidence=calls===1?['Inspect SecondGuard']:[];if(calls===2)v.followUp=[{repository:'repo11',path:'PermissionFilter.cs',line:1,reason:'Inspect ThirdGuard binding before deciding this path'}];}
+  if(calls===3){assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'),'Previously requested source must remain available even when it was not cited');assert.ok(p.records.some(r=>r.path==='ThirdGuard.cs'));}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,3);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+});
+
+test('a later isolated format failure gets bounded correction despite older failure history',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:5,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1||calls===3)v.trace[0].endLine=100000;
+  if(calls===2){v.assessment='needs-context';v.missingEvidence=['Inspect SecondGuard'];}
+  if(calls===4){assert.match(p.previousValidationFailure,/citation/);assert.ok(p.records.some(r=>r.path==='SecondGuard.cs'));}
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,4);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');assert.equal(f.model.usageLedger.attempts.length,4);
+});
+
+test('section retrieval follows indexed primary calls to base and overriding method candidates',async t=>{
+ const code='class Base:\n    def persist(self, value):\n        self.value = value\nclass Disk(Base):\n    def persist(self, value):\n        super().persist(value)\ndef write(request):\n    storage.persist(request.value)\n';
+ const f=await threatFixture(t,[['repo0/Store.py',code]]),{InvestigationSource}=await import('../src/investigation-source.mjs');
+ const source=new InvestigationSource(f.model,f.manifest,f.root),window=await source.functionWindow({repository:'repo0',path:'Store.py',line:7});
+ source.search=()=>({items:[],next:'global-page-limit'}); // Global paging must not hide same-file definitions.
+ const result=source.calledImplementations([window]);
+ assert.ok(result.searches.some(s=>s.symbol==='persist'));
+ assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===2));
+ assert.ok(result.references.some(r=>r.path==='Store.py'&&r.line===5));
+ assert.ok(result.references.every(r=>r.required===false));assert.match(result.interpretation,/do not establish/);
+ const originalNodes=source.nodes.bind(source);source.nodes=options=>options.kind==='function'&&options.limit===129?Array.from({length:129},(_,n)=>({id:String(n),line:1000+n,endLine:1000+n})):originalNodes(options);
+ assert.equal((await source.functionWindow(result.references[0])).functionContext.complete,true,'Exact saved function identity bypasses unrelated file-page limits');
+ await fs.appendFile(path.join(f.root,'repo0/Store.py'),'# changed');
+ await assert.rejects(()=>source.functionWindow(result.references[0]),/changed|hash|match/);
+});
+
+test('retrieval upgrade can repair an exhausted evidence validation failure without resetting settled work',async t=>{
+ const f=await threatFixture(t);let calls=0;
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{calls++;return answer(JSON.parse(JSON.parse(request.body).messages[0].content));}};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const e=f.model.threatValidation.entries[0];e.assessment='failed';e.error='Security assessment failed schema or evidence validation';e.rounds=5;f.model.threatValidation.retrievalVersion='old';
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
+});
+
+test('section follow-up retains its entry and application composition ahead of broad matches',async t=>{
+ const f=await threatFixture(t,[['repo0/api.py','def change():\n    return store.write()\n'],['repo0/server.py','def create_app():\n    app = FastAPI()\n    app.include_router(router)\n    return app\n']]);
+ f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'section',interfaceIds:[f.model.interfaces.find(i=>i.repository==='repo2'&&i.direction==='inbound').id],locations:[{repository:'repo0',path:'api.py',line:1}],controls:'PermissionFilter',explanation:'Inspect the write'};
+ const follow=Array.from({length:12},(_,n)=>({repository:'repo'+n,path:'Api.cs',line:1,reason:'Prior requested candidate'}));
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,follow,{},['Inspect PermissionFilter and SecondGuard']);
+ assert.equal(packet.records[0].path,'api.py');assert.equal(packet.records[1].repository,'repo2','Every named interface must supply its own entry source even when discovery cited only one');assert.ok(packet.candidate.locations.every(r=>!('excerpt' in r)));assert.ok(packet.records.slice(0,3).some(r=>r.path==='server.py'));
+ assert.ok(packet.records.find(r=>r.path==='server.py').lines.some(l=>l.text.includes('include_router')));
+});
+
+test('section search history does not become a required dependency but current requests still do',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'section',locations:[{repository:'repo0',path:'Api.cs',line:1}],controls:'',explanation:'Assess this entry'};
+ const old={repository:'repo0',path:'UnboundCandidate.cs',line:1,reason:'Old search candidate',required:false};
+ const candidate=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[old],{},[]);
+ assert.ok(!candidate.gaps.some(g=>g.path===old.path));assert.ok(candidate.retrieval.candidateWindowsOmitted>0);
+ const requested=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,[{...old,required:true}],{},[]);
+ assert.ok(requested.gaps.some(g=>g.path===old.path));
+});
+
+test('section engineering fits a bounded multi-file proof without the smaller generic source cutoff',async t=>{
+ const files=Array.from({length:5},(_,n)=>['repo0/part'+n+'.py',Array.from({length:55},(_,l)=>`value_${l} = '${'x'.repeat(155)}'`).join('\n')]);
+ const f=await threatFixture(t,files);f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const locations=files.map(([p])=>({repository:'repo0',path:p.slice(6),line:1}));
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,{id:'section',locations,controls:'',explanation:'Review the stated path'},[],{},[]);
+ assert.equal(packet.gaps.length,0);assert.equal(packet.records.length,5);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet.records))>42000);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet.records))<=66000);
+ assert.ok(Buffer.byteLength(JSON.stringify(packet))<=94000);
+});
+
+test('exact small request types include their complete fields without unrelated handlers',async t=>{
+ const f=await threatFixture(t,[['repo0/Types.py','class Request:\n    config: dict\n    name: str\n\ndef unrelated():\n    return 1\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const n=source.localDefinitions('Request',[{repository:'repo0',path:'Types.py'}]).matches[0];
+ const w=await source.functionWindow({...n,nodeId:n.id});
+ assert.equal(w.functionContext.complete,true);assert.ok(w.lines.some(l=>l.text.includes('config: dict')));assert.ok(!w.lines.some(l=>l.text.includes('unrelated')));
+});
+
+test('automatic section corrects a contradictory decision without converting it into support',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};let calls=0;
+ await reviewThreatScenarios(f.manifest,f.model,{sourceRoot:f.root,config,budget:2,contextRounds:5,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>{
+  const p=JSON.parse(JSON.parse(request.body).messages[0].content);calls++;
+  const raw=await answer(p).json(),v=JSON.parse(raw.content[0].text);
+  if(calls===1){v.assessment='needs-context';v.engineering.obligations.forEach(o=>o.status='established');v.missingEvidence=[];v.followUp=[];}
+  else assert.match(p.previousValidationFailure,/contradictory section decision/);
+  raw.content[0].text=JSON.stringify(v);return Response.json(raw);
+ }});
+ assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.threatValidation.entries[0].history[0].assessment,'failed');
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});
+
+test('a section positive reached from an unresolved draft gets a challenge of its current conclusion',async t=>{
+ const f=await threatFixture(t);f.model.aiReview.scope={poc:{kind:'section'}};
+ const options={sourceRoot:f.root,config,budget:1,threatIds:['saved-threat-0'],fetchImpl:async(_,request)=>answer(JSON.parse(JSON.parse(request.body).messages[0].content))};
+ await reviewThreatScenarios(f.manifest,f.model,options);
+ const e=f.model.threatValidation.entries[0];e.assessment='static-supported';e.challengeCompleted=true;e.challengeStarted=true;e.engineering.conclusion='Narrow current persistent write';e.engineering.obligations.forEach(o=>o.status='established');e.draftAssessment={assessment:'needs-context',engineering:{conclusion:'Older speculative impact'}};
+ await reviewThreatScenarios(f.manifest,f.model,{...options,fetchImpl:async(_,request)=>{const p=JSON.parse(JSON.parse(request.body).messages[0].content);assert.equal(p.decisionChallenge.priorClaim,'Narrow current persistent write');assert.equal(p.candidate.explanation,'Narrow current persistent write');assert.equal(p.challengeBasis,'current-positive-1');return answer(p);}});
+ assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
+ assert.equal(f.model.usageLedger.attempts.length,2);
+});
+
+test('ambiguous indexed ownership is not missing code when all candidate bodies are supplied',async t=>{
+ const f=await threatFixture(t,[['repo0/Overlap.py',Array.from({length:100},(_,n)=>'# source '+n).join('\n')]]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const nodes=source.nodes.bind(source);source.nodes=options=>options.kind==='function'?[{line:8,endLine:20,name:'first'},{line:8,endLine:30,name:'second'}]:nodes(options);
+ const supplied=await source.functionWindow({repository:'repo0',path:'Overlap.py',line:10});
+ assert.equal(supplied.functionContext.complete,true);assert.match(supplied.functionContext.reason,/binding still requires/);
+ source.nodes=options=>options.kind==='function'?[{line:8,endLine:95,name:'first'},{line:8,endLine:30,name:'second'}]:nodes(options);
+ const truncated=await source.functionWindow({repository:'repo0',path:'Overlap.py',line:10});
+ assert.equal(truncated.functionContext.complete,false);assert.equal(truncated.functionContext.reason,'ambiguous-function-owner');
+});
+
+test('a citation inside one function does not become ambiguous with the following function',async t=>{
+ const f=await threatFixture(t,[['repo0/Neighbors.py','def first():\n    x = 1\n    return x\ndef next():\n    return 2\n']]);
+ const {InvestigationSource}=await import('../src/investigation-source.mjs');const source=new InvestigationSource(f.model,f.manifest,f.root);
+ const w=await source.functionWindow({repository:'repo0',path:'Neighbors.py',line:3});
+ assert.equal(w.functionContext.complete,true);assert.equal(w.functionContext.name,'first');assert.equal(w.endLine,3);
 });

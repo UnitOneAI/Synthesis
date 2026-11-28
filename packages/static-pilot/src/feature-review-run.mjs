@@ -1,3 +1,4 @@
+import {repositoryThreatWire} from './repository-assessment.mjs';
 import { enrichGraphModel } from './graph-review.mjs';
 import { reviewThreatScenarios, THREAT_RETRIEVAL_VERSION } from './threat-validation.mjs';
 import { pocReviewPlan } from './poc-scope.mjs';
@@ -29,22 +30,38 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
   };
   const remaining=()=>continuous?100:Math.max(0,budget-run.calls);
   const followCategoryEvidence=async()=>{
+    if(plan.scope?.poc?.kind==='section') {
+      const lookup=threatAssessmentLookup(model);
+      if((model.aiReview?.threats || []).some(t=>{const a=threatAssessment(model,t.id,lookup);return !['static-supported','ruled-out'].includes(a.assessment)||(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.draftAssessment?.assessment!=='static-supported')));}))return;
+    }
     const current=[...(model.aiReview?.batches || [])];
     for(const previous of current) {
       if(!remaining()||options.signal?.aborted||run.stopReason)break;
-      const missing=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').flatMap(c=>c.modelMissingEvidence || c.missingEvidence || []);
+      const missing=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').flatMap(c=>[...new Set([...(c.modelMissingEvidence || []),...(c.missingEvidence || [])])]);
       const symbols=controlSymbols(missing.join(' '));
-      if(previous.status!=='completed'||!symbols.length)continue;
+      if(previous.status!=='completed'||!missing.length)continue;
       const batch=batchesById.get(previous.id);if(!batch)continue;
-      const key=sha(JSON.stringify([model.modelRevision,plan.scope.poc.id,batch.id]));
-      if((historyCounts.get(key)||0)>=2)continue;
+      const key=sha(JSON.stringify([model.modelRevision,plan.scope.poc.id,batch.id,...(plan.scope?.poc?.kind==='section'?['section-category-3',THREAT_RETRIEVAL_VERSION]:[])]));
+      if((historyCounts.get(key)||0)>=(options.categoryFollowUpLimit || 2))continue;
+      const targetCategories=(previous.review?.categoryReviews || []).filter(c=>c.status==='evidence-gap').map(c=>c.category);
+      const categoryState=plan.scope?.poc?.kind==='section'?{categories:previous.review.categoryReviews,records:previous.evidenceContext.records}:null;
+      if(categoryState)for(const ref of [...new Map(categoryState.records.map(r=>[r.repository+'\0'+r.path,r])).values()])await source.window({...ref,line:ref.startLine});
       const seeds=batch.packet.records.flatMap(r=>r.evidence);
+      const primary=new Set(batch.packet.reviewUnit.primaryInterfaceIds);
+      const threatIds=new Set((model.aiReview.threats || []).filter(t=>t.interfaceIds.some(id=>primary.has(id))).map(t=>t.id));
+      const resolved=(model.threatValidation?.entries || []).filter(t=>threatIds.has(t.sourceId)&&(plan.scope?.poc?.kind!=='section'||targetCategories.includes(model.aiReview.threats.find(c=>c.id===t.sourceId)?.category))).flatMap(t=>(t.engineering?.obligations || []).flatMap(o=>o.citations || [])).map(r=>({...r,line:r.startLine}));
+      const requestedDefinitions=plan.scope?.poc?.kind==='section'?symbols.slice(0,8).flatMap(symbol=>(source.localDefinitions?.(symbol,seeds)?.matches || []).slice(0,3).map(n=>({repository:n.repository,path:n.path,line:n.line,nodeId:n.id,kind:n.kind,required:true,basis:'Exact local implementation requested by category review'}))):[];
       const controls=await controlContext(source,seeds,missing.join(' '));
       const fallback=await source.findImplementation(symbols,seeds);
-      const prepared=await prepareStrideEvidence(batch.packet,source,{references:[...fallback.references,...controls.references],priorReview:{missingCode:missing,instruction:'Resolve these code dependencies using the newly supplied source. Prior output is a hypothesis, never evidence. Reassess all six categories and preserve unaffected supported conclusions with citations.'}});
-      if(prepared.context.fingerprint===previous.evidenceContext?.fingerprint)continue;
+      const prepared=await prepareStrideEvidence(batch.packet,source,{sectionEvidence:plan.scope?.poc?.kind==='section',references:[...seeds,...requestedDefinitions,...resolved.map(r=>({...r,required:true})),...fallback.references.map(r=>({...r,required:false})),...controls.references],priorReview:{...(plan.scope?.poc?.kind==='section'?{retainedThreats:previous.review.threats.map((t,index)=>({index,title:t.title,category:t.category,interfaceIds:t.interfaceIds})),retainedDigest:sha(JSON.stringify(previous.review.threats.map(repositoryThreatWire))),targetCategories,categoryStateDigest:sha(JSON.stringify(categoryState)),engineeringConclusions:(model.threatValidation?.entries || []).filter(t=>threatIds.has(t.sourceId)).map(t=>{const claim=model.aiReview.threats.find(c=>c.id===t.sourceId);return {sourceId:t.sourceId,retainedIndex:previous.review.threats.findIndex(c=>c.title===claim?.title&&c.category===claim?.category),originalTitle:claim?.title,assessment:t.assessment,conclusion:t.engineering?.conclusion,basis:'Assessed current claim, which may narrow the original hypothesis. Fresh source citations must support the category decision; do not revive excluded impacts merely because the original title was broader.'};})}:{}),...(plan.scope?.poc?.kind==='section'?{validationCorrections:(previous.review?.categoryReviews || []).flatMap(c=>(c.missingEvidence || []).filter(s=>!(c.modelMissingEvidence || []).includes(s)).map(s=>c.category+': '+s))}:{previousUnresolvedItems:missing}),instruction:'Reassess each previous unresolved item; the earlier classification may be wrong. Resolve implementation questions from the newly supplied source. Keep actual missing bindings in missingEvidence, and effective deployment/access/policy questions in deploymentConditions. Do not copy the earlier unresolved list unchanged. validationCorrections names the category that failed a mechanical citation check: repair that category specifically. Each supported-conditional category must contain at least one actual input citation AND at least one actual operation citation within its own citations array; citations in a different category do not satisfy it. A code range can be cited under both roles only when it actually demonstrates both facts. Prior output is a hypothesis, never evidence. Reassess all six categories and preserve unaffected supported conclusions with citations. For EVERY primary operation, cite its handler source in EACH category, including no-scenario and ruled-out decisions. All operations must be covered; a citation to one route does not review its siblings. Code facts are resolved from cited handlers, registration and helpers; effective network exposure and operator policy belong in deploymentConditions, not missingEvidence.'}});
+      prepared.retainedThreats=previous.review.threats.map(repositoryThreatWire);
+      prepared.categoryState=categoryState;
+      if(categoryState)prepared.context.records=[...new Map([...categoryState.records,...prepared.context.records].map(r=>[r.id,r])).values()];
+      prepared.context.categoryClosure=plan.scope?.poc?.kind==='section'?{version:'retain-cases-1',retainedIds:previous.review.threats.map(t=>t.id),promptHash:sha(JSON.stringify(prepared.packet.sourceContext.priorReview))}:null;
+      const followUpKey=sha(JSON.stringify([prepared.context.fingerprint,missing]));
+      if((model.featureEvidenceHistory || []).some(h=>h.key===key&&h.followUpKey===followUpKey))continue;
       // Retain the paid prior result before a forced evidence reassessment.
-      model.featureEvidenceHistory=[...(model.featureEvidenceHistory || []),{key,batchId:batch.id,previous,at:new Date().toISOString()}];
+      model.featureEvidenceHistory=[...(model.featureEvidenceHistory || []),{key,followUpKey,batchId:batch.id,previous,at:new Date().toISOString()}];
       historyCounts.set(key,(historyCounts.get(key)||0)+1);
       run.phase='category evidence';options.progress?.('Following exact missing category controls before expanding discovery');await save();
       await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,maxBatches:1,concurrency:1,
@@ -65,35 +82,54 @@ export async function reviewFeatureCohorts(model,manifest,config,excerpts,fetchI
     const assessmentLookup=threatAssessmentLookup(model);
     const threatIds=model.aiReview.threats.filter(t=>{
       const a=threatAssessment(model,t.id,assessmentLookup);
-      if(a.assessment==='static-supported'&&!a.challengeCompleted)return true;
-      return !['static-supported','ruled-out'].includes(a.assessment) && !(model.threatValidation?.retrievalVersion===THREAT_RETRIEVAL_VERSION && a.assessment==='needs-context' && (a.rounds>=3 || a.stopReason==='no-new-evidence'));
+      if(a.assessment==='static-supported'&&(!a.challengeCompleted||(plan.scope?.poc?.kind==='section'&&a.draftAssessment?.assessment!=='static-supported')))return true;
+      return !['static-supported','ruled-out'].includes(a.assessment) && !(model.threatValidation?.retrievalVersion===THREAT_RETRIEVAL_VERSION && a.assessment==='needs-context' && (a.rounds>=(plan.scope?.poc?.kind==='section'?5:3) || a.stopReason==='no-new-evidence'));
     }).map(t=>t.id);
     if(!threatIds.length)return;
     run.phase='engineering';options.progress?.('Following code and controls before the next discovery cohort');
     const priorEntries=new Map((model.threatValidation?.entries || []).map(e=>[e.sourceId,JSON.stringify(e)]));
     const baseCalls=run.calls,baseEngineering=run.engineeringCalls;
     const engineeringCheckpoint=async()=>{run.calls=baseCalls+(model.threatValidation?.callsThisRun || 0);run.engineeringCalls=baseEngineering+(model.threatValidation?.callsThisRun || 0);await save();};
-    const result=await reviewThreatScenarios(manifest,model,{sourceRoot:options.sourceRoot,config,budget:remaining(),runUntilComplete:false,finishCaseFirst:true,threatIds,
+    const result=await reviewThreatScenarios(manifest,model,{sourceRoot:options.sourceRoot,config,budget:remaining(),runUntilComplete:false,finishCaseFirst:true,contextRounds:plan.scope?.poc?.kind==='section'?5:3,threatIds,
       fetchImpl,signal:options.signal,trace:options.trace,progress:options.progress,checkpoint:engineeringCheckpoint});
     run.engineeringCalls=baseEngineering+result.callsThisRun;run.calls=baseCalls+result.callsThisRun;
     if(result.status==='failed'||result.entries.some(e=>JSON.stringify(e)!==priorEntries.get(e.sourceId) && e.assessment==='failed' && !/^Security assessment failed|^Model did not return the required JSON|^Security packet metadata/.test(e.error || '')))run.stopReason='provider-or-source-failure';
     return result;
   };
   try {
+    if(plan.scope?.poc?.kind==='section'&&model.aiReview?.scope?.poc?.id===plan.scope.poc.id) {
+      const recoveries=new Map();
+      for(const h of [...(model.featureEvidenceHistory || [])].reverse()) {
+        const current=model.aiReview.batches.find(b=>b.id===h.batchId),planned=batchesById.get(h.batchId);
+        if(current&&current.status!=='completed'&&planned&&h.previous?.status==='completed'&&h.previous.packetHash===planned.packetHash&&!recoveries.has(h.batchId))recoveries.set(h.batchId,h.previous);
+      }
+      if(recoveries.size)await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,maxBatches:1,recoveredBatches:[...recoveries.values()],batchIds:[],checkpoint:save});
+    }
     // A saved cohort may have completed discovery but not its engineering work.
-    if(model.aiReview?.scope?.poc?.id===plan.scope.poc.id){await followCategoryEvidence();if(!run.stopReason)await settle();}
+    if(model.aiReview?.scope?.poc?.id===plan.scope.poc.id){if(plan.scope?.poc?.kind==='section')await settle();if(!run.stopReason)await followCategoryEvidence();if(!run.stopReason)await settle();}
     while(remaining()&&!run.stopReason&&!options.signal?.aborted) {
       const before=model.aiReview?.scope?.poc?.id===plan.scope.poc.id ? model.aiReview?.coverage?.completedBatches || 0 : 0;
       run.phase='discovery';run.cohorts++;
       await enrichGraphModel(model,config,excerpts,fetchImpl,{...options,plan,runUntilComplete:false,
-        maxBatches:Math.min(remaining(),options.concurrency || 2,4),checkpoint:save});
+        maxBatches:Math.min(remaining(),options.concurrency || 2,4),recoverFailures:plan.scope?.poc?.kind==='section',checkpoint:save});
       const discoveryCalls=model.aiReview.coverage?.callsThisRun;
       if(!Number.isFinite(discoveryCalls))throw Error('Discovery request accounting unavailable');
       run.calls+=discoveryCalls;run.discoveryCalls+=discoveryCalls;
       const reason=model.aiReview.stopReason;
       if(['provider-failure','repeated-response-format-failure','cancelled','time-budget'].includes(reason)){run.stopReason=reason;break;}
-      await followCategoryEvidence();if(!run.stopReason)await settle();await save();
-      if(!model.aiReview.coverage.pendingBatches) {run.stopReason=model.aiReview.coverage.failedBatches?'discovery-failures':'planned-discovery-finished';break;}
+      if(plan.scope?.poc?.kind==='section')await settle();
+      if(!run.stopReason)await followCategoryEvidence();if(!run.stopReason)await settle();
+      if(!run.stopReason && plan.scope?.poc?.kind==='section'){await followCategoryEvidence();if(!run.stopReason)await settle();}
+      await save();
+      if(!model.aiReview.coverage.pendingBatches) {
+        if(plan.scope?.poc?.kind==='section' && model.aiReview.coverage.failedBatches && run.cohorts<3) {options.progress?.('Retrying failed section packets with validation feedback; successful packets remain saved');continue;}
+        if(plan.scope?.poc?.kind==='section')for(let pass=0;pass<3&&!run.stopReason&&remaining()&&!options.signal?.aborted;pass++) {
+          const beforeFollow=run.calls;
+          await followCategoryEvidence();if(!run.stopReason)await settle();await save();
+          if(run.calls===beforeFollow)break;
+        }
+        run.stopReason ||= model.aiReview.coverage.failedBatches?'discovery-failures':'planned-discovery-finished';break;
+      }
       if(model.aiReview.coverage.completedBatches<=before){run.stopReason='no-new-completed-discovery';break;}
     }
     run.stopReason=options.signal?.aborted?'cancelled':run.stopReason||'request-budget';

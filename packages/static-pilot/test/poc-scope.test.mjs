@@ -290,7 +290,7 @@ test('missing indexed symbols use verified text fallback and changed source neve
  const f=await fixture(t),source=new InvestigationSource(f.model,f.manifest,f.root);
  const result=await source.findImplementation(['IsAdmin'],[{repository:'app',path:'Controllers/EmailController.cs'}]);
  assert.ok(result.references.some(r=>r.repository==='support'&&r.path==='RootController.cs'));
- assert.match(result.interpretation,/no match does not establish/);
+ assert.match(result.interpretation,/no match does not establish/i);
  await fs.appendFile(path.join(f.root,'support','RootController.cs'),'\n// modified');
  const changed=await source.findImplementation(['IsAdmin'],[]);
  assert.equal(changed.references.length,0);assert.ok(changed.failures.some(f=>f.reason==='source-hash-mismatch'));

@@ -1,3 +1,4 @@
+import {reviewAutomaticSections} from './automatic-section-run.mjs';
 import {assessCompletedPoc} from './threat-validation.mjs';
 import {reviewFeatureCohorts} from './feature-review-run.mjs';
 import {
@@ -37,7 +38,7 @@ try {
           : resolve();
       };
       parentPort.on("message", ack);
-      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes, threatValidation: workerData.model?.threatValidation,featureReviewRun:workerData.model?.featureReviewRun,featureEvidenceHistory:workerData.model?.featureEvidenceHistory });
+      parentPort.postMessage({ type: "checkpoint", id, aiReview, usageLedger, savedStrideScopes: workerData.model?.savedStrideScopes, threatValidation: workerData.model?.threatValidation,featureReviewRun:workerData.model?.featureReviewRun,featureEvidenceHistory:workerData.model?.featureEvidenceHistory,automaticSections:workerData.model?.automaticSections,automaticSectionHistory:workerData.model?.automaticSectionHistory });
     });
   const trace = (event, data) =>
     new Promise((resolve, reject) => {
@@ -84,7 +85,9 @@ try {
       : null;
   const model =
     workerData.mode === "review"
-      ? await (workerData.options.reviewScope==='poc' && workerData.model.pocScope?.reviewDepth==='security-features'
+      ? await (workerData.options.reviewScope==='sections'
+          ? (model,config,excerpts,fetchImpl,options)=>reviewAutomaticSections(model,workerData.manifest,config,excerpts,fetchImpl,{...options,sourceRoot:workerData.options.sourceRoot,verifiedSource:source})
+          : workerData.options.reviewScope==='poc' && workerData.model.pocScope?.reviewDepth==='security-features'
           ? (model,config,excerpts,fetchImpl,options)=>reviewFeatureCohorts(model,workerData.manifest,config,excerpts,fetchImpl,{...options,sourceRoot:workerData.options.sourceRoot,verifiedSource:source})
           : enrichGraphModel)(
           workerData.model,

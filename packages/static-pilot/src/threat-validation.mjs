@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-12';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-30';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -53,6 +53,7 @@ export function validateThreatAssessment(value, packet) {
   // New responses express every required code gap on a specific obligation.
   rest.missingEvidence=missingEvidence ?? argument.obligations.filter(o=>o.status==='missing').map(o=>o.reason);
   const assessed=validateSecurityAssessment(rest,packet);
+  if(packet.sectionReview===true && rest.assessment==='needs-context' && argument.consistency.status==='consistent' && argument.obligations.every(o=>o.status==='established') && !assessed.evidenceGaps.length)throw Error('Security assessment failed schema or evidence validation (contradictory section decision: all four code obligations are established and consistent, with no missing source, but assessment is needs-context. Independently conclude the narrower cited path, or mark the precise required code obligation missing and explain it. Unknown broader impacts must not block a narrower demonstrated write. Do not mark supported merely to pass validation.)');
   if(argument.consistency?.status==='unresolved') {
     assessed.assessment='needs-context';
     assessed.missingEvidence.push('Reconcile the decision: '+argument.consistency.reason);
@@ -68,12 +69,20 @@ You are the critical engineering reviewer, separate from the discovery assessmen
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
-  const requiredSymbols = new Set(controlSymbols(missing.join(' ')));
+  if(model.aiReview?.scope?.poc?.kind==='section') {
+    const evidence=new Map(model.evidence.map(e=>[e.id,e]));
+    const owned=model.interfaces.filter(i=>(issue.interfaceIds || []).includes(i.id)).flatMap(i=>i.evidence.map(id=>evidence.get(id))).filter(Boolean).map(e=>({repository:e.repository,path:e.path,line:e.line,blobSha256:e.blobSha256}));
+    issue={...issue,locations:[...new Map([...issue.locations,...owned].map(r=>[r.repository+'\0'+r.path+'\0'+r.line,r])).values()]};
+  }
+
+  const requestedContext=[...missing,...followUp.filter(r=>r.required!==false).map(r=>r.reason || '')].join(' ');
+  const requiredSymbols = new Set(controlSymbols(requestedContext));
   const symbols = [...new Set([...requiredSymbols,...controlSymbols([issue.controls, issue.explanation].join(' '))])];
   const definition = n => ['function','class','method','type'].includes(n.kind);
   const refs = [], searches = [], gaps = [];
   for (const symbol of symbols) {
-    const matches = []; let after = '';
+    const local=source.localDefinitions?.(symbol,issue.locations);
+    const matches = [...(local?.matches || [])]; let after = '';
     for (let page = 0; page < 2; page++) {
       const result = source.search(symbol, after);
       matches.push(...result.items.filter(n => n.kind === 'file' || n.name === symbol || n.name?.endsWith('.' + symbol) || n.name?.endsWith('::' + symbol)));
@@ -82,29 +91,31 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     }
     const sameFile = n => issue.locations.some(r=>r.repository===n.repository && r.path===n.path);
     const sameRepository = n => issue.locations.some(r=>r.repository===n.repository);
-    let found = matches.sort((a,b) => Number(definition(b))-Number(definition(a)) || Number(sameFile(b))-Number(sameFile(a)) ||
+    let found = [...new Map(matches.map(n=>[n.id,n])).values()].sort((a,b) => Number(definition(b))-Number(definition(a)) || Number(sameFile(b))-Number(sameFile(a)) ||
       Number(sourceScope(a.path)!=='production-candidate')-Number(sourceScope(b.path)!=='production-candidate') ||
       Number(sameRepository(b))-Number(sameRepository(a)) || Number(a.kind === 'file')-Number(b.kind === 'file')).slice(0,4);
     if(found.some(definition))found=found.filter(definition);
     const declarationMatches=symbol==='APIRouter'?found.filter(n=>n.kind==='call'&&sameFile(n)).length:0;
-    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after), nodeIds: found.map(n => n.id) });
+    searches.push({ symbol, matches: found.length, definitionMatches:found.filter(definition).length, declarationMatches, truncated: Boolean(after)||Boolean(local?.limited), nodeIds: found.map(n => n.id) });
     searches.at(-1).requested = requiredSymbols.has(symbol);
-    for (const n of found.slice(0,requiredSymbols.has(symbol)?1:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && Math.abs(r.line - (n.line || 1)) < 20))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, definition:definition(n), required:requiredSymbols.has(symbol) });
+    const localDefinitions=found.filter(n=>sameFile(n)&&definition(n));
+    for (const n of found.slice(0,requiredSymbols.has(symbol)?4:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, nodeId:n.id, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n))&&(model.aiReview?.scope?.poc?.kind!=='section'||sameFile(n)||followUp.some(r=>r.repository===n.repository&&r.path===n.path)) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
-  const unresolvedSymbols=searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol);
+  const members=[...new Set(requestedContext.match(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){1,2}\b/g) || [])].slice(0,6);
+  const unresolvedSymbols=[...members,...searches.filter(s=>s.requested&&!s.definitionMatches&&!s.declarationMatches).map(s=>s.symbol)];
   const fallback = source.findImplementation && unresolvedSymbols.length
     ? await source.findImplementation(unresolvedSymbols,issue.locations) : null;
-  const authContext = await controlContext(source, issue.locations, [...missing,issue.controls,issue.explanation].join(' '));
+  const authContext = await controlContext(source, issue.locations, [requestedContext,issue.controls,issue.explanation].join(' '));
   const bootstrapRefs=authContext.references.filter(r=>r.basis==='application-registration-candidate');
   // Text hits are unbound candidates. Explicit requested locations stay required;
   // unrelated hits must not become mandatory dependencies merely by matching a
   // framework/constant name. Omitted candidates remain visible in retrieval.
-  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:false,basis:'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:true, basis:'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
+  const references = [...refs.filter(r=>r.required).map(r=>({...r,basis:r.definition?'requested-definition':'requested-symbol'})), ...(fallback?.references || []).filter(r=>issue.locations.some(s=>s.repository===r.repository&&s.path===r.path)).map(r=>({...r,required:Boolean(r.symbol?.includes('.')),basis:r.symbol?.includes('.')?'requested-member-use candidate':'requested-local-declaration candidate'})), ...followUp.map(r => ({...r, required:r.required!==false, basis:r.required===false?'prior-search-candidate':'requested-control'})), ...issue.locations.map(r => ({...r, required:true, basis:'saved-scenario'})), ...(fallback?.references || []).map(r=>({...r,required:false,basis:'requested-text-candidate'})), ...authContext.references.filter(r=>!bootstrapRefs.includes(r)), ...refs.filter(r=>!r.required).map(r => ({...r, basis:'named-control-candidate'}))];
   const resourceNames = [...new Set(issue.locations.map(r => r.path.split('/').at(-1).replace(/\.[^.]+$/, '').toLowerCase()).filter(n => n.length>4 && !['server','controller','program','security','settings_routes'].includes(n)))];
-  const routeCandidates = /route|caller|endpoint|service layer/i.test(missing.join(' ')) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
+  const routeCandidates = /route|caller|endpoint|service layer/i.test(requestedContext) ? model.interfaces.filter(i => i.direction==='inbound' && resourceNames.some(n => String(i.connection?.path || i.operation || '').toLowerCase().includes(n))).slice(0,6) : [];
   const evidence=new Map(model.evidence.map(e=>[e.id,e]));
   for(const route of routeCandidates) for(const id of route.evidence || []) {
     const ref=evidence.get(id);if(ref)references.splice(issue.locations.length+followUp.length,0,{...ref,basis:'resource-route-candidate'});
@@ -124,11 +135,11 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   }
   // Supply declarations before repeating the same middle-of-file window. Explicit
   // follow-up paths must still resolve to selected, hash-matched graph files.
-  if(/initializ|declar|environment|config|startup/i.test(missing.join(' '))) {
+  if(/initializ|declar|environment|config|startup/i.test(requestedContext)) {
     const seen=new Set();
     for(const r of [...followUp,...refs,...issue.locations]) {
       const k=r.repository+'\0'+r.path;
-      if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:true,basis:'requested-initialization'});}
+      if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:model.aiReview?.scope?.poc?.kind!=='section',basis:'initialization candidate; applicability requires assessment'});}
     }
   }
   // Explicit code requests (including declaration windows) must precede
@@ -138,7 +149,19 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // second model request; these remain candidate context, never proof of binding.
   const declarations=[...new Map(references.filter(r=>r.required).map(r=>[r.repository+'\0'+r.path,{...r,line:1,required:false,basis:'source-declarations'}])).values()].slice(0,3);
   references.splice(references.filter(r=>r.required).length,0,...bootstrapRefs,...declarations);
-  let records=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
+  if(model.aiReview?.scope?.poc?.kind==='section') {
+    // Keep the primary operation and application composition visible while
+    // following new controls; broad identifier matches must not evict them.
+    const primaryWindows=[];
+    if(source.calledImplementations)for(const ref of issue.locations.slice(0,4))try{primaryWindows.push(await source.functionWindow(ref));}catch{/* Required retrieval below records the source failure. */}
+    const called=source.calledImplementations?.(primaryWindows);
+    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3),...refs.filter(r=>r.required),...followUp.filter(r=>r.required!==false).slice(0,8).map(r=>({...r,required:true,basis:'requested-control'}))];
+    const keys=new Set(first.map(r=>r.repository+'\0'+r.path+'\0'+(r.line || 1)));
+    const rest=references.filter(r=>!keys.has(r.repository+'\0'+r.path+'\0'+(r.line || 1)));
+    references.splice(0,references.length,...first,...rest.filter(r=>r.required),...(called?.references || []),...rest.filter(r=>!r.required));
+  }
+  const sourceByteLimit=model.aiReview?.scope?.poc?.kind==='section'?Math.max(16000,Math.min(66000,INVESTIGATION_LIMITS.packetBytes-24000-Buffer.byteLength(JSON.stringify({candidate:issue,context})))):42000;
+  let records=[]; const continuationReferences=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
     if(source.file(ref.repository,ref.path)) availableFiles.set(key,{repository:ref.repository,path:ref.path});
@@ -151,16 +174,17 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
       const merge=overlap.length && mergedLines.length<=200 && mergedLines.at(-1).line-mergedLines[0].line+1===mergedLines.length;
       const merged=merge ? {...record,id:sha(JSON.stringify([record.repository,record.path,record.blobSha256,mergedLines[0].line,mergedLines.at(-1).line])).slice(0,20),startLine:mergedLines[0].line,endLine:mergedLines.at(-1).line,lines:mergedLines,basis:'combined hash-matched source windows'} : record;
       const next=[...records.filter(r=>!merge || !overlap.includes(r)),merged];
-      const reason=next.length>12 ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>42000 ? 'required-source-byte-limit' : null;
+      const reason=next.length>(model.aiReview?.scope?.poc?.kind==='section'?24:12) ? 'required-source-window-limit' : Buffer.byteLength(JSON.stringify(next))>sourceByteLimit ? 'required-source-byte-limit' : null;
       if(reason){omitted++;if(ref.required)gaps.push({reason,repository:ref.repository,path:ref.path,startLine:record.startLine,endLine:record.endLine});continue;}
       records=next;if(merge)coalescedWindows+=overlap.length;
-      if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,detail:'Only a partial function window was supplied; do not infer full control coverage.'});
+      if(ref.required&&!continuationReferences.some(r=>r.repository===ref.repository&&r.path===ref.path&&r.line===(ref.line || 1)))continuationReferences.push({repository:ref.repository,path:ref.path,line:ref.line || 1,blobSha256:record.blobSha256,...(ref.kind?{kind:ref.kind}:{}),...(ref.nodeId?{nodeId:ref.nodeId}:{}),reason:'Previously requested source, re-read and hash checked; prior conclusions are not evidence.'});
+      if(ref.required && record.functionContext?.complete===false)gaps.push({reason:record.functionContext.reason,repository:ref.repository,path:ref.path,line:ref.line,detail:'Only a partial function window was supplied; do not infer full control coverage.'});
     }catch(error){if(ref.required)gaps.push({reason:error.message,repository:ref.repository,path:ref.path});else omitted++;}
   }
   for(let i=gaps.length-1;i>=0;i--) if(gaps[i].startLine && records.some(r=>r.repository===gaps[i].repository && r.path===gaps[i].path && r.startLine<=gaps[i].startLine && r.endLine>=gaps[i].endLine)) gaps.splice(i,1);
-  const packet={purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,availableFiles:[...availableFiles.values()].slice(0,64),gaps,
+  const packet={sectionReview:model.aiReview?.scope?.poc?.kind==='section',purpose:'Independent static assessment of one saved STRIDE scenario',candidate:issue,context,records,continuationReferences:continuationReferences.slice(0,16),availableFiles:[...availableFiles.values()].slice(0,64),gaps,
     citationPolicy:'Graph name-search misses and truncated candidate neighborhoods do not prove a missing control; record any required unresolved code path in a missing engineering obligation. Each citation must fit entirely inside ONE record startLine/endLine range. Split citations across windows even for the same file. Named matches and graph edges are candidates, not proof of enforcement. Assess this exact actor, operation and conditions. Missing context does not establish absent controls. Name missing functions in the affected engineering obligation reason for bounded follow-up retrieval.',
-    retrieval:{coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
+    retrieval:{sourceByteLimit,coalescedWindows,indexedSourceSearch:fallback ? {...fallback,references:undefined} : null,frameworkControlSearches:authContext.searches, frameworkCandidatesOmitted:authContext.omitted,routeCandidates:routeCandidates.map(i=>i.id),controlSearches:searches,includedWindows:records.length,gapCount:gaps.length,candidateWindowsOmitted:omitted,neighborhoodLimited,fullCallGraph:false}};
   if (Buffer.byteLength(JSON.stringify(packet)) > INVESTIGATION_LIMITS.packetBytes) throw Error('Security packet metadata exceeds size limit');
   return packet;
 }
@@ -180,23 +204,23 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
     if(entry && ['static-supported','ruled-out'].includes(entry.assessment) && entry.issueHash===hashes.get(entry.sourceId) && model.threatValidation.contextKey===threatValidationKey(model)) {
       model.threatValidationHistory=[...(model.threatValidationHistory || []),structuredClone(model.threatValidation)].slice(-3);
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
-      entry.challengeCompleted=false;entry.assessment='not-assessed';entry.rounds=0;delete entry.stopReason;
+      entry.challengeCompleted=false;entry.assessment='not-assessed';entry.rounds=0;delete entry.continuationReferences;delete entry.stopReason;
     }
   }
   // Upgrade selected older positive assessments by challenging their existing
   // argument, not by repeating discovery. Their original response remains intact.
   if(model.threatValidation?.contextKey===threatValidationKey(model)) for(const entry of model.threatValidation.entries || []) {
-    if(entry.assessment==='static-supported' && !entry.challengeCompleted && entry.issueHash===hashes.get(entry.sourceId)) {
+    if(((entry.assessment==='static-supported'&&(!entry.challengeCompleted||(model.aiReview?.scope?.poc?.kind==='section'&&entry.draftAssessment?.assessment!=='static-supported')))||(entry.decisionReviewRequired&&!entry.challengeStarted)) && entry.issueHash===hashes.get(entry.sourceId)) {
       entry.draftAssessment=structuredClone(entry);entry.challengeStarted=true;entry.challengePending=true;
-      entry.assessment='not-assessed';entry.rounds=0;
+      if(entry.assessment==='static-supported'){entry.assessment='not-assessed';entry.followUp=[];entry.missingEvidence=[];delete entry.continuationReferences;}entry.rounds=0;
     }
   }
   // A changed retriever may resolve an exhausted code gap. Reopen it once for
   // this policy; retain prior attempts and never reset conclusive assessments.
   if (model.threatValidation && model.threatValidation.retrievalVersion !== THREAT_RETRIEVAL_VERSION) {
-    for (const entry of model.threatValidation.entries || []) if (entry.assessment === 'needs-context' && entry.issueHash === hashes.get(entry.sourceId) && (entry.rounds >= INVESTIGATION_LIMITS.contextRounds || entry.stopReason === 'no-new-evidence')) {
-      entry.history = [...(entry.history || []),{assessment:entry.assessment,packetHash:entry.packetHash,attemptId:entry.attemptId,usage:entry.usage,rounds:entry.rounds,reason:'retrieval-policy-updated'}];
-      entry.rounds=0;delete entry.stopReason;
+    for (const entry of model.threatValidation.entries || []) if ((entry.assessment === 'needs-context'||(entry.assessment==='failed'&&/^Security assessment failed|^Model did not return the required JSON/.test(entry.error || ''))) && entry.issueHash === hashes.get(entry.sourceId) && (entry.rounds >= INVESTIGATION_LIMITS.contextRounds || entry.stopReason === 'no-new-evidence')) {
+      entry.history = [...(entry.history || []),{assessment:entry.assessment,packetHash:entry.packetHash,attemptId:entry.attemptId,usage:entry.usage,rounds:entry.rounds,continuationReferences:entry.continuationReferences,reason:'retrieval-policy-updated'}];
+      entry.rounds=0;delete entry.continuationReferences;delete entry.stopReason;
     }
   }
   const priorEntries = new Map();
@@ -228,10 +252,13 @@ export async function reviewThreatScenarios(manifest, model, options = {}) {
       }
       for(const ref of anchors.slice()) {
         const initial=prior?.evidence?.find(r=>r.repository===ref.repository && r.path===ref.path && r.startLine===1);
-        if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1});
+        if(initial && !anchors.some(r=>r.repository===initial.repository && r.path===initial.path && r.line===1)) anchors.push({...initial,line:1,required:m.aiReview?.scope?.poc?.kind!=='section'});
       }
       for(const ref of [...(prior?.engineering?.obligations || []).flatMap(o=>o.citations),...(prior?.engineering?.conditions || []).flatMap(c=>c.citations)]) if(!anchors.some(a=>a.repository===ref.repository && a.path===ref.path && a.line===ref.startLine)) anchors.push({...ref,line:ref.startLine});
-      const packet=await threatInvestigationPacket(m,mf,root,issue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8)],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      const positive=prior?.challengeStarted&&prior.draftAssessment?.assessment==='static-supported'?prior.draftAssessment:null;
+      const currentIssue=positive?{...issue,title:'Current source-supported claim under independent challenge',explanation:positive.engineering.conclusion,preconditions:positive.engineering.conditions.map(c=>c.statement),controls:positive.counterEvidence,analysis:positive.impact}:issue;
+      const packet=await threatInvestigationPacket(m,mf,root,currentIssue,[...(follow?.length?follow:prior?.followUp || []),...anchors.slice(0,8),...(prior?.continuationReferences || []).map(r=>({...r,required:m.aiReview?.scope?.poc?.kind==='section'?false:true}))],scoped,missing?.length?missing:prior?.missingEvidence || [],sharedSource);
+      if(positive)packet.challengeBasis='current-positive-1';
       if(prior?.decisionReviewRequired) packet.decisionReview={
         task:'Reconcile the previous code argument with its unresolved questions. It marked all four code obligations established but withheld the conclusion. Independently check the fresh code below. For each previous missing fact decide whether it changes this exact code path or is deployment context / broader follow-up. Return an honest supported conditional conclusion, a cited ruled-out path, or mark the exact code obligation missing. Do not change a status merely to satisfy this request. Narrow impact to the directly demonstrated operation; do not infer all downstream traffic, theft or exploitation from a configuration write. A reviewer answer establishes only that condition, not the full attack. Upstream authentication does not imply administrator authorization.',
         previousConclusion:prior.engineering.conclusion,

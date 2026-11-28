@@ -70,35 +70,35 @@ export async function prepareStrideEvidence(original, source, options = {}) {
     graphDetails:
       "Retrieved on demand from the saved graph; per-interface neighborhoods omitted",
   };
-  const seedText=[];
+  const primaryEvidence=new Set(packet.records.filter(r=>(packet.reviewUnit?.primaryInterfaceIds || []).includes(r.id)).flatMap(r=>r.evidence).map(r=>`${r.repository}\0${r.path}\0${r.line}`));
+  if(options.sectionEvidence)packet.sourceContext.retrievalPolicy='section-candidates-1';
+  const seedText=[],primaryWindows=[];
   if (original.reviewFocus?.selectedProfile) for (const ref of packet.records.flatMap(r=>r.evidence).slice(0,8)) {
-    try {seedText.push((await source.functionWindow(ref)).code);} catch { /* Regular retrieval records the evidence gap below. */ }
+    try {const window=await source.functionWindow(ref);seedText.push(window.code);if(primaryEvidence.has(`${ref.repository}\0${ref.path}\0${ref.line}`))primaryWindows.push(window);} catch { /* Regular retrieval records the evidence gap below. */ }
   }
   const controlLookup = original.reviewFocus?.selectedProfile ? await controlContext(source, packet.records.flatMap(r=>r.evidence), seedText.join('\n')) : null;
   if (controlLookup) packet.sourceContext.controlLookup = {searches:controlLookup.searches,omitted:controlLookup.omitted,basis:controlLookup.basis};
-  const refs = [
-    ...(options.references || []),
-    ...packet.records.flatMap((r) => r.evidence),
-    ...(controlLookup?.references || []),
-  ];
+  const called=options.sectionEvidence&&source.calledImplementations?source.calledImplementations(primaryWindows):null;
+  if(called)packet.sourceContext.calledImplementations={...called,references:undefined};
+  const packetRefs=packet.records.flatMap(r=>r.evidence);
+  const headers=options.sectionEvidence?[...new Map(primaryWindows.map(r=>[r.repository+'\0'+r.path,{repository:r.repository,path:r.path,line:1,required:false,basis:'Primary module declarations; applicability requires assessment'}])).values()].slice(0,2):[];
+  const refs = options.sectionEvidence?[
+    ...packetRefs.filter(r=>primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line}`)),
+    ...(options.references || []).filter(r=>r.required===true),
+    ...(controlLookup?.references || []).filter(r=>r.basis==='application-registration-candidate'),
+    ...headers,...(called?.references || []),
+    ...(options.references || []).filter(r=>r.required!==true),...packetRefs,...(controlLookup?.references || []),
+  ]:[...(options.references || []),...packetRefs,...(controlLookup?.references || []),...(called?.references || [])];
+  const requiredRefs=new Set(refs.filter(r=>r.required===true||primaryEvidence.has(`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`)).map(r=>`${r.repository}\0${r.path}\0${r.line || r.startLine || 1}`));
   for (const ref of refs) {
     const key = `${ref.repository}\0${ref.path}\0${ref.line || ref.startLine || 1}`;
     if (seen.has(key)) continue;
     seen.add(key);
     try {
       const line = ref.line || (ref.startLine ? ref.startLine + 20 : 1);
-      if (
-        records.some(
-          (w) =>
-            w.repository === ref.repository &&
-            w.path === ref.path &&
-            w.startLine <= line &&
-            w.endLine >= line &&
-            (!ref.blobSha256 || ref.blobSha256 === w.blobSha256),
-        )
-      )
-        continue;
-      if (records.length >= 16) throw Error("source-context-window-limit");
+      const covering=records.find(w=>w.repository===ref.repository&&w.path===ref.path&&w.startLine<=line&&w.endLine>=line&&(!ref.blobSha256||ref.blobSha256===w.blobSha256));
+      if(covering){if(options.sectionEvidence&&requiredRefs.has(key))covering.required=true;continue;}
+      if (records.length >= (options.sectionEvidence?24:16)) throw Error("source-context-window-limit");
       const w = await (original.reviewFocus?.selectedProfile ? source.functionWindow.bind(source) : source.window.bind(source))({
         ...ref,
         line,
@@ -107,6 +107,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
       // code already contains numbered lines. Sending the identical text again
       // as structured lines wastes context and can evict applicable controls.
       const {lines, ...transmitted} = w;
+      if(options.sectionEvidence)transmitted.required=requiredRefs.has(key);
       records.push(transmitted);
       if (
         Buffer.byteLength(JSON.stringify(packet)) >
@@ -115,12 +116,13 @@ export async function prepareStrideEvidence(original, source, options = {}) {
         records.pop();
         throw Error("source-context-byte-limit");
       }
-      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason});
+      if(w.functionContext?.complete===false)gaps.push({repository:ref.repository,path:ref.path,line,reason:w.functionContext.reason,...(options.sectionEvidence?{required:requiredRefs.has(key)}:{})});
     } catch (error) {
       gaps.push({
         repository: ref.repository,
         path: ref.path,
         line: ref.line,
+        ...(options.sectionEvidence?{required:requiredRefs.has(key),basis:'Unread retrieval candidate; only applicable missing bindings prevent a section conclusion.'}:{}),
         reason: /^source-/.test(error.message)
           ? error.message
           : "source-unavailable",
@@ -184,6 +186,7 @@ export async function prepareStrideEvidence(original, source, options = {}) {
       repository: omitted.repository,
       path: omitted.path,
       line: omitted.startLine,
+      ...(options.sectionEvidence?{required:omitted.required!==false}:{}),
     });
   }
   if (Buffer.byteLength(JSON.stringify(packet)) > REVIEW_LIMITS.packetBytes)
