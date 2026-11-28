@@ -578,3 +578,14 @@ test('retrieval upgrade can repair an exhausted evidence validation failure with
  await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);assert.equal(f.model.threatValidation.entries[0].assessment,'ruled-out');
  await reviewThreatScenarios(f.manifest,f.model,options);assert.equal(calls,2);
 });
+
+test('section follow-up retains its entry and application composition ahead of broad matches',async t=>{
+ const f=await threatFixture(t,[['repo0/api.py','def change():\n    return store.write()\n'],['repo0/server.py','def create_app():\n    app = FastAPI()\n    app.include_router(router)\n    return app\n']]);
+ f.model.aiReview.scope={poc:{kind:'section'}};
+ const {threatInvestigationPacket}=await import('../src/threat-validation.mjs');
+ const issue={id:'section',interfaceIds:[f.model.interfaces.find(i=>i.repository==='repo2'&&i.direction==='inbound').id],locations:[{repository:'repo0',path:'api.py',line:1}],controls:'PermissionFilter',explanation:'Inspect the write'};
+ const follow=Array.from({length:12},(_,n)=>({repository:'repo'+n,path:'Api.cs',line:1,reason:'Prior requested candidate'}));
+ const packet=await threatInvestigationPacket(f.model,f.manifest,f.root,issue,follow,{},['Inspect PermissionFilter and SecondGuard']);
+ assert.equal(packet.records[0].path,'api.py');assert.equal(packet.records[1].repository,'repo2','Every named interface must supply its own entry source even when discovery cited only one');assert.ok(packet.candidate.locations.every(r=>!('excerpt' in r)));assert.ok(packet.records.slice(0,3).some(r=>r.path==='server.py'));
+ assert.ok(packet.records.find(r=>r.path==='server.py').lines.some(l=>l.text.includes('include_router')));
+});

@@ -10,7 +10,7 @@ import { InvestigationSource } from './investigation-source.mjs';
 import { reviewSecurityIssues, INVESTIGATION_LIMITS } from './security-review.mjs';
 import { systemModel } from './system-model.mjs';
 import { threatIssue, threatValidationKey } from './threat-validation-state.mjs';
-export const THREAT_RETRIEVAL_VERSION = 'control-context-16';
+export const THREAT_RETRIEVAL_VERSION = 'control-context-17';
 
 // CWE's generic missingEvidence bucket mixes deployment questions with code
 // blockers. STRIDE uses the four typed code obligations instead. The wire
@@ -68,6 +68,12 @@ You are the critical engineering reviewer, separate from the discovery assessmen
 export { controlSymbols } from './control-context.mjs';
 export async function threatInvestigationPacket(model, manifest, root, issue, followUp, context, missing = [], sourceOverride) {
   const source = sourceOverride || new InvestigationSource(model, manifest, root);
+  if(model.aiReview?.scope?.poc?.kind==='section') {
+    const evidence=new Map(model.evidence.map(e=>[e.id,e]));
+    const owned=model.interfaces.filter(i=>(issue.interfaceIds || []).includes(i.id)).flatMap(i=>i.evidence.map(id=>evidence.get(id))).filter(Boolean).map(e=>({repository:e.repository,path:e.path,line:e.line,blobSha256:e.blobSha256}));
+    issue={...issue,locations:[...new Map([...issue.locations,...owned].map(r=>[r.repository+'\0'+r.path+'\0'+r.line,r])).values()]};
+  }
+
   const requestedContext=[...missing,...followUp.map(r=>r.reason || '')].join(' ');
   const requiredSymbols = new Set(controlSymbols(requestedContext));
   const symbols = [...new Set([...requiredSymbols,...controlSymbols([issue.controls, issue.explanation].join(' '))])];
@@ -93,7 +99,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     searches.at(-1).requested = requiredSymbols.has(symbol);
     const localDefinitions=found.filter(n=>sameFile(n)&&definition(n));
     for (const n of found.slice(0,requiredSymbols.has(symbol)?4:2)) if (!refs.some(r => r.repository === n.repository && r.path === n.path && r.line === (n.line || 1)))
-      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, nodeId:n.id, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n)) });
+      refs.push({ repository: n.repository, path: n.path, line: n.line || 1, nodeId:n.id, kind:n.kind, definition:definition(n), required:requiredSymbols.has(symbol)&&(!localDefinitions.length||localDefinitions.includes(n))&&(model.aiReview?.scope?.poc?.kind!=='section'||sameFile(n)||followUp.some(r=>r.repository===n.repository&&r.path===n.path)) });
   }
   // A focused claim does not need a repository-wide control catalog. Keep exact
   // seeds and requested controls first, then only nearby candidate call edges.
@@ -132,7 +138,7 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
     const seen=new Set();
     for(const r of [...followUp,...refs,...issue.locations]) {
       const k=r.repository+'\0'+r.path;
-      if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:true,basis:'requested-initialization'});}
+      if(!seen.has(k) && seen.size<2){seen.add(k);references.push({...r,line:1,required:model.aiReview?.scope?.poc?.kind!=='section',basis:'initialization candidate; applicability requires assessment'});}
     }
   }
   // Explicit code requests (including declaration windows) must precede
@@ -142,6 +148,13 @@ export async function threatInvestigationPacket(model, manifest, root, issue, fo
   // second model request; these remain candidate context, never proof of binding.
   const declarations=[...new Map(references.filter(r=>r.required).map(r=>[r.repository+'\0'+r.path,{...r,line:1,required:false,basis:'source-declarations'}])).values()].slice(0,3);
   references.splice(references.filter(r=>r.required).length,0,...bootstrapRefs,...declarations);
+  if(model.aiReview?.scope?.poc?.kind==='section') {
+    // Keep the primary operation and application composition visible while
+    // following new controls; broad identifier matches must not evict them.
+    const first=[...issue.locations.map(r=>({...r,required:true,basis:'saved-scenario'})),...bootstrapRefs.slice(0,3)];
+    const keys=new Set(first.map(r=>r.repository+'\0'+r.path+'\0'+(r.line || 1)));
+    references.splice(0,references.length,...first,...references.filter(r=>!keys.has(r.repository+'\0'+r.path+'\0'+(r.line || 1))));
+  }
   let records=[]; const continuationReferences=[]; const availableFiles=new Map();let omitted=0,coalescedWindows=0;
   for(const ref of references) {
     const key=ref.repository+'\0'+ref.path;
